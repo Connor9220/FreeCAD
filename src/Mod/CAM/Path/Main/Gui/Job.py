@@ -837,6 +837,7 @@ class TaskPanel:
             )
 
             self.obj.Label = str(self.form.jobLabel.text())
+            self.obj.JobAuthor = str(self.form.jobAuthor.text())
             self.obj.Description = str(self.form.jobDescription.toPlainText())
             self.obj.Operations.Group = [
                 self.form.operationsList.item(i).data(self.DataObject)
@@ -960,6 +961,7 @@ class TaskPanel:
         """sets fields in the form to match the object"""
 
         self.form.jobLabel.setText(self.obj.Label)
+        self.form.jobAuthor.setText(self.obj.JobAuthor)
         self.form.jobDescription.setPlainText(self.obj.Description)
 
         if hasattr(self.obj, "SplitOutput"):

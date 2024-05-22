@@ -154,6 +154,12 @@ class ObjectJob:
         )
         obj.addProperty(
             "App::PropertyString",
+            "JobAuthor",
+            "Path",
+            QT_TRANSLATE_NOOP("App::Property", "CAM Author for this job"),
+        )
+        obj.addProperty(
+            "App::PropertyString",
             "CycleTime",
             "Path",
             QT_TRANSLATE_NOOP("App::Property", "Job Cycle Time Estimation"),
@@ -545,6 +551,14 @@ class ObjectJob:
                 QT_TRANSLATE_NOOP("App::Property", "Select the type of Job"),
             )
             obj.setEditorMode("JobType", 2)  # Hide
+
+        if not hasattr(obj, "JobAuthor"):
+            obj.addProperty(
+                "App::PropertyString",
+                "JobAuthor",
+                "Path",
+                QT_TRANSLATE_NOOP("App::Property", "Job Author for this job"),
+            )
 
         for n in self.propertyEnumerations():
             setattr(obj, n[0], n[1])

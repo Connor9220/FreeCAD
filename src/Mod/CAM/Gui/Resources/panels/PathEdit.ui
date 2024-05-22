@@ -52,6 +52,18 @@
          </widget>
         </item>
         <item>
+         <widget class="QGroupBox" name="groupBox_9">
+          <property name="title">
+           <string>Job Author</string>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_19">
+           <item>
+            <widget class="QLineEdit" name="jobAuthor"/>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
          <widget class="QGroupBox" name="groupBox_4">
           <property name="title">
            <string>Model</string>
