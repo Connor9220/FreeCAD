@@ -8620,20 +8620,23 @@ bool SketchObject::evaluateConstraints() const
 
     std::vector<Part::Geometry*> geometry = getCompleteGeometry();
     const std::vector<Sketcher::Constraint*>& constraints = Constraints.getValuesForce();
-    if (static_cast<int>(geometry.size()) != extGeoCount + intGeoCount)
+    if (static_cast<int>(geometry.size()) != extGeoCount + intGeoCount) {
         return false;
-    if (geometry.size() < 2)
+    }
+    if (geometry.size() < 2) {
         return false;
+    }
 
-    std::vector<Sketcher::Constraint*>::const_iterator it;
-    for (it = constraints.begin(); it != constraints.end(); ++it) {
-        if (!evaluateConstraint(*it))
+    for (auto it : constraints) {
+        if (!evaluateConstraint(it)) {
             return false;
+        }
     }
 
     if (!constraints.empty()) {
-        if (!Constraints.scanGeometry(geometry))
+        if (!Constraints.scanGeometry(geometry)) {
             return false;
+        }
     }
 
     return true;
@@ -8652,8 +8655,9 @@ void SketchObject::validateConstraints()
     std::vector<Sketcher::Constraint*>::const_iterator it;
     for (it = constraints.begin(); it != constraints.end(); ++it) {
         bool valid = evaluateConstraint(*it);
-        if (valid)
+        if (valid) {
             newConstraints.push_back(*it);
+        }
     }
 
     if (newConstraints.size() != constraints.size()) {
@@ -9821,20 +9825,36 @@ void SketchObject::setMissingPointOnPointConstraints(std::vector<ConstraintIds>&
 
 void SketchObject::makeMissingPointOnPointCoincident(bool onebyone)
 {
-    if (analyser)
-        analyser->makeMissingPointOnPointCoincident(onebyone);
+    if (analyser) {
+        onebyone ? analyser->makeMissingPointOnPointCoincidentOneByOne()
+                 : analyser->makeMissingPointOnPointCoincident();
+    }
 }
 
 void SketchObject::makeMissingVerticalHorizontal(bool onebyone)
 {
-    if (analyser)
-        analyser->makeMissingVerticalHorizontal(onebyone);
+    if (analyser) {
+        onebyone ? analyser->makeMissingVerticalHorizontalOneByOne()
+                 : analyser->makeMissingVerticalHorizontal();
+    }
 }
 
 void SketchObject::makeMissingEquality(bool onebyone)
 {
-    if (analyser)
-        analyser->makeMissingEquality(onebyone);
+    if (analyser) {
+        onebyone ? analyser->makeMissingEqualityOneByOne()
+                 : analyser->makeMissingEquality();
+    }
+}
+
+int SketchObject::detectDegeneratedGeometries(double tolerance)
+{
+    return analyser->detectDegeneratedGeometries(tolerance);
+}
+
+int SketchObject::removeDegeneratedGeometries(double tolerance)
+{
+    return analyser->removeDegeneratedGeometries(tolerance);
 }
 
 int SketchObject::autoRemoveRedundants(bool updategeo)
