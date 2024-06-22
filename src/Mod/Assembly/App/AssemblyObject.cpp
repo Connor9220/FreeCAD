@@ -221,12 +221,55 @@ void AssemblyObject::doDragStep()
 
         auto dragPartsVec = std::make_shared<std::vector<std::shared_ptr<ASMTPart>>>(dragMbdParts);
         mbdAssembly->runDragStep(dragPartsVec);
-        setNewPlacements();
-        redrawJointPlacements(getJoints());
+        if (validateNewPlacements()) {
+            setNewPlacements();
+            redrawJointPlacements(getJoints());
+        }
     }
     catch (...) {
         // We do nothing if a solve step fails.
     }
+}
+
+Base::Placement AssemblyObject::getMbdPlacement(std::shared_ptr<ASMTPart> mbdPart)
+{
+    double x, y, z;
+    mbdPart->getPosition3D(x, y, z);
+    Base::Vector3d pos = Base::Vector3d(x, y, z);
+
+    double q0, q1, q2, q3;
+    mbdPart->getQuarternions(q3, q0, q1, q2);
+    Base::Rotation rot = Base::Rotation(q0, q1, q2, q3);
+
+    return Base::Placement(pos, rot);
+}
+
+bool AssemblyObject::validateNewPlacements()
+{
+    // First we check if a grounded object has moved. It can happen that they flip.
+    for (auto* obj : getGroundedParts()) {
+        auto* propPlacement =
+            dynamic_cast<App::PropertyPlacement*>(obj->getPropertyByName("Placement"));
+        if (propPlacement) {
+            Base::Placement oldPlc = propPlacement->getValue();
+
+            auto it = objectPartMap.find(obj);
+            if (it != objectPartMap.end()) {
+                std::shared_ptr<MbD::ASMTPart> mbdPart = it->second;
+                Base::Placement newPlacement = getMbdPlacement(mbdPart);
+                if (!oldPlc.isSame(newPlacement)) {
+                    Base::Console().Warning(
+                        "Assembly : Ignoring bad solve, a grounded object moved.\n");
+                    return false;
+                }
+            }
+        }
+    }
+
+    // TODO: We could do further tests
+    // For example check if the joints connectors are correctly aligned.
+
+    return true;
 }
 
 void AssemblyObject::postDrag()
@@ -320,31 +363,7 @@ void AssemblyObject::setNewPlacements()
             continue;
         }
 
-        double x, y, z;
-        mbdPart->getPosition3D(x, y, z);
-        // Base::Console().Warning("in set placement : (%f, %f, %f)\n", x, y, z);
-        Base::Vector3d pos = Base::Vector3d(x, y, z);
-
-        // TODO : replace with quaternion to simplify
-        auto& r0 = mbdPart->rotationMatrix->at(0);
-        auto& r1 = mbdPart->rotationMatrix->at(1);
-        auto& r2 = mbdPart->rotationMatrix->at(2);
-        Base::Vector3d row0 = Base::Vector3d(r0->at(0), r0->at(1), r0->at(2));
-        Base::Vector3d row1 = Base::Vector3d(r1->at(0), r1->at(1), r1->at(2));
-        Base::Vector3d row2 = Base::Vector3d(r2->at(0), r2->at(1), r2->at(2));
-        Base::Matrix4D mat;
-        mat.setRow(0, row0);
-        mat.setRow(1, row1);
-        mat.setRow(2, row2);
-        Base::Rotation rot = Base::Rotation(mat);
-
-        /*double q0, q1, q2, q3;
-        mbdPart->getQuarternions(q0, q1, q2, q3);
-        Base::Rotation rot = Base::Rotation(q0, q1, q2, q3);*/
-
-        Base::Placement newPlacement = Base::Placement(pos, rot);
-
-        propPlacement->setValue(newPlacement);
+        propPlacement->setValue(getMbdPlacement(mbdPart));
         obj->purgeTouched();
     }
 }
@@ -399,6 +418,10 @@ std::shared_ptr<ASMTAssembly> AssemblyObject::makeMbdAssembly()
     auto assembly = CREATE<ASMTAssembly>::With();
     assembly->setName("OndselAssembly");
 
+    ParameterGrp::handle hPgr = App::GetApplication().GetParameterGroupByPath(
+        "User parameter:BaseApp/Preferences/Mod/Assembly");
+
+    assembly->setDebug(hPgr->GetBool("LogSolverDebug", false));
     return assembly;
 }
 
@@ -1652,14 +1675,14 @@ void AssemblyObject::swapJCS(App::DocumentObject* joint)
 }
 
 bool AssemblyObject::isEdgeType(App::DocumentObject* obj,
-                                const char* elName,
+                                std::string& elName,
                                 GeomAbs_CurveType type)
 {
     PartApp::Feature* base = static_cast<PartApp::Feature*>(obj);
     const PartApp::TopoShape& TopShape = base->Shape.getShape();
 
     // Check for valid face types
-    TopoDS_Edge edge = TopoDS::Edge(TopShape.getSubShape(elName));
+    TopoDS_Edge edge = TopoDS::Edge(TopShape.getSubShape(elName.c_str()));
     BRepAdaptor_Curve sf(edge);
 
     if (sf.GetType() == type) {
@@ -1670,16 +1693,16 @@ bool AssemblyObject::isEdgeType(App::DocumentObject* obj,
 }
 
 bool AssemblyObject::isFaceType(App::DocumentObject* obj,
-                                const char* elName,
+                                std::string& elName,
                                 GeomAbs_SurfaceType type)
 {
     auto base = static_cast<PartApp::Feature*>(obj);
     PartApp::TopoShape TopShape = base->Shape.getShape();
 
     // Check for valid face types
-    TopoDS_Face face = TopoDS::Face(TopShape.getSubShape(elName));
+    TopoDS_Face face = TopoDS::Face(TopShape.getSubShape(elName.c_str()));
     BRepAdaptor_Surface sf(face);
-    // GeomAbs_Plane GeomAbs_Cylinder GeomAbs_Cone GeomAbs_Sphere GeomAbs_Thorus
+
     if (sf.GetType() == type) {
         return true;
     }
@@ -1726,8 +1749,8 @@ DistanceType AssemblyObject::getDistanceType(App::DocumentObject* joint)
 {
     std::string type1 = getElementTypeFromProp(joint, "Element1");
     std::string type2 = getElementTypeFromProp(joint, "Element2");
-    const char* elt1 = getElementFromProp(joint, "Element1");
-    const char* elt2 = getElementFromProp(joint, "Element2");
+    std::string elt1 = getElementFromProp(joint, "Element1");
+    std::string elt2 = getElementFromProp(joint, "Element2");
     auto* obj1 = getLinkedObjFromNameProp(joint, "Object1", "Part1");
     auto* obj2 = getLinkedObjFromNameProp(joint, "Object2", "Part2");
 

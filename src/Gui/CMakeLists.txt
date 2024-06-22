@@ -929,7 +929,6 @@ SET(Viewprovider_CPP_SRCS
     ViewProviderGeometryObject.cpp
     ViewProviderImagePlane.cpp
     ViewProviderInventorObject.cpp
-    ViewProviderMeasureDistance.cpp
     ViewProviderPyImp.cpp
     ViewProviderPythonFeature.cpp
     ViewProviderVRMLObject.cpp
@@ -944,6 +943,7 @@ SET(Viewprovider_CPP_SRCS
     ViewProviderOrigin.cpp
     ViewProviderMaterialObject.cpp
     ViewProviderTextDocument.cpp
+    ViewProviderTextureExtension.cpp
     ViewProviderLink.cpp
     LinkViewPyImp.cpp
     ViewProviderLinkPyImp.cpp
@@ -967,7 +967,6 @@ SET(Viewprovider_SRCS
     ViewProviderGeometryObject.h
     ViewProviderImagePlane.h
     ViewProviderInventorObject.h
-    ViewProviderMeasureDistance.h
     ViewProviderPythonFeature.h
     ViewProviderVRMLObject.h
     ViewProviderBuilder.h
@@ -981,6 +980,7 @@ SET(Viewprovider_SRCS
     ViewProviderOrigin.h
     ViewProviderMaterialObject.h
     ViewProviderTextDocument.h
+    ViewProviderTextureExtension.h
     ViewProviderLink.h
     ViewProviderVarSet.h
     AxisOrigin.h
@@ -1145,6 +1145,7 @@ SET(Workbench_CPP_SRCS
     OverlayWidgets.cpp
     MenuManager.cpp
     PythonWorkbenchPyImp.cpp
+    ToolBarAreaWidget.cpp
     ToolBarManager.cpp
     ToolBoxManager.cpp
     Workbench.cpp
@@ -1160,6 +1161,7 @@ SET(Workbench_SRCS
     OverlayManager.h
     OverlayWidgets.h
     MenuManager.h
+    ToolBarAreaWidget.h
     ToolBarManager.h
     ToolBoxManager.h
     Workbench.h
