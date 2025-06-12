@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
 from .asset import Asset
+from .docasset import DocumentAsset
 from .manager import AssetManager
 from .uri import AssetUri
 from .serializer import AssetSerializer, DummyAssetSerializer
@@ -13,6 +14,7 @@ __all__ = [
     "AssetUri",
     "AssetManager",
     "AssetSerializer",
+    "DocumentAsset",
     "DummyAssetSerializer",
     "AssetStore",
     "MemoryStore",
