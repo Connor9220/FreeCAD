@@ -32,13 +32,13 @@ import io
 import tempfile
 from ...assets import Asset, AssetUri, AssetSerializer, DummyAssetSerializer
 from ...camassets import cam_assets
-from ..doc import (
-    find_shape_object,
+from ...docobject.util import (
+    DocFromBytes,
     get_object_properties,
+    update_object_properties,
     get_unset_value_for,
-    update_shape_object_properties,
-    ShapeDocFromBytes,
 )
+from ..doc import find_shape_object
 from .icon import ToolBitShapeIcon
 
 
@@ -343,12 +343,7 @@ class ToolBitShape(Asset):
         Path.Log.debug(f"{id}: ToolBitShape.from_bytes called with {len(data)} bytes")
 
         # Open the shape data temporarily to get the Body label and parameters
-        with ShapeDocFromBytes(data) as temp_doc:
-            if not temp_doc:
-                # This case might be covered by ShapeDocFromBytes exceptions,
-                # but keeping for clarity.
-                raise ValueError("Failed to open shape document from bytes")
-
+        with DocFromBytes(data) as temp_doc:
             # Determine the specific subclass of ToolBitShape.
             try:
                 shape_class = ToolBitShape.get_shape_class_from_bytes(data)
@@ -698,7 +693,7 @@ class ToolBitShape(Asset):
         document.
         """
         assert self._data is not None
-        with ShapeDocFromBytes(self._data) as tmp_doc:
+        with DocFromBytes(self._data) as tmp_doc:
             shape = find_shape_object(tmp_doc)
             if not shape:
                 FreeCAD.Console.PrintWarning(
@@ -713,7 +708,7 @@ class ToolBitShape(Asset):
                 )
                 return None
 
-            update_shape_object_properties(props, self.get_parameters())
+            update_object_properties(props, self.get_parameters())
 
             # Recompute the document to apply property changes
             tmp_doc.recompute()
