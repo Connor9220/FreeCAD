@@ -74,6 +74,7 @@ class CAMWorkbench(Workbench):
         import Path.Dressup.Gui.Preferences as PathPreferencesPathDressup
         import Path.Tool.assets.ui.preferences as AssetPreferences
         import Path.Main.Gui.PreferencesJob as PathPreferencesPathJob
+        import Path.Tool.machine.ui.prefs as MachinePreferences
 
         translate = FreeCAD.Qt.translate
 
@@ -114,6 +115,10 @@ class CAMWorkbench(Workbench):
         )
         FreeCADGui.addPreferencePage(
             AssetPreferences.AssetPreferencesPage,
+            QT_TRANSLATE_NOOP("QObject", "CAM"),
+        )
+        FreeCADGui.addPreferencePage(
+            MachinePreferences.MachinePreferencesPage,
             QT_TRANSLATE_NOOP("QObject", "CAM"),
         )
         FreeCADGui.addPreferencePage(
