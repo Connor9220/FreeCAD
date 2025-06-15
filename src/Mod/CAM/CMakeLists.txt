@@ -270,6 +270,7 @@ SET(PathPythonToolsMachineUi_SRCS
     Path/Tool/machine/ui/machine.py
     Path/Tool/machine/ui/mill.py
     Path/Tool/machine/ui/prefs.py
+    Path/Tool/machine/ui/rigidity.py
 )
 
 SET(PathPythonToolsShape_SRCS
