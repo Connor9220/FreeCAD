@@ -53,6 +53,7 @@ class LinearAxis(Axis):
         start: FreeCAD.Units.Quantity = FreeCAD.Units.Quantity("0 mm"),
         end: Optional[FreeCAD.Units.Quantity] = None,
         rigidity: FreeCAD.Units.Quantity = FreeCAD.Units.Quantity("0.1 mm"),
+        max_feed: FreeCAD.Units.Quantity = FreeCAD.Units.Quantity("2000 mm/min"),
     ):
         """
         Rigidity is specified in mm/Newton. FreeCAD quantities do not support mm/N,
@@ -62,6 +63,7 @@ class LinearAxis(Axis):
         self.start = start
         self.end = end
         self.rigidity = rigidity
+        self.max_feed = max_feed
 
     def validate(self) -> None:
         super().validate()
@@ -73,6 +75,8 @@ class LinearAxis(Axis):
             raise AttributeError("Linear axis end must be larger than axis start")
         if self.rigidity.Value < 0:
             raise AttributeError("Linear axis rigidity cannot be negative")
+        if self.max_feed.Value <= 0:
+            raise AttributeError("Linear axis feed rate must be positive")
 
     def dump(self, do_print: bool = True, indent: int = 0) -> str:
         prefix = "  " * indent
@@ -82,6 +86,7 @@ class LinearAxis(Axis):
         if self.end is not None:
             output += f"{prefix}End={self.end.UserString}\n"
         output += f"{prefix}Rigidity={self.rigidity.UserString}/N\n"
+        output += f"{prefix}Feed Rate={self.max_feed.UserString}\n"
         if do_print:
             print(output)
         return output
@@ -130,7 +135,6 @@ class Machine(Asset, ABC):
         self,
         label: str,
         axes: Dict[str, Axis],
-        max_feed: FreeCAD.Units.Quantity,
         post_processor: str = "generic",
         post_processor_args: str = "",
         id: Optional[str] = None,
@@ -141,7 +145,6 @@ class Machine(Asset, ABC):
         Args:
             label: Machine label.
             axes: E.g. {"x": Axis(0, 1000, 0.01)}
-            max_feed: Maximum feed rate (e.g., '2000 mm/min').
             post_processor: Name of the FreeCAD post processor.
             post_processor_args: Arguments for the post processor.
             id: Unique identifier (optional).
@@ -153,7 +156,6 @@ class Machine(Asset, ABC):
         self._spindles = []
 
         # Set property values
-        self._max_feed = max_feed
         self.post_processor = post_processor  # property setter below checks validity
         self._post_processor_args = post_processor_args
 
@@ -173,15 +175,6 @@ class Machine(Asset, ABC):
     @label.setter
     def label(self, value: str):
         self._label = value
-
-    @property
-    def max_feed(self) -> FreeCAD.Units.Quantity:
-        """Maximum feed rate of the machine."""
-        return self._max_feed
-
-    @max_feed.setter
-    def max_feed(self, value: FreeCAD.Units.Quantity):
-        self._max_feed = value
 
     @property
     def axes(self) -> Dict[str, Axis]:
@@ -238,8 +231,6 @@ class Machine(Asset, ABC):
         """Validates machine parameters."""
         if not self.label:
             raise AttributeError("Machine name is required")
-        if self.max_feed.Value <= 0:
-            raise AttributeError("Max feed rate must be positive")
         for name, axis in self._axes.items():
             try:
                 axis.validate()
@@ -262,7 +253,6 @@ class Machine(Asset, ABC):
         for name, axis in sorted(self._axes.items()):
             output += f"  {name}-Axis:\n"
             output += axis.dump(do_print, 2)
-        output += f"  Max Feed Rate: {self.max_feed.UserString}\n"
         output += f"  Post Processor: {self._post_processor or 'None'}\n"
         output += f"  Post Processor Args: {self._post_processor_args or 'None'}\n"
         for spindle in self.spindles:
