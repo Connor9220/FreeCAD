@@ -99,6 +99,10 @@ def isValidBaseObject(obj):
     if hasattr(obj, "BitBody") and hasattr(obj, "ShapeName"):
         # ToolBit's are not valid base objects
         return False
+    if hasattr(obj, "ToolBitID"):
+        return False
+    if any(hasattr(ob, "ToolBitID") for ob in getattr(obj, "InListRecursive", [])):
+        return False
     if obj.TypeId in NotValidBaseTypeIds:
         Path.Log.debug("%s is blacklisted (%s)" % (obj.Label, obj.TypeId))
         return False
