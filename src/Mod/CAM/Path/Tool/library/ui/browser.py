@@ -284,6 +284,7 @@ class LibraryBrowserWidget(ToolBitBrowserWidget):
 
         selected_items = self._tool_list_widget.selectedItems()
         has_selection = bool(selected_items)
+        has_library = self.current_library is not None
 
         # Add actions in the desired order
         edit_action = context_menu.addAction("Edit", self._on_edit_requested)
@@ -310,13 +311,17 @@ class LibraryBrowserWidget(ToolBitBrowserWidget):
 
         context_menu.addSeparator()
 
-        action = context_menu.addAction(
-            "Remove from Library", self._on_remove_from_library_requested
-        )
-        action.setShortcut(QtGui.QKeySequence.Delete)
+        # Only show "Remove from Library" when viewing a specific library
+        if has_library:
+            action = context_menu.addAction(
+                "Remove from Library", self._on_remove_from_library_requested
+            )
+            action.setShortcut(QtGui.QKeySequence.Delete)
 
-        action = context_menu.addAction("Delete from disk", self._on_delete_requested)
-        action.setShortcut(QtGui.QKeySequence("Shift+Delete"))
+        # Only show "Delete from disk" when viewing 'all tools' (no library selected)
+        if not has_library:
+            action = context_menu.addAction("Delete from disk", self._on_delete_requested)
+            action.setShortcut(QtGui.QKeySequence("Shift+Delete"))
 
         # Execute the menu
         context_menu.exec_(self._tool_list_widget.mapToGlobal(position))
