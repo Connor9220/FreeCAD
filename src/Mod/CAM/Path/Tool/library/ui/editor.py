@@ -350,7 +350,7 @@ class LibraryEditor(QWidget):
         self.form.renameLibraryButton.setEnabled(library_selected)
         self.form.exportLibraryButton.setEnabled(library_selected)
         self.form.importLibraryButton.setEnabled(True)
-        self.form.addToolBitButton.setEnabled(library_selected)
+        self.form.addToolBitButton.setEnabled(True)  # Always enabled - can create standalone toolbits
         # TODO: self.form.exportToolBitButton.setEnabled(toolbit_selected)
 
     def _save_library(self):
@@ -475,17 +475,9 @@ class LibraryEditor(QWidget):
         self._update_button_states()
 
     def _on_add_toolbit_requested(self):
-        """Handles request to add a new toolbit to the current library."""
+        """Handles request to add a new toolbit to the current library or create standalone."""
         Path.Log.debug("_on_add_toolbit_requested: Called.")
         current_library = self.browser.get_current_library()
-        if not current_library:
-            Path.Log.warning("Cannot add toolbit: No library selected.")
-            QMessageBox.warning(
-                self,
-                FreeCAD.Qt.translate("CAM", "Warning"),
-                FreeCAD.Qt.translate("CAM", "Please select a library first."),
-            )
-            return
 
         # Select the shape for the new toolbit
         selector = ShapeSelector()
@@ -508,15 +500,19 @@ class LibraryEditor(QWidget):
             tool_asset_uri = cam_assets.add(new_toolbit)
             Path.Log.debug(f"_on_add_toolbit_requested: Saved tool with URI: {tool_asset_uri}")
 
-            # Add the toolbit to the current library
-            toolno = current_library.add_bit(new_toolbit)
-            Path.Log.debug(
-                f"_on_add_toolbit_requested: Added toolbit {new_toolbit.get_id()} (URI: {new_toolbit.get_uri()}) "
-                f"to current_library with number {toolno}."
-            )
-
-            # Save the library
-            cam_assets.add(current_library)
+            # Add the toolbit to the current library if one is selected
+            if current_library:
+                toolno = current_library.add_bit(new_toolbit)
+                Path.Log.debug(
+                    f"_on_add_toolbit_requested: Added toolbit {new_toolbit.get_id()} (URI: {new_toolbit.get_uri()}) "
+                    f"to current_library with number {toolno}."
+                )
+                # Save the library
+                cam_assets.add(current_library)
+            else:
+                Path.Log.debug(
+                    f"_on_add_toolbit_requested: Created standalone toolbit {new_toolbit.get_id()} (URI: {new_toolbit.get_uri()})"
+                )
 
         except Exception as e:
             Path.Log.error(f"Failed to create or add new toolbit: {e}")
