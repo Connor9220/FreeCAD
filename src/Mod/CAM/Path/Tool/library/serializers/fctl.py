@@ -35,6 +35,9 @@ class FCTLSerializer(AssetSerializer):
     extensions = (".fctl",)
     mime_type = "application/x-freecad-toolbit-library"
 
+    Path.Log.setLevel(Path.Log.Level.INFO, Path.Log.thisModule())
+    Path.Log.trackModule(Path.Log.thisModule())
+
     @classmethod
     def get_label(cls) -> str:
         return FreeCAD.Qt.translate("CAM", "FreeCAD Tool Library")
@@ -66,6 +69,7 @@ class FCTLSerializer(AssetSerializer):
         Creates a Library instance from serialized data and resolved
         dependencies.
         """
+        
         data_dict = json.loads(data.decode("utf-8"))
         # The id parameter from the Asset.from_bytes method is the canonical ID
         # for the asset being deserialized. We should use this ID for the library
@@ -107,5 +111,31 @@ class FCTLSerializer(AssetSerializer):
 
     @classmethod
     def deep_deserialize(cls, data: bytes) -> Library:
-        # TODO: attempt to fetch tools from the asset manager here
-        return cls.deserialize(data, str(uuid.uuid4()), {})
+        """Deep deserialize a library by fetching all toolbit dependencies."""
+        import uuid
+        from ...camassets import cam_assets
+        
+        # Generate a unique ID for this library instance
+        library_id = str(uuid.uuid4())
+        
+        Path.Log.info(f"FCTL DEEP_DESERIALIZE: Starting deep deserialization for library id='{library_id}'")
+        
+        # Extract dependency URIs from the library data
+        dependency_uris = cls.extract_dependencies(data)
+        Path.Log.info(f"FCTL DEEP_DESERIALIZE: Found {len(dependency_uris)} toolbit dependencies: {[uri.asset_id for uri in dependency_uris]}")
+        
+        # Fetch all toolbit dependencies
+        resolved_dependencies = {}
+        for dep_uri in dependency_uris:
+            try:
+                Path.Log.info(f"FCTL DEEP_DESERIALIZE: Fetching toolbit '{dep_uri.asset_id}'")
+                toolbit = cam_assets.get(dep_uri, store=['local', 'builtin'], depth=0)
+                resolved_dependencies[dep_uri] = toolbit
+                Path.Log.info(f"FCTL DEEP_DESERIALIZE: Successfully fetched toolbit '{dep_uri.asset_id}'")
+            except Exception as e:
+                Path.Log.warning(f"FCTL DEEP_DESERIALIZE: Failed to fetch toolbit '{dep_uri.asset_id}': {e}")
+        
+        Path.Log.info(f"FCTL DEEP_DESERIALIZE: Resolved {len(resolved_dependencies)} of {len(dependency_uris)} dependencies")
+        
+        # Now deserialize with the resolved dependencies
+        return cls.deserialize(data, library_id, resolved_dependencies)
