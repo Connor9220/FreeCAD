@@ -443,14 +443,27 @@ class LibraryBrowserWidget(ToolBitBrowserWidget):
 
             toolbit_data_bytes = toolbit_yaml_str.encode("utf-8")
             toolbit = YamlToolBitSerializer.deserialize(toolbit_data_bytes, dependencies=None)
-            # Assign a new tool id and a label
-            toolbit.set_id()
-            self._asset_manager.add(toolbit)  # Save the new toolbit to disk
+            
+            # Get the original toolbit ID from the deserialized data
+            original_id = toolbit.id
+            Path.Log.info(f"COPY PASTE: Attempting to paste toolbit with original_id={original_id}")
+            
+            # Check if toolbit already exists in asset manager
+            toolbit_uri = toolbit.get_uri()
+            existing_toolbit = None
+            try:
+                existing_toolbit = self._asset_manager.get(toolbit_uri, store=['local', 'builtin'], depth=0)
+                Path.Log.info(f"COPY PASTE: Found existing toolbit {original_id}, using reference")
+            except FileNotFoundError:
+                # Toolbit doesn't exist, save it as new
+                Path.Log.info(f"COPY PASTE: Toolbit {original_id} not found, creating new one")
+                self._asset_manager.add(toolbit)
+                existing_toolbit = toolbit
 
-            # Add the bit to the current library
-            added_toolbit = current_library.add_bit(toolbit)
+            # Add the existing or new toolbit to the current library
+            added_toolbit = current_library.add_bit(existing_toolbit)
             if added_toolbit:
-                new_uris.add(str(toolbit.get_uri()))
+                new_uris.add(str(existing_toolbit.get_uri()))
 
         if new_uris:
             self._asset_manager.add(current_library)  # Save the modified library
@@ -485,16 +498,23 @@ class LibraryBrowserWidget(ToolBitBrowserWidget):
 
             toolbit_data_bytes = toolbit_yaml_str.encode("utf-8")
             toolbit = YamlToolBitSerializer.deserialize(toolbit_data_bytes, dependencies=None)
-            source_library.remove_bit(toolbit)
-
-            # Remove it from the old library, add it to the new library
-            source_library.remove_bit(toolbit)
-            added_toolbit = current_library.add_bit(toolbit)
-            if added_toolbit:
-                new_uris.add(str(toolbit.get_uri()))
-
-            # The toolbit itself does not change, so we don't need to save it.
-            # It is only the reference in the library that changes.
+            
+            # Get the original toolbit ID and find the existing toolbit
+            original_id = toolbit.id
+            Path.Log.info(f"CUT PASTE: Moving toolbit with original_id={original_id}")
+            
+            toolbit_uri = toolbit.get_uri()
+            try:
+                existing_toolbit = self._asset_manager.get(toolbit_uri, store=['local', 'builtin'], depth=0)
+                Path.Log.info(f"CUT PASTE: Found existing toolbit {original_id}, using reference")
+                
+                # Remove from source library, add to target library
+                source_library.remove_bit(existing_toolbit)
+                added_toolbit = current_library.add_bit(existing_toolbit)
+                if added_toolbit:
+                    new_uris.add(str(existing_toolbit.get_uri()))
+            except FileNotFoundError:
+                Path.Log.warning(f"CUT PASTE: Toolbit {original_id} not found in asset manager")
 
         if new_uris:
             # Save the modified libraries

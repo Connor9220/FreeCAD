@@ -551,18 +551,42 @@ class LibraryEditor(QWidget):
         if not response:
             return
         file_path, toolbit = cast(Tuple[pathlib.Path, ToolBit], response)
+        
+        # Debug logging for imported toolbit
+        Path.Log.info(f"IMPORT TOOLBIT: file_path={file_path}, toolbit.id={toolbit.id}, toolbit.label={toolbit.label}")
+        import traceback
+        stack = traceback.format_stack()
+        caller_info = ''.join(stack[-3:-1])
+        Path.Log.info(f"IMPORT TOOLBIT CALLER:\n{caller_info}")
 
-        # Add the imported toolbit to the current library
-        added_toolbit = current_library.add_bit(toolbit)
+        # Check if toolbit already exists in asset manager
+        toolbit_uri = toolbit.get_uri()
+        Path.Log.info(f"IMPORT CHECK: toolbit_uri={toolbit_uri}")
+        existing_toolbit = None
+        try:
+            existing_toolbit = cam_assets.get(toolbit_uri, store=['local', 'builtin'], depth=0)
+            Path.Log.info(f"IMPORT CHECK: Toolbit {toolbit.id} already exists, using existing reference")
+            Path.Log.info(f"IMPORT CHECK: existing_toolbit.id={existing_toolbit.id}, existing_toolbit.label={existing_toolbit.label}")
+        except FileNotFoundError:
+            # Toolbit doesn't exist, save it as new
+            Path.Log.info(f"IMPORT CHECK: Toolbit {toolbit.id} is new, saving to disk")
+            new_uri = cam_assets.add(toolbit)
+            Path.Log.info(f"IMPORT CHECK: Toolbit saved with new URI: {new_uri}")
+            existing_toolbit = toolbit
+        
+        # Add the toolbit (existing or new) to the current library
+        Path.Log.info(f"IMPORT ADD: Adding toolbit {existing_toolbit.id} to library {current_library.label}")
+        added_toolbit = current_library.add_bit(existing_toolbit)
         if added_toolbit:
-            cam_assets.add(toolbit)  # Save the imported toolbit to disk
+            Path.Log.info(f"IMPORT ADD: Successfully added toolbit to library")
             cam_assets.add(current_library)  # Save the modified library
             self.browser.refresh()
-            self.browser.select_by_uri([str(toolbit.get_uri())])
+            self.browser.select_by_uri([str(existing_toolbit.get_uri())])
             self._update_button_states()
         else:
+            Path.Log.warning(f"IMPORT ADD: Failed to add toolbit {existing_toolbit.id} to library")
             Path.Log.warning(
-                f"Failed to import toolbit from {file_path} to library {current_library.label}."
+                f"IMPORT FAILED: Failed to import toolbit from {file_path} to library {current_library.label}."
             )
             QMessageBox.warning(
                 self,
