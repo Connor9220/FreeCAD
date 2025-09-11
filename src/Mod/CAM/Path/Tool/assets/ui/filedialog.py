@@ -114,9 +114,9 @@ class AssetOpenDialog(QFileDialog):
             # Check asset type to determine subdirectory
             asset_type = getattr(asset_class, 'asset_type', None)
             if asset_type == 'toolbit':
-                return asset_path / "Bit"
+                return asset_path / "Tool" / "Bit"
             elif asset_type == 'library' or asset_type == 'toolbitlibrary':
-                return asset_path / "Library"
+                return asset_path / "Tool" / "Library"
             else:
                 # Default to asset path root for unknown types
                 return asset_path

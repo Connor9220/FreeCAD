@@ -139,7 +139,7 @@ def setAssetPath(path: pathlib.Path):
 
 
 def getToolBitPath() -> pathlib.Path:
-    return getAssetPath() / "Bit"
+    return getAssetPath() / "Tool" / "Bit"
 
 
 def getLastToolLibrary() -> Optional[str]:
