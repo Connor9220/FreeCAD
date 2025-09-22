@@ -902,12 +902,11 @@ class ObjectDressup:
         return None
 
     # Get finish index of mill command for one profile
-    def findLastCutMultiProfileIndex(self):
-        startIndex = self.firstMillIndex
-        if startIndex >= len(self.source):
-            return len(self.source) - 1
-        for i in range(startIndex, len(self.source), +1):
-            if not self.isCuttingMove(self.source[i]):
+    def findLastCutMultiProfileIndex(self, source, startIndex):
+        if startIndex >= len(source):
+            return len(source) - 1
+        for i in range(startIndex, len(source), +1):
+            if not self.isCuttingMove(source[i]):
                 return i - 1
 
         return i
