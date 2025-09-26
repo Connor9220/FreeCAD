@@ -99,6 +99,7 @@ class ToolBit(Asset, ABC):
 
         # Initialize properties
         self._update_tool_properties()
+        self.subtype: Optional[str] = None
 
     def __eq__(self, other):
         """Compare ToolBit objects based on their unique ID."""
@@ -162,7 +163,15 @@ class ToolBit(Asset, ABC):
         )
 
         # Now that we have a shape, create the toolbit instance.
-        return cls.from_shape(tool_bit_shape, attrs, id=attrs.get("id"))
+        toolbit = cls.from_shape(tool_bit_shape, attrs, id=attrs.get("id"))
+
+        # --- NEW: Store the alias/subtype if shape_id is an alias ---
+        if shape_id.lower() != shape_class.name.lower() and shape_id.lower() in shape_class.aliases:
+            toolbit.subtype = shape_id.lower()
+        else:
+            toolbit.subtype = None
+
+        return toolbit
 
     @classmethod
     def from_shape(
@@ -979,3 +988,7 @@ class ToolBit(Asset, ABC):
         This mostly exists as a safe-hold for probes, which should never rotate.
         """
         return True
+
+    def get_subtype(self) -> Optional[str]:
+        """Returns the alias/subtype used to instantiate this toolbit, if any."""
+        return self.subtype

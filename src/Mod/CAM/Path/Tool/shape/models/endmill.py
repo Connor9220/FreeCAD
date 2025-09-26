@@ -28,7 +28,22 @@ from .base import ToolBitShape
 
 class ToolBitShapeEndmill(ToolBitShape):
     name = "Endmill"
-    aliases = ("endmill",)
+    # Only include valid subtypes: roughing is only for upcut or standard endmills
+    aliases = (
+        "endmill",         # Standard square endmill
+        "upcut",           # Upcut flute
+        "downcut",         # Downcut flute
+        "compression",     # Compression flute
+        "center_cut",      # Center cutting
+        "roughing",        # Roughing (serrated, upcut only)
+        "variable_flute",  # Variable flute geometry
+        "high_helix",      # High helix angle
+        "straight_flute",  # Straight flute
+        "single_flute",    # Single flute
+        "long_reach",      # Extended length
+        "micro",           # Micro diameter
+        "slot_drill",      # Slotting endmill
+    )
 
     @classmethod
     def schema(cls) -> Mapping[str, Tuple[str, str]]:

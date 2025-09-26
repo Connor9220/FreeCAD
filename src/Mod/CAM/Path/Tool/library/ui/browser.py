@@ -188,33 +188,47 @@ class LibraryBrowserWidget(ToolBitBrowserWidget):
             Path.Preferences.setLastToolLibrary(str(library.get_uri()))
 
     def _get_available_tool_types(self):
-        """Get all available tool types from the current assets."""
-        tool_types = set()
-        # Make sure we have assets to work with
-        if not hasattr(self, "_all_assets") or not self._all_assets:
-            return []
-
-        for asset in self._all_assets:
-            # Use get_shape_name() method to get the tool type
-            if hasattr(asset, "get_shape_name"):
-                tool_type = asset.get_shape_name()
-                if tool_type:
-                    tool_types.add(tool_type)
-
-        return sorted(tool_types)
+        """Get all available tool types and subtypes, grouped for display."""
+        # Build a mapping: {ParentType: set(subtypes)}
+        type_map = {}
+        for asset in getattr(self, "_all_assets", []):
+            parent = asset.get_shape_name().title()
+            subtype = getattr(asset, "subtype", None)
+            if subtype:
+                subtype_disp = subtype.title()
+                type_map.setdefault(parent, set()).add(subtype_disp)
+            else:
+                type_map.setdefault(parent, set())
+        # Flatten for combo: parent, then indented subtypes
+        result = []
+        for parent in sorted(type_map):
+            result.append(parent)
+            for subtype in sorted(type_map[parent]):
+                result.append(f"  {subtype}")  # Indent for display
+        return result
 
     def _get_filtered_assets(self):
-        """Get assets filtered by tool type if a specific type is selected."""
-        if self._tool_type_combo.currentIndex() == 0:  # "All Toolbit Types"
+        """Filter assets by selected type or subtype, showing subtypes under parent."""
+        sel = self._selected_tool_type
+        if self._tool_type_combo.currentIndex() == 0 or not sel:
             return self._all_assets
 
-        filtered_assets = []
-        for asset in self._all_assets:
-            if hasattr(asset, "get_shape_name"):
-                tool_type = asset.get_shape_name()
-                if tool_type == self._selected_tool_type:
-                    filtered_assets.append(asset)
-        return filtered_assets
+        sel = sel.strip()
+        # If indented, it's a subtype
+        if self._selected_tool_type.startswith("  "):
+            # Only show assets with this subtype
+            return [
+                a for a in self._all_assets
+                if (str(getattr(a, "subtype", "")) or "").title() == sel
+            ]
+        else:
+            # Parent: include all with this shape name or any subtype under it
+            return [
+                a for a in self._all_assets
+                if a.get_shape_name().title() == sel or (str(getattr(a, "subtype", "")) or "").title() in [
+                    s for s in self._get_available_tool_types() if s.startswith("  ")
+                ]
+            ]
 
     def _update_tool_list(self):
         """Updates the tool list based on the current library."""
