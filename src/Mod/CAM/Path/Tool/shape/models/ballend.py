@@ -26,7 +26,6 @@ from .base import ToolBitShape
 
 class ToolBitShapeBallend(ToolBitShape):
     name: str = "Ballend"
-    aliases = ("ballend",)
 
     @classmethod
     def schema(cls) -> Mapping[str, Tuple[str, str]]:

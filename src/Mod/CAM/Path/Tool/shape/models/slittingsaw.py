@@ -26,7 +26,6 @@ from .base import ToolBitShape
 
 class ToolBitShapeSlittingSaw(ToolBitShape):
     name = "SlittingSaw"
-    aliases = "slittingsaw", "slitting-saw"
 
     @classmethod
     def schema(cls) -> Mapping[str, Tuple[str, str]]:
