@@ -28,7 +28,6 @@ from .base import ToolBitShape
 
 class ToolBitShapeBullnose(ToolBitShape):
     name = "Bullnose"
-    aliases = "bullnose", "torus"
 
     @classmethod
     def schema(cls) -> Mapping[str, Tuple[str, str]]:
