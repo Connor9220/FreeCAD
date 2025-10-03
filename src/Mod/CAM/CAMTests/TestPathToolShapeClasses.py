@@ -7,6 +7,7 @@ from typing import Mapping, Tuple
 import FreeCAD
 from CAMTests.PathTestUtils import PathTestWithAssets
 from Path.Tool.assets import DummyAssetSerializer
+import Path.Tool.shape
 from Path.Tool.shape import (
     ToolBitShape,
     ToolBitShapeBallend,

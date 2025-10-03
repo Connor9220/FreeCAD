@@ -1,0 +1,76 @@
+{
+    "Ballend": [
+        "ballend"
+    ],
+    "Bullnose": [
+        "bullnose",
+        "torus"
+    ],
+    "Chamfer": [
+        "chamfer"
+    ],
+    "Custom": [
+        "custom"
+    ],
+    "Dovetail": [
+        "dovetail"
+    ],
+    "Drill": [
+        "drill",
+        "jobber",
+        "stub",
+        "parabolic",
+        "spot",
+        "center",
+        "pilot",
+        "taper",
+        "split_point",
+        "brad_point",
+        "countersink",
+        "counterbore"
+    ],
+    "Endmill": [
+        "endmill",
+        "upcut",
+        "downcut",
+        "compression",
+        "center_cut",
+        "roughing",
+        "variable_flute",
+        "high_helix",
+        "straight_flute",
+        "single_flute",
+        "long_reach",
+        "micro",
+        "slot_drill"
+    ],
+    "Probe": [
+        "probe"
+    ],
+    "Radius": [
+        "radius",
+        "fillet"
+    ],
+    "Reamer": [
+        "reamer"
+    ],
+    "SlittingSaw": [
+        "slittingsaw",
+        "slitting-saw",
+        "slitting_saw"
+    ],
+    "Tap": [
+        "tap"
+    ],
+    "ThreadMill": [
+        "threadmill",
+        "thread-mill",
+        "thread_mill"
+    ],
+    "VBit": [
+        "vbit",
+        "v-bit",
+        "v_bit",
+        "engraving"
+    ]
+}

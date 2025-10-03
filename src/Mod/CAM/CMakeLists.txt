@@ -485,6 +485,7 @@ SET(Tools_Shape_SRCS
     Tools/Shape/thread-mill.svg
     Tools/Shape/v-bit.fcstd
     Tools/Shape/v-bit.svg
+    Tools/Shape/shape_aliases.json
 )
 
 SET(Tests_SRCS
