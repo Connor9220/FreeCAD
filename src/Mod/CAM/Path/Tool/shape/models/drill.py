@@ -28,20 +28,6 @@ from .base import ToolBitShape
 
 class ToolBitShapeDrill(ToolBitShape):
     name = "Drill"
-    aliases = (
-        "drill",
-        "jobber",
-        "stub",
-        "parabolic",
-        "spot",
-        "center",
-        "pilot",
-        "taper",
-        "split_point",
-        "brad_point",
-        "countersink",
-        "counterbore",
-    )
 
     @classmethod
     def schema(cls) -> Mapping[str, Tuple[str, str]]:

@@ -2,6 +2,7 @@
 
 import sys
 from lazy_loader.lazy_loader import LazyLoader
+from . import shape
 from . import toolbit
 from .assets import DummyAssetSerializer
 from .camassets import cam_assets
