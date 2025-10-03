@@ -31,7 +31,6 @@ class ToolBitShapeCustom(ToolBitShape):
     """
 
     name: str = "Custom"
-    aliases = ("custom",)
 
     # Connor: We're going to treat custom tools as normal endmills
     @classmethod
