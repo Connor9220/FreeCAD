@@ -27,7 +27,6 @@ from .base import ToolBitShape
 
 class ToolBitShapeThreadMill(ToolBitShape):
     name = "ThreadMill"
-    aliases = "threadmill", "thread-mill"
 
     @classmethod
     def schema(cls) -> Mapping[str, Tuple[str, str]]:

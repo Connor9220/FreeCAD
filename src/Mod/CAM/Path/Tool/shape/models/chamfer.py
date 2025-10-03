@@ -27,7 +27,6 @@ from .base import ToolBitShape
 
 class ToolBitShapeChamfer(ToolBitShape):
     name = "Chamfer"
-    aliases = ("chamfer",)
 
     @classmethod
     def schema(cls) -> Mapping[str, Tuple[str, str]]:
