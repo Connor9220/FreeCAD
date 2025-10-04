@@ -44,9 +44,11 @@ TYPESYSTEM_SOURCE(Path::Command, Base::Persistence)
 Command::Command(const char* name, const std::map<std::string, double>& parameters)
     : Name(name)
     , Parameters(parameters)
+    , Annotations()
 {}
 
 Command::Command()
+    : Annotations()
 {}
 
 Command::~Command()
@@ -329,6 +331,36 @@ void Command::scaleBy(double factor)
                 break;
         }
     }
+}
+
+void Command::setAnnotation(const std::string& key, const std::string& value)
+{
+    Annotations[key] = value;
+}
+
+std::string Command::getAnnotation(const std::string& key) const
+{
+    auto it = Annotations.find(key);
+    if (it != Annotations.end()) {
+        return it->second;
+    }
+    return "";
+}
+
+Command& Command::setAnnotations(const std::string& annotationString)
+{
+    // Simple parser: split by space, then by colon
+    std::stringstream ss(annotationString);
+    std::string token;
+    while (ss >> token) {
+        auto pos = token.find(':');
+        if (pos != std::string::npos) {
+            std::string key = token.substr(0, pos);
+            std::string value = token.substr(pos + 1);
+            Annotations[key] = value;
+        }
+    }
+    return *this;
 }
 
 // Reimplemented from base class

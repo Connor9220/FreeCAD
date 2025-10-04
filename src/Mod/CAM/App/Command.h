@@ -67,6 +67,14 @@ public:
     double getValue(const std::string& name) const;  // returns the value of a given parameter
     void scaleBy(double factor);  // scales the receiver - use for imperial/metric conversions
 
+    // annotation methods
+    void setAnnotation(const std::string& key,
+                       const std::string& value);             // sets a single annotation
+    std::string getAnnotation(const std::string& key) const;  // gets an annotation value
+    Command&
+    setAnnotations(const std::string& annotationString);  // sets annotations from string and
+                                                          // returns reference for chaining
+
     // this assumes the name is upper case
     inline double getParam(const std::string& name, double fallback = 0.0) const
     {
@@ -77,6 +85,7 @@ public:
     // attributes
     std::string Name;
     std::map<std::string, double> Parameters;
+    std::map<std::string, std::string> Annotations;
 };
 
 }  // namespace Path
