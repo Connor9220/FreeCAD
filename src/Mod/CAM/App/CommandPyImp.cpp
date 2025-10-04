@@ -206,6 +206,35 @@ void CommandPy::setParameters(Py::Dict arg)
     }
 }
 
+// Annotations attribute get/set
+
+Py::Dict CommandPy::getAnnotations() const
+{
+    Py::Dict annotationsDict;
+    for (const auto& pair : getCommandPtr()->Annotations) {
+        annotationsDict.setItem(pair.first, Py::String(pair.second));
+    }
+    return annotationsDict;
+}
+
+void CommandPy::setAnnotations(Py::Dict arg)
+{
+    getCommandPtr()->Annotations.clear();
+    PyObject *key, *value;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(arg.ptr(), &pos, &key, &value)) {
+        std::string ckey, cvalue;
+        if (PyUnicode_Check(key) && PyUnicode_Check(value)) {
+            ckey = PyUnicode_AsUTF8(key);
+            cvalue = PyUnicode_AsUTF8(value);
+            getCommandPtr()->Annotations[ckey] = cvalue;
+        }
+        else {
+            throw Py::TypeError("Annotations dictionary keys and values must be strings");
+        }
+    }
+}
+
 // GCode methods
 
 PyObject* CommandPy::toGCode(PyObject* args) const
@@ -268,6 +297,47 @@ PyObject* CommandPy::transform(PyObject* args)
     }
     else {
         throw Py::TypeError("Argument must be a placement");
+    }
+}
+
+PyObject* CommandPy::addAnnotations(PyObject* args)
+{
+    PyObject* annotationsObj;
+    if (PyArg_ParseTuple(args, "O", &annotationsObj)) {
+        if (PyDict_Check(annotationsObj)) {
+            // Handle dictionary input
+            PyObject *key, *value;
+            Py_ssize_t pos = 0;
+            while (PyDict_Next(annotationsObj, &pos, &key, &value)) {
+                std::string ckey, cvalue;
+                if (PyUnicode_Check(key) && PyUnicode_Check(value)) {
+                    ckey = PyUnicode_AsUTF8(key);
+                    cvalue = PyUnicode_AsUTF8(value);
+                    getCommandPtr()->setAnnotation(ckey, cvalue);
+                }
+                else {
+                    PyErr_SetString(PyExc_TypeError, "Dictionary keys and values must be strings");
+                    return nullptr;
+                }
+            }
+        }
+        else if (PyUnicode_Check(annotationsObj)) {
+            // Handle string input like "xyz:abc test:1234"
+            std::string annotationString = PyUnicode_AsUTF8(annotationsObj);
+            getCommandPtr()->setAnnotations(annotationString);
+        }
+        else {
+            PyErr_SetString(PyExc_TypeError, "Argument must be a dictionary or string");
+            return nullptr;
+        }
+
+        // Return self for chaining
+        Py_INCREF(this);
+        return static_cast<PyObject*>(this);
+    }
+    else {
+        PyErr_SetString(PyExc_TypeError, "Invalid arguments");
+        return nullptr;
     }
 }
 
