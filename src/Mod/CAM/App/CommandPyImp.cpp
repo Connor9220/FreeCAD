@@ -212,7 +212,12 @@ Py::Dict CommandPy::getAnnotations() const
 {
     Py::Dict annotationsDict;
     for (const auto& pair : getCommandPtr()->Annotations) {
-        annotationsDict.setItem(pair.first, Py::String(pair.second));
+        if (std::holds_alternative<std::string>(pair.second)) {
+            annotationsDict.setItem(pair.first, Py::String(std::get<std::string>(pair.second)));
+        }
+        else if (std::holds_alternative<double>(pair.second)) {
+            annotationsDict.setItem(pair.first, Py::Float(std::get<double>(pair.second)));
+        }
     }
     return annotationsDict;
 }
@@ -223,14 +228,31 @@ void CommandPy::setAnnotations(Py::Dict arg)
     PyObject *key, *value;
     Py_ssize_t pos = 0;
     while (PyDict_Next(arg.ptr(), &pos, &key, &value)) {
-        std::string ckey, cvalue;
-        if (PyUnicode_Check(key) && PyUnicode_Check(value)) {
+        std::string ckey;
+        if (PyUnicode_Check(key)) {
             ckey = PyUnicode_AsUTF8(key);
-            cvalue = PyUnicode_AsUTF8(value);
-            getCommandPtr()->Annotations[ckey] = cvalue;
+
+            if (PyUnicode_Check(value)) {
+                // String value
+                std::string cvalue = PyUnicode_AsUTF8(value);
+                getCommandPtr()->Annotations[ckey] = cvalue;
+            }
+            else if (PyFloat_Check(value)) {
+                // Float value
+                double dvalue = PyFloat_AsDouble(value);
+                getCommandPtr()->Annotations[ckey] = dvalue;
+            }
+            else if (PyLong_Check(value)) {
+                // Integer value (convert to double)
+                double dvalue = static_cast<double>(PyLong_AsLong(value));
+                getCommandPtr()->Annotations[ckey] = dvalue;
+            }
+            else {
+                throw Py::TypeError("Annotation values must be strings or numbers");
+            }
         }
         else {
-            throw Py::TypeError("Annotations dictionary keys and values must be strings");
+            throw Py::TypeError("Annotation keys must be strings");
         }
     }
 }

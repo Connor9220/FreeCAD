@@ -90,7 +90,7 @@ class TestPathCommandAnnotations(PathTestBase):
 
         # Verify annotations were parsed and set correctly
         self.assertEqual(c.Annotations["xyz"], "abc")
-        self.assertEqual(c.Annotations["test"], "1234")
+        self.assertEqual(c.Annotations["test"], 1234)
         self.assertEqual(c.Annotations["operation"], "milling")
 
     def test04(self):
@@ -211,3 +211,96 @@ class TestPathCommandAnnotations(PathTestBase):
         self.assertNotIn("operation", gcode)
         self.assertNotIn("tapping", gcode)
         self.assertNotIn("thread", gcode)
+
+    def test11(self):
+        """Test save/restore with mixed string and numeric annotations (in-memory)."""
+        # Create command with mixed annotations
+        original = Path.Command("G1", {"X": 10.0, "Y": 20.0, "F": 1000.0})
+        original.Annotations = {
+            "tool_name": "6mm_endmill",  # string
+            "spindle_speed": 12000.0,  # float
+            "feed_rate": 1500,  # int -> float
+            "operation": "pocket",  # string
+            "depth_of_cut": -2.5,  # negative float
+        }
+
+        # Use FreeCAD's in-memory serialization
+        content = original.dumpContent()
+
+        # Create new command and restore from memory
+        restored = Path.Command()
+        restored.restoreContent(content)
+
+        # Verify all annotations were restored with correct types
+        self.assertEqual(restored.Annotations["tool_name"], "6mm_endmill")
+        self.assertEqual(restored.Annotations["spindle_speed"], 12000.0)
+        self.assertEqual(restored.Annotations["feed_rate"], 1500.0)
+        self.assertEqual(restored.Annotations["operation"], "pocket")
+        self.assertEqual(restored.Annotations["depth_of_cut"], -2.5)
+
+        # Verify types are preserved
+        self.assertIsInstance(restored.Annotations["tool_name"], str)
+        self.assertIsInstance(restored.Annotations["spindle_speed"], float)
+        self.assertIsInstance(restored.Annotations["feed_rate"], float)
+        self.assertIsInstance(restored.Annotations["operation"], str)
+        self.assertIsInstance(restored.Annotations["depth_of_cut"], float)
+
+        # Verify GCode parameters were also restored correctly
+        self.assertEqual(restored.Name, "G1")
+        # Note: Parameters are restored via GCode parsing
+
+    def test12(self):
+        """Test save/restore with empty and complex annotations (in-memory)."""
+        # Test 1: Empty annotations (should work and use compact format)
+        simple = Path.Command("G0", {"Z": 5.0})
+        self.assertEqual(simple.Annotations, {})
+
+        simple_content = simple.dumpContent()
+        simple_restored = Path.Command()
+        simple_restored.restoreContent(simple_content)
+
+        self.assertEqual(simple_restored.Annotations, {})
+        self.assertEqual(simple_restored.Name, "G0")
+
+        # Test 2: Complex CAM annotations with edge cases
+        complex_cmd = Path.Command("G84", {"X": 25.4, "Y": 12.7, "Z": -8.0})
+        complex_cmd.Annotations = {
+            # Mixed types with edge cases
+            "tool_type": "tap",  # string
+            "spindle_speed": 500.0,  # float
+            "zero_value": 0.0,  # zero
+            "negative": -123.456,  # negative
+            "large_number": 999999.999,  # large number
+            "operation_id": "OP_030",  # alphanumeric string
+            "thread_spec": "M4x0.7",  # string with numbers
+            "scientific": 1.23e-6,  # scientific notation
+        }
+
+        # Serialize and restore
+        complex_content = complex_cmd.dumpContent()
+        complex_restored = Path.Command()
+        complex_restored.restoreContent(complex_content)
+
+        # Verify all complex data restored correctly
+        self.assertEqual(len(complex_restored.Annotations), 8)
+
+        # Check specific values and types
+        self.assertEqual(complex_restored.Annotations["tool_type"], "tap")
+        self.assertIsInstance(complex_restored.Annotations["tool_type"], str)
+
+        self.assertEqual(complex_restored.Annotations["spindle_speed"], 500.0)
+        self.assertIsInstance(complex_restored.Annotations["spindle_speed"], float)
+
+        self.assertEqual(complex_restored.Annotations["zero_value"], 0.0)
+        self.assertEqual(complex_restored.Annotations["negative"], -123.456)
+        self.assertEqual(complex_restored.Annotations["large_number"], 999999.999)
+
+        # Verify strings with numbers stay as strings
+        self.assertEqual(complex_restored.Annotations["operation_id"], "OP_030")
+        self.assertEqual(complex_restored.Annotations["thread_spec"], "M4x0.7")
+        self.assertIsInstance(complex_restored.Annotations["operation_id"], str)
+        self.assertIsInstance(complex_restored.Annotations["thread_spec"], str)
+
+        # Check scientific notation
+        self.assertAlmostEqual(complex_restored.Annotations["scientific"], 1.23e-6, places=8)
+        self.assertIsInstance(complex_restored.Annotations["scientific"], float)
