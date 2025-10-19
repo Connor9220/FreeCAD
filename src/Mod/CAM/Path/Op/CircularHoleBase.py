@@ -81,6 +81,31 @@ class ObjectOp(PathOp.ObjectOp):
             QT_TRANSLATE_NOOP("App::Property", "List of disabled features"),
         )
         self.initCircularHoleOperation(obj)
+        # Always add sorting endpoint properties for new objects
+        obj.addProperty(
+            "App::PropertyVectorDistance",
+            "StartPoint",
+            "Sorting",
+            QT_TRANSLATE_NOOP("App::Property", "The start point of this path"),
+        )
+        obj.addProperty(
+            "App::PropertyBool",
+            "UseStartPoint",
+            "Sorting",
+            QT_TRANSLATE_NOOP("App::Property", "Make True, if specifying a Start Point"),
+        )
+        obj.addProperty(
+            "App::PropertyVectorDistance",
+            "EndPoint",
+            "Sorting",
+            QT_TRANSLATE_NOOP("App::Property", "The end point of this path"),
+        )
+        obj.addProperty(
+            "App::PropertyBool",
+            "UseEndPoint",
+            "Sorting",
+            QT_TRANSLATE_NOOP("App::Property", "Make True, if specifying a End Point"),
+        )
 
         # Handle SortingMode property with migration support
         if not hasattr(obj, "SortingMode"):
@@ -174,6 +199,36 @@ class ObjectOp(PathOp.ObjectOp):
         Do not overwrite, implement circularHoleExecute(obj, holes) instead."""
         Path.Log.track()
 
+        # Ensure endpoint properties exist for runtime safety
+        if not hasattr(obj, "StartPoint"):
+            obj.addProperty(
+                "App::PropertyVectorDistance",
+                "StartPoint",
+                "Sorting",
+                QT_TRANSLATE_NOOP("App::Property", "The start point of this path"),
+            )
+        if not hasattr(obj, "UseStartPoint"):
+            obj.addProperty(
+                "App::PropertyBool",
+                "UseStartPoint",
+                "Sorting",
+                QT_TRANSLATE_NOOP("App::Property", "Make True, if specifying a Start Point"),
+            )
+        if not hasattr(obj, "EndPoint"):
+            obj.addProperty(
+                "App::PropertyVectorDistance",
+                "EndPoint",
+                "Sorting",
+                QT_TRANSLATE_NOOP("App::Property", "The end point of this path"),
+            )
+        if not hasattr(obj, "UseEndPoint"):
+            obj.addProperty(
+                "App::PropertyBool",
+                "UseEndPoint",
+                "Sorting",
+                QT_TRANSLATE_NOOP("App::Property", "Make True, if specifying a End Point"),
+            )
+
         # MIGRATION: Ensure SortingMode property exists and is up to date
         if not hasattr(obj, "SortingMode"):
             obj.addProperty(
@@ -224,7 +279,12 @@ class ObjectOp(PathOp.ObjectOp):
             if obj.SortingMode == "Automatic":
                 holes = PathUtils.sort_locations(holes, ["x", "y"])
             elif obj.SortingMode == "Automatic TSP":
-                holes = PathUtils.sort_locations_tsp(holes, ["x", "y"])
+                startPoint = obj.StartPoint if obj.UseStartPoint else None
+                endPoint = obj.EndPoint if obj.UseEndPoint else None
+                print(f"startPoint={startPoint}  endPoint={endPoint}")
+                holes = PathUtils.sort_locations_tsp(
+                    holes, ["x", "y"], startPoint=startPoint, endPoint=endPoint
+                )
             self.circularHoleExecute(obj, holes)
 
     def circularHoleExecute(self, obj, holes):
@@ -253,8 +313,8 @@ class ObjectOp(PathOp.ObjectOp):
         obj.Disabled = []
 
     def onDocumentRestored(self, obj):
+        # Migration logic for SortingMode and endpoint properties
         super().onDocumentRestored(obj)
-        # Migration logic for SortingMode
         if not hasattr(obj, "SortingMode"):
             obj.addProperty(
                 "App::PropertyEnumeration",
@@ -274,3 +334,33 @@ class ObjectOp(PathOp.ObjectOp):
                     obj.SortingMode = current_value
                 else:
                     obj.SortingMode = "Automatic"
+
+        # Add endpoint properties if missing (for legacy objects)
+        if not hasattr(obj, "StartPoint"):
+            obj.addProperty(
+                "App::PropertyVectorDistance",
+                "StartPoint",
+                "Sorting",
+                QT_TRANSLATE_NOOP("App::Property", "The start point of this path"),
+            )
+        if not hasattr(obj, "UseStartPoint"):
+            obj.addProperty(
+                "App::PropertyBool",
+                "UseStartPoint",
+                "Sorting",
+                QT_TRANSLATE_NOOP("App::Property", "Make True, if specifying a Start Point"),
+            )
+        if not hasattr(obj, "EndPoint"):
+            obj.addProperty(
+                "App::PropertyVectorDistance",
+                "EndPoint",
+                "Sorting",
+                QT_TRANSLATE_NOOP("App::Property", "The end point of this path"),
+            )
+        if not hasattr(obj, "UseEndPoint"):
+            obj.addProperty(
+                "App::PropertyBool",
+                "UseEndPoint",
+                "Sorting",
+                QT_TRANSLATE_NOOP("App::Property", "Make True, if specifying a End Point"),
+            )
