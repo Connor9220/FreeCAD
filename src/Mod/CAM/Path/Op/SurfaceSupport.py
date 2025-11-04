@@ -508,7 +508,12 @@ class ProcessSelectedFaces:
         if self.obj.Base:
             if len(self.obj.Base) > 0:
                 self.checkBase = True
-                if self.obj.ScanType == "Rotational":
+                if self.obj.ScanType in [
+                    "Rotational",
+                    "Rotational-Continuous",
+                    "Rotational-Continuous-Helix",
+                    "Rotational-Shortest-Path",
+                ]:
                     self.checkBase = False
                     FreeCAD.Console.PrintWarning(self.msgNoFaces)
 

@@ -68,6 +68,14 @@ if False:
 else:
     Path.Log.setLevel(Path.Log.Level.INFO, Path.Log.thisModule())
 
+FLOAT_EPSILON = 1e-6
+ROTATIONAL_SCAN_TYPES = {
+    "Rotational",
+    "Rotational-Continuous",
+    "Rotational-Continuous-Helix",
+    "Rotational-Shortest-Path",
+}
+
 
 class ObjectSurface(PathOp.ObjectOp):
     """Proxy object for Surfacing operation."""
@@ -190,7 +198,7 @@ class ObjectSurface(PathOp.ObjectOp):
                 "Surface",
                 QT_TRANSLATE_NOOP(
                     "App::Property",
-                    "Planar: Flat, 3D surface scan.  Rotational: 4th-axis rotational scan.",
+                    "Planar: Flat, 3D surface scan. Rotational: 4th-axis indexed scan (legacy). Rotational-Continuous: Maintain rotational position. Rotational-Continuous-Helix: Helical interpolation with gradual axis advance. Rotational-Shortest-Path: Minimize rotation distance.",
                 ),
             ),
             (
@@ -477,6 +485,12 @@ class ObjectSurface(PathOp.ObjectOp):
             "ScanType": [
                 (translate("CAM_Surface", "Planar"), "Planar"),
                 (translate("CAM_Surface", "Rotational"), "Rotational"),
+                (translate("CAM_Surface", "Rotational-Continuous"), "Rotational-Continuous"),
+                (
+                    translate("CAM_Surface", "Rotational-Continuous-Helix"),
+                    "Rotational-Continuous-Helix",
+                ),
+                (translate("CAM_Surface", "Rotational-Shortest-Path"), "Rotational-Shortest-Path"),
             ],
         }
 
@@ -552,6 +566,10 @@ class ObjectSurface(PathOp.ObjectOp):
 
         P0 = R2 = 0  # 0 = show
         P2 = R0 = 2  # 2 = hide
+
+        # Check if this is any rotational scan type
+        isRotational = obj.ScanType in ROTATIONAL_SCAN_TYPES
+
         if obj.ScanType == "Planar":
             # if obj.CutPattern in ['Line', 'ZigZag']:
             if obj.CutPattern in ["Circular", "CircularZigZag", "Spiral"]:
@@ -559,7 +577,7 @@ class ObjectSurface(PathOp.ObjectOp):
                 P2 = 0
             elif obj.CutPattern == "Offset":
                 P0 = 2
-        elif obj.ScanType == "Rotational":
+        elif isRotational:
             R2 = P0 = P2 = 2
             R0 = 0
         obj.setEditorMode("DropCutterDir", R0)
@@ -743,6 +761,7 @@ class ObjectSurface(PathOp.ObjectOp):
         self.tmpCOM = None
         self.gaps = [0.1, 0.2, 0.3]
         self.cancelOperation = False
+        self._currentRotationAngle = 0.0  # Initialize rotation angle tracker
         CMDS = []
         modelVisibility = []
         FCAD = FreeCAD.ActiveDocument
@@ -1039,7 +1058,7 @@ class ObjectSurface(PathOp.ObjectOp):
 
             if obj.ScanType == "Planar":
                 final.extend(self._processPlanarOp(JOB, obj, mdlIdx, COMP, 0))
-            elif obj.ScanType == "Rotational":
+            elif obj.ScanType in ROTATIONAL_SCAN_TYPES:
                 final.extend(self._processRotationalOp(JOB, obj, mdlIdx, COMP))
 
         elif obj.HandleMultipleFeatures == "Individually":
@@ -1060,7 +1079,7 @@ class ObjectSurface(PathOp.ObjectOp):
 
                 if obj.ScanType == "Planar":
                     final.extend(self._processPlanarOp(JOB, obj, mdlIdx, COMP, fsi))
-                elif obj.ScanType == "Rotational":
+                elif obj.ScanType in ROTATIONAL_SCAN_TYPES:
                     final.extend(self._processRotationalOp(JOB, obj, mdlIdx, COMP))
                 COMP = None
         # Eif
@@ -2162,7 +2181,6 @@ class ObjectSurface(PathOp.ObjectOp):
             if (
                 obj.RotationAxis == obj.DropCutterDir
             ):  # Same == indexed (cutter runs parallel to axis)
-
                 # Translate scan to gcode
                 sumAdv = begIdx
                 for sl in range(0, len(scanLines)):
@@ -2190,10 +2208,17 @@ class ObjectSurface(PathOp.ObjectOp):
                 # Convert rotational scans into gcode
                 rings = linesToPointRings(scanLines)
                 rNum = 0
+                numRings = len(rings)
                 for rng in rings:
-                    rSTG = self._rotationalScanToGcode(obj, rng, rNum, prevDepth, layDep, advances)
+                    # Get next ring for helical interpolation
+                    nextRng = rings[rNum + 1] if rNum < numRings - 1 else None
+                    rSTG = self._rotationalScanToGcode(
+                        obj, rng, rNum, prevDepth, layDep, advances, nextRng
+                    )
                     commands.extend(rSTG)
-                    if arc != 360.0:
+                    # Skip clearance retract if using Continuous-Helix and not at last ring
+                    helicalMode = obj.ScanType == "Rotational-Continuous-Helix"
+                    if arc != 360.0 and not (helicalMode and rNum < numRings - 1):
                         clrZ = self.layerEndzMax + self.SafeHeightOffset
                         commands.append(Path.Command("G0", {"Z": clrZ, "F": self.vertRapid}))
                     rNum += 1
@@ -2399,9 +2424,54 @@ class ObjectSurface(PathOp.ObjectOp):
 
         return output
 
-    def _rotationalScanToGcode(self, obj, RNG, rN, prvDep, layDep, advances):
-        """_rotationalScanToGcode(obj, RNG, rN, prvDep, layDep, advances) ...
-        Convert rotational scan data to gcode path commands."""
+    def _normalizeAngle(self, angle):
+        """Normalize angle to 0-360 range."""
+        while angle < 0:
+            angle += 360.0
+        while angle >= 360.0:
+            angle -= 360.0
+        return angle
+
+    def _shortestAnglePath(self, fromAngle, toAngle):
+        """Calculate shortest angular path from fromAngle to toAngle.
+
+        Returns:
+            Tuple of (target_angle, angular_distance)
+            target_angle may be outside 0-360 range for continuous rotation
+        """
+        fromAngle = self._normalizeAngle(fromAngle)
+        toAngle = self._normalizeAngle(toAngle)
+
+        # Calculate both forward and backward distances
+        forward = toAngle - fromAngle
+        if forward < 0:
+            forward += 360.0
+
+        backward = fromAngle - toAngle
+        if backward < 0:
+            backward += 360.0
+
+        # Choose shorter path
+        if forward <= backward:
+            # Move forward
+            return fromAngle + forward, forward
+        else:
+            # Move backward
+            return fromAngle - backward, backward
+
+    def _rotationalScanToGcode(self, obj, RNG, rN, prvDep, layDep, advances, nextRNG=None):
+        """_rotationalScanToGcode(obj, RNG, rN, prvDep, layDep, advances, nextRNG=None) ...
+        Convert rotational scan data to gcode path commands.
+
+        Supports three optimization modes:
+        - None: Always resets to starting angle (legacy behavior)
+        - Continuous: Maintains current rotational position across scan lines
+        - Shortest Path: Chooses shortest angular distance to next position
+
+        Supports helical interpolation mode (Continuous-Helix):
+        - When optMode is "Continuous-Helix" and nextRNG is provided, gradually transitions
+          X/Y/Z from current ring to next ring during rotation, eliminating rapid Z retracts
+        """
         output = []
         nxtAng = 0
         zMax = 0.0
@@ -2417,47 +2487,128 @@ class ObjectSurface(PathOp.ObjectOp):
         if obj.RotationAxis == "Y":
             axisOfRot = "B"
 
-        # Create first point
-        ang = 0.0 + obj.CutterTilt
+        # Determine the rotational mode from ScanType
+        scanType = obj.ScanType
+
+        # Map scan type to mode for backward compatibility with logic
+        if scanType == "Rotational":
+            optMode = "None"  # Legacy indexed mode
+        elif scanType == "Rotational-Continuous":
+            optMode = "Continuous"
+        elif scanType == "Rotational-Continuous-Helix":
+            optMode = "Continuous-Helix"
+        elif scanType == "Rotational-Shortest-Path":
+            optMode = "Shortest-Path"
+        else:
+            optMode = "None"  # Planar or unknown
+
+        # Determine if helical mode is active
+        helicalMode = optMode == "Continuous-Helix"
+
+        # Initialize or retrieve current rotation angle
+        if optMode == "None" or not hasattr(self, "_currentRotationAngle"):
+            # Legacy behavior: always start from 0 + tilt
+            ang = 0.0 + obj.CutterTilt
+            self._currentRotationAngle = ang
+        elif optMode in ["Continuous", "Continuous-Helix", "Shortest-Path"]:
+            # Use current rotation position
+            ang = self._currentRotationAngle
+
         pnt = RNG[0]
 
         # Adjust feed rate based on radius/circumference of cutter.
         # Original feed rate based on travel at circumference.
         if rN > 0:
-            if pnt.z >= self.layerEndzMax:
-                clrZ = pnt.z + 5.0
-                output.append(Path.Command("G1", {"Z": clrZ, "F": self.vertRapid}))
+            if not helicalMode:
+                # Legacy behavior: rapid to clearance if not using helical mode
+                if pnt.z >= self.layerEndzMax - FLOAT_EPSILON:
+                    clrZ = pnt.z + 5.0
+                    output.append(Path.Command("G1", {"Z": clrZ, "F": self.vertRapid}))
+            # If helical mode, we're already at the right position from previous ring
         else:
             output.append(Path.Command("G1", {"Z": self.clearHeight, "F": self.vertRapid}))
 
-        output.append(Path.Command("G0", {axisOfRot: ang, "F": self.axialFeed}))
-        output.append(Path.Command("G1", {"X": pnt.x, "Y": pnt.y, "F": self.axialFeed}))
-        output.append(Path.Command("G1", {"Z": pnt.z, "F": self.axialFeed}))
+        # Move to starting angle and position (skip if in helical mode and not first ring)
+        if rN == 0 or not helicalMode:
+            output.append(Path.Command("G0", {axisOfRot: ang, "F": self.axialFeed}))
+            output.append(Path.Command("G1", {"X": pnt.x, "Y": pnt.y, "F": self.axialFeed}))
+            # First ring or non-helical: plunge to starting Z
+            output.append(Path.Command("G1", {"Z": pnt.z, "F": self.axialFeed}))
 
         lenRNG = len(RNG)
         lastIdx = lenRNG - 1
+
+        # Calculate interpolation for helical mode
+        useHelical = helicalMode and nextRNG is not None and len(nextRNG) == lenRNG
+
         for i in range(0, lenRNG):
             if i < lastIdx:
-                nxtAng = ang + advances[i + 1]
+                # Calculate next angle based on optimization mode
+                if optMode == "Shortest-Path":
+                    # Calculate target angle in normalized space
+                    targetAngle = (ang % 360.0) + advances[i + 1]
+                    # Find shortest path to target
+                    nxtAng, _ = self._shortestAnglePath(ang, targetAngle)
+                elif optMode in ["Continuous", "Continuous-Helix"]:
+                    # Simply add the advance (continuous rotation)
+                    nxtAng = ang + advances[i + 1]
+                else:
+                    # Legacy: simple addition
+                    nxtAng = ang + advances[i + 1]
+
                 nxt = RNG[i + 1]
+            elif useHelical and i == lastIdx:
+                # At last point in helical mode, still need to calculate next angle
+                # for the next ring to start from the correct position
+                nxtAng = ang + advances[0]  # Use first advance of next rotation
 
-            if pnt.z > zMax:
-                zMax = pnt.z
+            # Determine position for this point
+            # For helical mode, interpolate between current and next ring
+            if useHelical:
+                # Calculate interpolation factor (0.0 at start, 1.0 at end)
+                t = float(i) / float(lenRNG - 1)
 
-            output.append(
-                Path.Command(
-                    "G1",
-                    {
-                        "X": pnt.x,
-                        "Y": pnt.y,
-                        "Z": pnt.z,
-                        axisOfRot: ang,
-                        "F": self.axialFeed,
-                    },
+                # Interpolate X, Y, and Z between current ring point and next ring point
+                # At the last point (i == lastIdx), we interpolate to the START of next ring
+                if i == lastIdx:
+                    # Transition from current ring's last point to next ring's first point
+                    xVal = pnt.x + t * (nextRNG[0].x - pnt.x)
+                    yVal = pnt.y + t * (nextRNG[0].y - pnt.y)
+                    zVal = pnt.z + t * (nextRNG[0].z - pnt.z)
+                else:
+                    # Interpolate to corresponding point in next ring
+                    xVal = pnt.x + t * (nextRNG[i].x - pnt.x)
+                    yVal = pnt.y + t * (nextRNG[i].y - pnt.y)
+                    zVal = pnt.z + t * (nextRNG[i].z - pnt.z)
+            else:
+                # Non-helical: use current ring's values
+                xVal = pnt.x
+                yVal = pnt.y
+                zVal = pnt.z
+
+            if zVal > zMax:
+                zMax = zVal
+
+            # In helical mode, skip the last point as it will be the first point of next ring
+            if not (useHelical and i == lastIdx):
+                output.append(
+                    Path.Command(
+                        "G1",
+                        {
+                            "X": xVal,
+                            "Y": yVal,
+                            "Z": zVal,
+                            axisOfRot: ang,
+                            "F": self.axialFeed,
+                        },
+                    )
                 )
-            )
             pnt = nxt
             ang = nxtAng
+
+        # Save current rotation angle for next scan line
+        if optMode in ["Continuous", "Continuous-Helix", "Shortest-Path"]:
+            self._currentRotationAngle = ang
 
         # Save layer end point for use in transitioning to next layer
         self.layerEndPnt = RNG[0]
