@@ -513,6 +513,7 @@ SET(Tests_SRCS
     CAMTests/TestLinkingGenerator.py
     CAMTests/TestMach3Mach4Post.py
     CAMTests/TestPathAdaptive.py
+    CAMTests/TestPathCommandAnnotations.py
     CAMTests/TestPathCore.py
     CAMTests/TestPathDepthParams.py
     CAMTests/TestPathDressupArray.py
