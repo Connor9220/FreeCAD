@@ -51,6 +51,7 @@ PostProcessorDefaultArgs = "PostProcessorDefaultArgs"
 PostProcessorBlacklist = "PostProcessorBlacklist"
 PostProcessorOutputFile = "PostProcessorOutputFile"
 PostProcessorOutputPolicy = "PostProcessorOutputPolicy"
+SanityReportOutputFile = "PathSanityReportOutputFile"
 
 ToolGroup = PreferencesGroup + "/Tools"
 ToolPath = "ToolPath"
@@ -68,6 +69,16 @@ WarningSuppressOpenCamLib = "WarningSuppressOpenCamLib"
 WarningSuppressVelocity = "WarningSuppressVelocity"
 EnableExperimentalFeatures = "EnableExperimentalFeatures"
 EnableAdvancedOCLFeatures = "EnableAdvancedOCLFeatures"
+
+
+def setSanityReportOutputFile(fileName):
+    pref = preferences()
+    pref.SetString(SanityReportOutputFile, fileName)
+
+
+def defaultSanityReportOutputFile():
+    pref = preferences()
+    return pref.GetString(SanityReportOutputFile, "")
 
 
 _observers = defaultdict(list)  # maps group name to callback functions
