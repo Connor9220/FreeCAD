@@ -1,3 +1,29 @@
+def substitute_report_path_and_filename(template, job):
+    """
+    Substitute %D, %d, %j, %M in a path and %d, %j in a filename for report output.
+    - %D: directory of the active document
+    - %d: name of the active document (without extension)
+    - %j: name of the active Job object
+    - %M: user macro directory
+    """
+    import os
+    doc = getattr(job, 'Document', None)
+    doc_path = getattr(doc, 'FileName', None) if doc else None
+    doc_label = getattr(doc, 'Label', None) if doc else None
+    job_label = getattr(job, 'Label', None)
+    macro_dir = os.path.dirname(FreeCAD.getUserMacroDir())
+
+    substitutions = {
+        '%D': os.path.dirname(doc_path) if doc_path else '',
+        '%d': os.path.splitext(os.path.basename(doc_path))[0] if doc_path else (doc_label or ''),
+        '%j': job_label or '',
+        '%M': macro_dir,
+    }
+    # Apply all substitutions
+    result = template
+    for key, value in substitutions.items():
+        result = result.replace(key, value)
+    return result
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
 # ***************************************************************************
