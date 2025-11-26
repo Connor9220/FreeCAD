@@ -96,69 +96,104 @@ class TestPathToolMachineSerializer(unittest.TestCase):
         self.test_mill.spindle_axis.rigidity_y = FreeCAD.Units.Quantity("0.001 mm/N")
 
         self.lathe_yaml_str = """
-type: Lathe
-name: StandardLathe
-label: Standard Lathe
-icon: lathe
-feature_flags:
-  - TURNING_2D
-children:
-  - type: Spindle
-    name: MainSpindle
-    max_rpm: 5000 rpm
-    max_power: 3 kW
-    children:
-      - type: AngularAxis
-        name: A
-        angular_rigidity: 12 deg/N
-        rigidity_x: 0.001 mm/N
-        rigidity_y: 0.001 mm/N
-        children: []
-  - type: LinearAxis
-    name: Z
-    max_feed: 1000 mm/min
-    children:
-      - type: LinearAxis
-        name: X
-        max_feed: 1000 mm/min
-        children:
-          - type: MachineComponent
-            name: ToolHolder
+{
+  "type": "Lathe",
+  "name": "StandardLathe",
+  "label": "Standard Lathe",
+  "icon": "lathe",
+  "feature_flags": [
+    "TURNING_2D"
+  ],
+  "children": [
+    {
+      "type": "Spindle",
+      "name": "MainSpindle",
+      "max_rpm": "5000 rpm",
+      "max_power": "3 kW",
+      "children": [
+        {
+          "type": "AngularAxis",
+          "name": "A",
+          "angular_rigidity": "12 deg/N",
+          "rigidity_x": "0.001 mm/N",
+          "rigidity_y": "0.001 mm/N",
+          "children": []
+        }
+      ]
+    },
+    {
+      "type": "LinearAxis",
+      "name": "Z",
+      "max_feed": "1000 mm/min",
+      "children": [
+        {
+          "type": "LinearAxis",
+          "name": "X",
+          "max_feed": "1000 mm/min",
+          "children": [
+            {
+              "type": "MachineComponent",
+              "name": "ToolHolder"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
 """
 
         self.mill_yaml_str = """
-type: Mill
-name: Standard3AxisMill
-label: Standard 3-Axis Mill
-icon: mill
-post_processor: grbl
-feature_flags:
-  - MILLING_3D
-  - RIGID_TAPPING
-children:
-  - type: LinearAxis
-    name: X
-    max_feed: 2000 mm/min
-    children:
-      - type: LinearAxis
-        name: Y
-        max_feed: 2000 mm/min
-        children:
-          - type: LinearAxis
-            name: Z
-            max_feed: 1500 mm/min
-            children:
-              - type: Spindle
-                name: MainSpindle
-                max_rpm: 24000 rpm
-                max_power: 5 kW
-                children:
-                  - type: AngularAxis
-                    name: A
-                    angular_rigidity: 12 deg/N
-                    rigidity_x: 0.001 mm/N
-                    rigidity_y: 0.001 mm/N
-                    children: []
+{
+  "type": "Mill",
+  "name": "Standard3AxisMill",
+  "label": "Standard 3-Axis Mill",
+  "icon": "mill",
+  "post_processor": "grbl",
+  "feature_flags": [
+    "MILLING_3D",
+    "RIGID_TAPPING"
+  ],
+  "children": [
+    {
+      "type": "LinearAxis",
+      "name": "X",
+      "max_feed": "2000 mm/min",
+      "children": [
+        {
+          "type": "LinearAxis",
+          "name": "Y",
+          "max_feed": "2000 mm/min",
+          "children": [
+            {
+              "type": "LinearAxis",
+              "name": "Z",
+              "max_feed": "1500 mm/min",
+              "children": [
+                {
+                  "type": "Spindle",
+                  "name": "MainSpindle",
+                  "max_rpm": "24000 rpm",
+                  "max_power": "5 kW",
+                  "children": [
+                    {
+                      "type": "AngularAxis",
+                      "name": "A",
+                      "angular_rigidity": "12 deg/N",
+                      "rigidity_x": "0.001 mm/N",
+                      "rigidity_y": "0.001 mm/N",
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
 """
 
     def test_serialize_lathe(self):
