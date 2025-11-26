@@ -194,6 +194,7 @@ class LibraryBrowserWidget(ToolBitBrowserWidget):
         for asset in getattr(self, "_all_assets", []):
             parent = asset.get_shape_name().title()
             subtype = getattr(asset, "subtype", None)
+            print((parent, subtype))
             if subtype:
                 subtype_disp = subtype.title()
                 type_map.setdefault(parent, set()).add(subtype_disp)

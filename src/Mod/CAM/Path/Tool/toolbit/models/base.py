@@ -134,6 +134,9 @@ class ToolBit(Asset, ABC):
             attrs["shape-type"] = attrs["shape"]
         shape_type = attrs.get("shape-type")
         shape_class = ToolBitShape.get_shape_class_from_id(shape_id, shape_type)
+
+        print(shape_type, shape_id, shape_class)
+
         if not shape_class:
             Path.Log.debug(
                 f"Failed to find usable shape for ID '{shape_id}'"
@@ -150,7 +153,24 @@ class ToolBit(Asset, ABC):
                 Path.Log.debug(f"ToolBit.from_dict: Shape asset {shape_asset_uri} not found.")
                 # Rely on the fallback below
             else:
-                return cls.from_shape(tool_bit_shape, attrs, id=attrs.get("id"))
+                toolbit = cls.from_shape(tool_bit_shape, attrs, id=attrs.get("id"))
+                # Store the alias/subtype if shape-type or shape is an alias for the class
+                if (
+                    shape_type
+                    and shape_type.lower() != shape_class.name.lower()
+                    and hasattr(shape_class, "aliases")
+                    and shape_type.lower() in shape_class.aliases
+                ):
+                    toolbit.subtype = shape_type.lower()
+                elif (
+                    shape_id.lower() != shape_class.name.lower()
+                    and hasattr(shape_class, "aliases")
+                    and shape_id.lower() in shape_class.aliases
+                ):
+                    toolbit.subtype = shape_id.lower()
+                else:
+                    toolbit.subtype = None
+                return toolbit
 
         # Ending up here means we either could not load the shape asset,
         # or we are in shallow mode and do not want to load it.
@@ -165,8 +185,19 @@ class ToolBit(Asset, ABC):
         # Now that we have a shape, create the toolbit instance.
         toolbit = cls.from_shape(tool_bit_shape, attrs, id=attrs.get("id"))
 
-        # --- NEW: Store the alias/subtype if shape_id is an alias ---
-        if shape_id.lower() != shape_class.name.lower() and shape_id.lower() in shape_class.aliases:
+        # Store the alias/subtype if shape-type or shape is an alias for the class
+        if (
+            shape_type
+            and shape_type.lower() != shape_class.name.lower()
+            and hasattr(shape_class, "aliases")
+            and shape_type.lower() in shape_class.aliases
+        ):
+            toolbit.subtype = shape_type.lower()
+        elif (
+            shape_id.lower() != shape_class.name.lower()
+            and hasattr(shape_class, "aliases")
+            and shape_id.lower() in shape_class.aliases
+        ):
             toolbit.subtype = shape_id.lower()
         else:
             toolbit.subtype = None
