@@ -143,10 +143,14 @@ class PostProcessor:
             # process only selected operations
             self._job = job["job"]
             self._operations = job["operations"]
-        else:
+        elif job is not None:
             # get all operations from 'Operations' group
             self._job = job
             self._operations = getattr(job.Operations, "Group", [])
+        else:
+            # job is None (e.g., when just inspecting post processor settings)
+            self._job = None
+            self._operations = []
 
     @classmethod
     def exists(cls, processor):
@@ -411,8 +415,11 @@ class PostProcessor:
         args: ParserArgs
         flag: bool
 
+        # Handle the case where job is None (e.g., when just inspecting settings)
+        post_processor_args = self._job.PostProcessorArgs if self._job else ""
+
         (flag, args) = PostUtilsArguments.process_shared_arguments(
-            self.values, self.parser, self._job.PostProcessorArgs, self.all_visible, "-"
+            self.values, self.parser, post_processor_args, self.all_visible, "-"
         )
         #
         # If the flag is True, then all of the arguments should be processed normally.
@@ -519,7 +526,8 @@ class WrapperPost(PostProcessor):
         for idx, section in enumerate(postables):
             partname, sublist = section
 
-            gcode = self.script_module.export(sublist, "-", self._job.PostProcessorArgs)
+            post_processor_args = self._job.PostProcessorArgs if self._job else ""
+            gcode = self.script_module.export(sublist, "-", post_processor_args)
             Path.Log.debug(f"Exported {partname}")
             g_code_sections.append((partname, gcode))
         return g_code_sections

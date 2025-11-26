@@ -19,10 +19,9 @@
 # * USA                                                                   *
 # * *
 # ***************************************************************************
-import yaml
+import json
 from typing import Mapping, Optional, cast
 import FreeCAD
-import yaml
 from ...assets import Asset, AssetUri, AssetSerializer
 from ..models import Machine, Lathe, Mill
 
@@ -48,7 +47,7 @@ class MachineSerializer(AssetSerializer):
 
         attrs = asset.to_dict()
 
-        return yaml.dump(attrs, sort_keys=True, indent=2).encode("utf-8")
+        return json.dumps(attrs, sort_keys=True, indent=2).encode("utf-8")
 
     @classmethod
     def deserialize(
@@ -58,7 +57,7 @@ class MachineSerializer(AssetSerializer):
         dependencies: Optional[Mapping[AssetUri, Asset]],
     ) -> Machine:
         """Creates a Machine object from serialized data and resolved dependencies."""
-        attrs = yaml.safe_load(data.decode("utf-8", "ignore"))
+        attrs = json.loads(data.decode("utf-8", "ignore"))
         attrs["id"] = id
         machine_type = attrs.get("type")
         if machine_type == "Lathe":

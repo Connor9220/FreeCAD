@@ -569,7 +569,6 @@ SET(Tests_SRCS
     CAMTests/TestPathToolBitEditorWidget.py
     CAMTests/TestPathToolBitListWidget.py
     CAMTests/TestPathToolBitPropertyEditorWidget.py
-    CAMTests/TestPathToolDocObject.py
     CAMTests/TestPathToolDocumentObjectEditorWidget.py
     CAMTests/TestPathToolShapeClasses.py
     CAMTests/TestPathToolShapeDoc.py
