@@ -39,731 +39,145 @@ import Path.Post.UtilsExport as PostUtilsExport
 import Path.Post.UtilsParse as PostUtilsParse
 
 import Path
-import FreeCAD
-import FreeCADGui
-
-translate = FreeCAD.Qt.translate
-
-DEBUG = False
-if DEBUG:
-    Path.Log.setLevel(Path.Log.Level.DEBUG, Path.Log.thisModule())
-    Path.Log.trackModule(Path.Log.thisModule())
-else:
-    Path.Log.setLevel(Path.Log.Level.INFO, Path.Log.thisModule())
-
-#
-# Define some types that are used throughout this file.
-#
-Defaults = dict[str | bool]
-FormatHelp = str
-GCodeOrNone = [str | None]
-GCodeSections = list[tuple[str, GCodeOrNone]]
-Parser = argparse.ArgumentParser
-ParserArgs = [None | str | argparse.Namespace]
-Postables = [list | list[tuple[str, list]]]
-Section = tuple[str, list]
-Sublist = list
-Units = str
-Values = dict[str, Any]
-Visible = dict[str, bool]
-nl = "\n"  # particularly useful in a f-string
-PreventGuiTimeout = 1  # seconds
-
-SpeedPrecisions = {"G20": 2, "G21": 1}  # for in/sec, for mm/sec
-MinSpeeds = {"G20": 0.05, "G21": 1.3}  # for in/sec, for mm/sec
-
-
-class Opensbp(PostProcessor):
-    """For ShopBot (or other opensbp controllers), this is a CAM postprocessor.
-    We have to translate gcode to opensbp, so the output is NOT gcode.
-    Typically, you'd want a .sbp file extension.
-
-    Special behaviors:
-    * Many defaults have changed: read the tooltip for the Arguments
-    * This always tests the ShopBot app/machine units (see --inches --metric), and on the machine will give an error and exit if in the wrong units. No more mismatches.
-    * G54 (fixture/coordinate-system) is accepted, but is a noop (because it's the default in Operations). Others (G55 etc) are not-accepted.
-    * Note the default of --tool-change == False. Use that for manual tool change, but you only get 1 tool per file. True means call C9. Note: C9 seems to not work when there is no auto-tool-changer (corrupts units and erases your settings file!)
-    * This does arc gcodes (G02 and G03), so helical operations should work.
-    * This does Probe (G38.2), defaults to the same folder as the .sbp, and .txt as the extension for output filename
-    * Relative movement (G91) is not supported.
-    * opensbp commands can be in-lined via a comment:
-            (MC_RUN_COMMAND: <opensbpcommand>)
-    * By default, this post-processor fails if it sees a gcode it doesn't understand. but see --abort-on-unknown and --allow-unknown
-    * Do opensbp prompt (dialog-box) behavior like this:
-        (this comment becomes a dialog-box if followed by M00)
-        M00
-    * --modal only applies to G00 and G01. Notably NOT to arcs.
-    * Note that --preamble occurs before the machine-units are set, could be a problem! (not under our control)
-    # preamble/postamble are G-Code.
-    * Most optimizations assume that the instruction stream isn't interrupted with manually added commands (e.g. assumes the xyz position from the previous instructions). So, don't stop, and insert commands if you've used any of the optimizations.
-    * This always sets the move & jog speeds (feed and rapid) at the beginning of each operation, by fetching the Tool speeds. If rapid-speeds are 0.0, it will not set the jog-speed, so will use the machine setting.
-    * For spindle speed changes, your ShopBot C6 "cut" command should be configured for having-a-speed-control-module, or for not having. It will prompt you if configured for not-having the module.
-    * The A and B axis are not supported
-    """
-
-    def __init__(
-        self,
-        job,
-        tooltip=translate("CAM", "see property below"),
-        tooltipargs=[""],
-        units="Metric",
-    ) -> None:
-        super().__init__(
-            job=job,
-            tooltip=tooltip,
-            tooltipargs=tooltipargs,
-            units=units,
-        )
-        self.reinitialize()
-        Path.Log.debug("Refactored opensbp post processor initialized.")
-
-    def reinitialize(self) -> None:
-        """Initialize or reinitialize the 'core' data structures for the postprocessor."""
-        #
-        # This is also used to reinitialize the data structures between tests.
-        #
-        self.values: Values = {}
-        self.init_values(self.values)
-        # debug_str = "\n".join(f"{k}:{self.values[k]}" for k in sorted(self.values.keys())); print(f"### .values\n{debug_str}")
-
-        self.argument_defaults: Defaults = {}
-        self.init_argument_defaults(self.argument_defaults)
-        Path.Log.debug(f".argument_defaults\n{self.argument_defaults}")
-        self.arguments_visible: Visible = {}
-        self.init_arguments_visible(self.arguments_visible)
-        self.parser: Parser = self.init_arguments(
-            self.values, self.argument_defaults, self.arguments_visible
-        )
-        self.arguments = None  # the parser.parse_args result
-
-        #
-        # Create another parser just to get a list of all possible arguments
-        # that may be output using --output_all_arguments.
-        #
-        self.all_arguments_visible: Visible = {}
-        for k in iter(self.arguments_visible):
-            self.all_arguments_visible[k] = True
-        self.all_visible: Parser = self.init_arguments(
-            self.values, self.argument_defaults, self.all_arguments_visible
-        )
-
-    def init_values(self, values: Values) -> None:
-        """Initialize values that are used throughout the postprocessor."""
-        #
-        PostUtilsArguments.init_shared_values(values)
-        #
-        # Set any values here that need to override the default values set
-        # in the init_shared_values routine.
-        #
-
-        # Used in the argparser code as the "name" of the postprocessor program.
-        values["MACHINE_NAME"] = "opensbp"
-
-        values.update(
-            {
-                "DRILL_CYCLES_TO_TRANSLATE": ["G73", "G81", "G82", "G83", "G85"],
-                "ENABLE_COOLANT": False,
-                "ENABLE_MACHINE_SPECIFIC_COMMANDS": True,
-                "LINE_INCREMENT": 1,
-                "OUTPUT_PATH_LABELS": True,
-                "OUTPUT_TOOL_CHANGE": False,
-                "OUTPUT_BLANK_LINES": False,
-                # 'PARAMETER_ORDER' : don't care about order, we aren't gcode
-                "POSTAMBLE": "",
-                "POSTPROCESSOR_FILE_NAME": __name__,
-                "PREAMBLE": "",
-                "SPINDLE_WAIT": 3,  # for auto case
-                "STOP_SPINDLE_FOR_TOOL_CHANGE": True,
-                "SUPPRESS_COMMANDS": [
-                    "G54"
-                ],  # we don't have coord-systems (yet) # G99,G98,G80 added automatically
-                # 'TOOL_CHANGE' : we have to generate this dynamically
-                "TRANSLATE_DRILL_CYCLES": True,
-                "UNITS": self._units,
-                "UNIT_SPEED_FORMAT": "mm/s",
-                "USE_TLO": False,
-                "line_number": 1,
-                "ALLOW_UNKNOWN": [],  # --allow-unknown
-                "last_command": None,
-                "first_probe": True,
-                "SPEED_PRECISION": 2,  # updated at process_arguments
-                "MIN_SPEED": 0.05,  # updated at process_arguments
-                # these seem safe defaults
-                "MODAL": True,  # --modal
-                "OUTPUT_DOUBLES": False,  # --axis-modal
-            }
-        )
-        # FIXME: should be done by PostProcessor, isn't there yet in 1.0.
-        if "G38.2" not in self.values["MOTION_COMMANDS"]:
-            self.values["MOTION_COMMANDS"].append("G38.2")
-
-    def init_argument_defaults(self, argument_defaults: Defaults) -> None:
-        """Initialize which arguments (in a pair) are shown as the default argument."""
-        #
-        # Modify which argument to show as the default in flag-type arguments here.
-        # If the value is True, the first argument will be shown as the default.
-        # If the value is False, the second argument will be shown as the default.
-        #
-        # For example, if you want to show Metric mode as the default, use:
-        #   argument_defaults["metric_inch"] = True
-        #
-        # If you want to show that "Don't pop up editor for writing output" is
-        # the default, use:
-        #   argument_defaults["show-editor"] = False.
-        PostUtilsArguments.init_argument_defaults(argument_defaults)
-        #
-        # Note:  You also need to modify the corresponding entries in the "values" hash
-        #        to actually make the default value(s) change to match.
-        #
-
-        # argument_defaults['metric_inches'] = True if From doc
-        argument_defaults["wait-for-spindle"] = self.values["SPINDLE_WAIT"]
-        defaults = {
-            "tlo": False,
-            "translate_drill": True,
-            "tool_change": False,
-            "modal": True,
-            "no_modal": False,
-            "axis_modal": True,
-            "no_axis_modal": False,
-        }
-        for arg, v in defaults.items():
-            argument_defaults[arg] = v
-
-    def init_arguments_visible(self, arguments_visible: Visible) -> None:
-        """Initialize which argument pairs are visible in TOOLTIP_ARGS."""
-        PostUtilsArguments.init_arguments_visible(arguments_visible)
-        #
-        # Modify the visibility of any arguments from the defaults here.
-        #
-        arguments_visible.update(
-            {
-                k: False
-                for k in (
-                    "bcnc",
-                    "tlo",
-                    "translate_drill",
-                    "tool-change",
-                    "line-numbers",
-                    "gcode-comments",  # FIXME: doesn't hide "our" arguments
-                    "axis-modal",
-                    "modal",
-                )
-            }
-        )
-        arguments_visible.update(
-            {
-                k: True
-                for k in (
-                    "return_to",
-                    "wait-for-spindle",
-                )
-            }
-        )
-
-    def init_arguments(
-        self,
-        values: Values,
-        argument_defaults: Defaults,
-        arguments_visible: Visible,
-    ) -> Parser:
-        """Initialize the shared argument definitions."""
-
-        _parser: Parser = PostUtilsArguments.init_shared_arguments(
-            values, argument_defaults, arguments_visible
-        )
-        #
-        # Add any argument definitions that are not shared with all other
-        # postprocessors here.
-        #
-        _parser.add_argument(
-            "--o1",
-            action="store_true",
-            help="--no-comments --no-header",
-        )
-
-        # _parser.add_argument(
-        #    # this should probably be True for most shopbot installations
-        #    "--ab-is-distance", action="store_true", help="A & B axis are distances, default=degrees"
-        # )
-        """ # FIXME: not-implemented
-        _parser.add_argument(
-            "--filter",
-            "--filters",
-            help="a ',' list of filters in FreeCAD.getUserMacroDir()/post to run on the gcode of each Path object, before we see it (i.e. cleanups). A class of same (camelcase) name as file, __init__(self,objectslist, filename, argstring), .filter(eachpathobj, its-.Commands) -> gcode",
-        )
-        """
-        _parser.add_argument(
-            "--abort-on-unknown",
-            action=argparse.BooleanOptionalAction,
-            help="Generate an error and fail if an unknown gcode is seen. default=True",
-            default=True,
-        )
-        _parser.add_argument(
-            "--allow-unknown",
-            help="if --abort-on-unknown, allow these gcodes, but change them to a comment. E.g. --allow-unknown G55,G56. Always includes G54,G99,G98,G80",
-        )
-        _parser.add_argument(
-            "--native-rapid-fallback",
-            action=argparse.BooleanOptionalAction,
-            help="Use machine's rapid speeds if ToolController rapid speeds are zero, default=true. --no-native-rapid-fallback causes error on zeros.",
-            default=True,
-        )
-        _parser.add_argument(
-            "--gcode-comments",
-            action=argparse.BooleanOptionalAction,
-            # help="Add the original gcode as a comment, for debugging",
-            help=argparse.SUPPRESS,
-            default=False,
-        )
-
-        return _parser
-
-    def process_arguments(self) -> tuple[bool, ParserArgs]:
-        """Process any arguments to the postprocessor."""
-        #
-        # This function is separated out to make it easier to inherit from this postprocessor
-        #
-        args: ParserArgs
-        flag: bool
-
-        (flag, args) = PostUtilsArguments.process_shared_arguments(
-            self.values, self.parser, self._job.PostProcessorArgs, self.all_visible, "-"
-        )
-        #
-        # If the flag is True, then all of the arguments should be processed normally.
-        #
-        if flag:
-            #
-            # Process any additional arguments here.
-            #
-            #
-            # Update any variables that might have been modified while processing the arguments.
-            #
-            self._units = self.values["UNITS"]
-            self.values["UNIT_SPEED_FORMAT"] = (
-                "mm/s" if self.values["UNIT_FORMAT"] == "mm" else "in/s"
-            )
-            self.values["SPEED_PRECISION"] = SpeedPrecisions[self.values["UNITS"]]
-            self.values["MIN_SPEED"] = MinSpeeds[self.values["UNITS"]]
-
-            if args.allow_unknown:
-                self.values["SUPPRESS_COMMANDS"].extend(
-                    # and canonicalize
-                    [
-                        re.sub(r"^([A-Z])(\d(\.|$))", r"\g<1>0\2", g)
-                        for g in args.allow_unknown.split(",")
-                    ]
-                )
-
-            # too late for .values, so do them by hand
-            arg_sets = {
-                "o1": {
-                    "cli": {
-                        "comments": False,
-                        "no_comments": True,
-                        "no_header": True,
-                        "header": False,
-                    },
-                    "values": {"OUTPUT_HEADER": False, "OUTPUT_COMMENTS": False},
-                },
-            }
-
-            for opt in ("o1", "o2", "o3"):
-                if getattr(args, opt, None):
-                    cli_set = arg_sets[opt]["cli"]
-                    value_set = arg_sets[opt]["values"]
-                    for arg_name, value in cli_set.items():
-                        Path.Log.debug(f"--{opt} set {arg_name}={value}")
-                        setattr(args, arg_name, value)
-                    for value_key, value in value_set.items():
-                        self.values[value_key] = value
-
-        #
-        # If the flag is False, then args is either None (indicating an error while
-        # processing the arguments) or a string containing the argument list formatted
-        # for output.  Either way the calling routine will need to handle the args value.
-        #
-        return (flag, args)
-
-    def process_postables(self) -> GCodeSections:
-        """Postprocess the 'postables' in the job to g code sections."""
-        #
-        # This function is separated out to make it easier to inherit from this postprocessor.
-        #
-        gcode: GCodeOrNone
-        g_code_sections: GCodeSections
-        partname: str
-        postables: Postables
-        section: Section
-        sublist: Sublist
-
-        postables = self._buildPostList()
-
-        Path.Log.debug(f"postables count: {len(postables)}")
-
-        g_code_sections = []
-        # a section seems to be for one output file of gcode (a "split")
-        for _, section in enumerate(postables):
-            # partname is "allitems" if not splitting, and the operation/etc. if splitting
-            # sublist is each "phase" of the operation, like Fixture, ToolController, Operation
-            partname, sublist = section
-
-            # We have to lie about self.values to get some expanded g-code that we rely on
-            # e.g. we rely on comments
-            was_values = copy(self.values)
-            self.values.update(
-                {
-                    "MODAL": False,  # if true, this would elide the gcode "command", which screws us up. so, we do it later.
-                    "OUTPUT_COMMENTS": True,  # we use this to detect operation and...
-                    "OUTPUT_TOOL_CHANGE": True,  # we need this to ensure speeds
-                    "SHOW_MACHINE_UNITS": True,  # we have to set the machine
-                    "AXIS_PRECISION": 5,  # we do calculations, so more precision to prevent rounding errors
-                    "FEED_PRECISION": 5,
-                    "SPINDLE_WAIT": 0,  # we'll do the logic in the right place later
-                }
-            )
-            try:
-                # We get back a processed (expanded) set of gcode
-                # things like pre/post amble, canned-drill expansion, coolant on/off
-                # We could note where each `partname` begins, if we need that
-                #   but we get no access to where each `sublist` starts/ends
-                # `gcode` is a multi-line string
-                gcode = PostUtilsExport.export_common(self.values, sublist, "-")
-            finally:
-                self.values = was_values
-
-            # print(f"-gcode expanded-\n{gcode}--")
-
-            # ToOpenSBP will modify our .values, and not restore them
-            was_values = copy(self.values)
-            try:
-                # Treat each `sublist` as a unit/file, so new instance
-                native = ToOpenSBP(self).translate(gcode)
-            finally:
-                self.values = was_values
-
-            g_code_sections.append((partname, native))
-
-        return g_code_sections
-
-    def export(self) -> GCodeSections:
-        """Process the parser arguments, then postprocess the 'postables'."""
-        args: ParserArgs
-        flag: bool
-
-        Path.Log.debug("Exporting the job")
-        self.reinitialize()
-
-        (flag, args) = self.process_arguments()
-        #
-        # If the flag is True, then continue postprocessing the 'postables'
-        #
-        if flag:
-            self.arguments = args
-            Path.Log.debug(f"cli args {self._job.PostProcessorArgs}")
-            Path.Log.debug(f"argparsed {args}")
-            return self.process_postables()
-        #
-        # The flag is False meaning something unusual happened.
-        #
-        # If args is None then there was an error during argument processing.
-        #
-        if args is None:
-            return None
-        #
-        # Otherwise args will contain the argument list formatted for output
-        # instead of the "usual" gcode.
-        #
-        return [("allitems", args)]  # type: ignore
-
-    @property
-    def tooltip(self):
-        return self.__doc__
-
-    @property
-    def tooltipArgs(self) -> FormatHelp:
-        return self.parser.format_help()
-
-    @property
-    def units(self) -> Units:
-        return self._units
-
-
-def gcode(*commands):
-    """Only for use in class ToOpenSBP, for methods.
-    Decorator to add the function to the translate-map.
-        `commands` is list of Gcodes, i.e. "G54", "G55",
-        specify two digit gcode: e.g. "G01", "M06"
-    """
-
-    def gcode(func):
-        # we really just want to make a map with it
-        # But, we want the map to belong to the class
-        # which doesn't exist at "use" time
-        # so, annotate the method
-        # and collect/insert after the class
-        func._gcode = []
-        for c in commands:
-            func._gcode.append(c)
-            canonical = re.sub(r"^([A-Z])(\d(\.|$))", r"\g<1>0\2", c)
-            if canonical != c:
-                raise Exception(f"Internal: Must be a 2 digit gcode (e.g. G00): @gcode('{c}')")
-
-        # null wrapper
-        # FIXME: I think if we wrap it, then do obj.func(args), we'll get proper inhertance dispatch
-        return func
-
-    return gcode
-
-
-def gcode_insertmap():
-    # see gcode() above. this inserts the map
-    for attr in ToOpenSBP.__dict__.values():
-        if callable(attr) and hasattr(attr, "_gcode"):
-            for g in attr._gcode:
-                ToOpenSBP.DispatchMap[g] = attr
-
-
-class ToOpenSBP:
-    """Translate gcode to opensbp"""
-
-    PositionAxis = "XYZAB"  # though AB is barely supported here
-
-    DispatchMap = {}
-
-    def __init__(self, postprocessor: Opensbp):
-        # we will use specific features (.values[x] and arguments from the opensbp post)
-        self.post = postprocessor
-
-        # xyzf etc state
-        self.current_location = {p: None for p in self.post.values["PARAMETER_ORDER"]}
-        # for our speed-modal
-        self.current_location["ms"] = ["", ""]
-        self.current_location["js"] = ["", ""]
-        self.end_location = [None for x in self.PositionAxis]
-
-        self.set_units = None  # flag and memory of the first time we see a G20/G21 set-units
-        self._postfix = []  # balancing things to add to end
-        self.last_gui_update = 0
-        self.first_tool = True
-        self.first_no_F = True
-
-    def translate(self, gcode):
-        """Entry point, returns the translated contents, e.g. opensbp lines.
-        We rely on self.post to hold some state vars: we reuse self.post.values.
-        We have lost most context, and structuring of the gcode/job at this point,
-        and the export_common() has potentially inserted and translated stuff.
-        So, we repeat some logic from UtilsParse, like "is this a tool change?", etc.
-        Line-numbers are also lost, and won't match the "inspect toolpath commands" g-code.
-        We do have self.post._job
-        """
-        native = ""
-        before_len = len(gcode.split(nl))
-
-        # We reuse the postprocessor.values
-        # So, we have to reset some values
-        self.reset_values()
-        Path.Log.debug(f"post.values {self.post.values}")
-
-        for gcode_line in gcode.split(nl):
-
-            # be nice
-            if time.monotonic() - self.last_gui_update >= PreventGuiTimeout:
-                if "Gui" in dir(FreeCADGui):
-                    FreeCADGui.updateGui()
-                self.last_gui_update = time.monotonic()
-
-            self.post.values["line_number"] += 1  # actual line number
-
-            # we need Path.Commands to work with
-            path_command = self.to_path_command(
-                gcode_line, f"expanded gcode line {self.post.values['line_number']}"
-            )
-            if path_command is None:
-                continue
-
-            # canonicalize to 2 digits
-            if path_command.Name.startswith("("):
-                pass
-            else:
-                # canonicalize to 2 digits
-                # All the @gcode() methods can now assume 2 digits
-                # We have conflated Path.Command.Name and general gcode. this allows us to expand drill, then "post process" that.
-                path_command.Name = re.sub(r"^([A-Z])(\d(\.|$))", r"\g<1>0\2", path_command.Name)
-
-            # print(f"### GCODE [{self.post.values['line_number']}] {path_command.toGCode()}")
-
-            # And now we reproduce most of UtilsParse.parse_a_path
-
-            self.track_by_comments(path_command)
-
-            if self.post.arguments.gcode_comments and not path_command.Name.startswith("("):
-                native += self.comment(
-                    f"[{self.post.values['line_number']}] {path_command.toGCode()}"
-                )
-
-            new_location = [
-                float(path_command.Parameters.get(a, self.current_location.get(a, 0.0)) or 0.0)
-                for a in self.PositionAxis
-            ]
-            skip_modal = False
-
-            if (
-                path_command.Name in {"G00", "G01"}
-                and self.post.values["MODAL"]
-                and new_location == self.end_location
-            ):
-                skip_modal = True
-
-            # one place to figure out our end, used by set_speed()
-            if path_command.Name in self.post.values["MOTION_COMMANDS"]:
-                if self.post.values["MOTION_MODE"] == "G90":
-                    self.end_location = new_location
-                else:
-                    raise Exception("Relative G91 not supported yet")
-                    # FIXME: not tested (relative mode not fully implemented):
-                    # self.end_location = [
-                    #    float(self.current_location[a] or 0.0) + float(path_command.Parameters.get(a, 0.0))
-                    #    for a in self.current_location if a in self.PositionAxis
-                    # ]
-                # print(f"### end at {self.end_location}")
-
-            if skip_modal:
-                rez = ""
-            else:
-                # handle that gcode
-                # print(f"### path_command is {path_command.__class__.__name__} {path_command}")
-                rez = self.dispatch(path_command)
-                # print(f"### translated: {rez.rstrip()}")
-
-            # append to buffer
-            native += rez
-
-            if path_command.Name in self.post.values["MOTION_COMMANDS"]:
-                # does the right thing for position axis, for relative
-                for i, a in enumerate(self.PositionAxis):
-                    self.current_location[a] = self.end_location[i]
-                # all other parameters (especially F)
-                for a, v in path_command.Parameters.items():
-                    if a not in self.PositionAxis:
-                        self.current_location[a] = v
-                # print(f"### current {self.current_location}")
-
-            self.post.values["last_command"] = path_command
-
-        native += self.postfix()
-
-        Path.Log.debug(f"GCode in {before_len} -> out {len(native.split(nl))}")
-        return native
-
-    def postfix(self):
-        rez = ""
-
-        if self._postfix:
-            rez += nl.join(reversed(self._postfix))
-            rez += nl
-
-        return rez
-
-    def reset_values(self):
-        self.post.values.update(
-            {
-                "line_number": 0,
-                "COMMENT_SYMBOL": "'",
-            }
-        )
-
-    def track_by_comments(self, path_command):
-        """Since we've lost the Path objects structure (we only have the gcode str),
-        we'll track things of interest by comments here.
-        """
-        if path_command.Name.startswith("("):
-            if m := (
-                re.match(r"\(Path: ([^)]+)\)", path_command.Name)
-                or re.match(r"\(Begin operation: ([^)]+)\)", path_command.Name)
-                or re.match(r"\(Begin (preamble)\)", path_command.Name)
-            ):
-                self.post.values["Operation"] = m.group(1)
-
-    def to_path_command(self, gcode: str, during: str):
-        """Utility,
-        One gcode line to a Path.Command, with some error handling
-        e.g. to_path_command("G0 X50", "preamble")
-        `during` is explanatory text if we get a conversion error
-        """
-
-        if gcode == "":
-            return None
-
-        pc = Path.Command()
-        try:
-            pc.setFromGCode(gcode)
-        except ValueError as e:
-            # can't tell if it is really 'Badly formatted GCode argument', so just add our gcode to the message
-            message = f"During {during}, {self.location(gcode)}"
-            FreeCAD.Console.PrintError(message)
-            raise ValueError(message) from e
-        return pc
-
-    def dispatch(self, path_command):
-        """The whole point of this class is to put the translate stuff in a modular-unit,
-        and translate g-codes.
-        So, each gcode maps to a function that handles it,
-        so, we use @gcode decorators to collect the gcodes and functions,
-        and we dispatch here.
-        We return a string, which might be multi-line,
-        or '' to mean nothing resulted
-        """
-        command = None
-        if path_command.Name.startswith("("):
-            # sadly, Path.Command doesn't set .Name to "comment", but rather to the comment string
-            command = "comment"
-        else:
-            command = path_command.Name
-
-        # Call the translate handler
-        if command in self.DispatchMap:
-            rez = self.DispatchMap[command](
-                self, path_command
-            )  # careful, doesn't do inheritance lookup
-            return rez
-
-        else:
-            message = f"gcode not handled at {self.location(path_command)}"
-            if (
-                self.post.arguments.abort_on_unknown
-                # FIXME: cf SUPPRESS_UNKNOWN
-                and command not in self.post.values["ALLOW_UNKNOWN"]
-            ):
-                FreeCAD.Console.PrintError(message + "\n")
-                raise NotImplementedError(message)
-            else:
-                FreeCAD.Console.PrintWarning("Skipped:  " + message + "\n")
-                return self.comment(message)
-
-    def location(self, path_command=None):
-        """a message fragment of where we are, and the path_command if you want
-        `path_command` can be a literal-string gcode, or usually a Path.Command
-        """
-        g = (
-            f": {self.post.values['line_number']} {path_command if isinstance(path_command, str) else path_command.toGCode()}"
-            if path_command
-            else ""
-        )
-        return f"{self.post.values['Operation']}{g}"
-
-    def comment(self, message, force=False):
-        """if OUTPUT_COMMENTS, then generate the comment,
-        `force` ignores OUTPUT_COMMENTS and always generates.
-        INCLUDES the \n (nl)!
-        """
-        # note that comments from FreeCAD and export_common are strings with "()"
-        # so, you can't tell what comments came from a Path operation object, or from Path/Post utils
-        # and the parenthesis are preservered, so the final looks like '(blah blah)
-        # Comments from this postprocessor are w/o (), so the final looks like 'our comment
-        if self.post.values["OUTPUT_COMMENTS"] or force:
-            return self.post.values["COMMENT_SYMBOL"] + message + nl
+Path.write(object,"/path/to/file.ncc","post_opensbp")
+"""
+
+"""
+DONE:
+    uses native commands
+    handles feed and jog moves
+    handles XY, Z, and XYZ feed speeds
+    handles arcs
+    support for inch output
+ToDo
+    comments may not format correctly
+    drilling.  Haven't looked at it.
+    many other things
+
+"""
+
+TOOLTIP_ARGS = """
+Arguments for opensbp:
+    --comments          ... insert comments - mostly for debugging
+    --inches            ... convert output to inches
+    --no-header         ... suppress header output
+    --no-show-editor    ... don't show editor, just save result
+"""
+
+now = datetime.datetime.now()
+
+OUTPUT_COMMENTS = False
+OUTPUT_HEADER = True
+SHOW_EDITOR = True
+COMMAND_SPACE = ","
+
+# Preamble text will appear at the beginning of the GCODE output file.
+PREAMBLE = """"""
+# Postamble text will appear following the last operation.
+POSTAMBLE = """"""
+
+# Pre operation text will be inserted before every operation
+PRE_OPERATION = """"""
+
+# Post operation text will be inserted after every operation
+POST_OPERATION = """"""
+
+# Tool Change commands will be inserted before a tool change
+TOOL_CHANGE = """"""
+
+
+CurrentState = {}
+
+
+def getMetricValue(val):
+    return val
+
+
+def getImperialValue(val):
+    return val / 25.4
+
+
+GetValue = getMetricValue
+
+
+def export(objectslist, filename, argstring):
+    global OUTPUT_COMMENTS
+    global OUTPUT_HEADER
+    global SHOW_EDITOR
+    global CurrentState
+    global GetValue
+
+    for arg in argstring.split():
+        if arg == "--comments":
+            OUTPUT_COMMENTS = True
+        if arg == "--inches":
+            GetValue = getImperialValue
+        if arg == "--no-header":
+            OUTPUT_HEADER = False
+        if arg == "--no-show-editor":
+            SHOW_EDITOR = False
+
+    for obj in objectslist:
+        if not hasattr(obj, "Path"):
+            s = "the object " + obj.Name
+            s += " is not a path. Please select only path and Compounds."
+            print(s)
+            return
+
+    CurrentState = {
+        "X": 0,
+        "Y": 0,
+        "Z": 0,
+        "F": 0,
+        "S": 0,
+        "JSXY": 0,
+        "JSZ": 0,
+        "MSXY": 0,
+        "MSZ": 0,
+    }
+    print("postprocessing...")
+    gcode = ""
+
+    # write header
+    if OUTPUT_HEADER:
+        gcode += linenumber() + "'Exported by FreeCAD\n"
+        gcode += linenumber() + "'Post Processor: " + __name__ + "\n"
+        gcode += linenumber() + "'Output Time:" + str(now) + "\n"
+
+    # Write the preamble
+    if OUTPUT_COMMENTS:
+        gcode += linenumber() + "'(begin preamble)\n"
+    for line in PREAMBLE.splitlines(True):
+        gcode += linenumber() + line
+
+    for obj in objectslist:
+
+        # do the pre_op
+        if OUTPUT_COMMENTS:
+            gcode += linenumber() + "'(begin operation: " + obj.Label + ")\n"
+        for line in PRE_OPERATION.splitlines(True):
+            gcode += linenumber() + line
+
+        gcode += parse(obj)
+
+        # do the post_op
+        if OUTPUT_COMMENTS:
+            gcode += linenumber() + "'(finish operation: " + obj.Label + ")\n"
+        for line in POST_OPERATION.splitlines(True):
+            gcode += linenumber() + line
+
+    # do the post_amble
+    if OUTPUT_COMMENTS:
+        gcode += "'(begin postamble)\n"
+    for line in POSTAMBLE.splitlines(True):
+        gcode += linenumber() + line
+
+    if SHOW_EDITOR:
+        dia = PostUtils.GCodeEditorDialog()
+        dia.editor.setPlainText(gcode)
+        result = dia.exec_()
+        if result:
+            final = dia.editor.toPlainText()
         else:
             return ""
 
