@@ -22,6 +22,7 @@
 # ***************************************************************************
 import FreeCAD
 import Path
+from typing import Optional, Mapping
 from ...shape import ToolBitShapeThreadMill
 from ..mixins import RotaryToolBitMixin, CuttingToolMixin
 from .base import ToolBit
@@ -30,9 +31,11 @@ from .base import ToolBit
 class ToolBitThreadMill(ToolBit, CuttingToolMixin, RotaryToolBitMixin):
     SHAPE_CLASS = ToolBitShapeThreadMill
 
-    def __init__(self, shape: ToolBitShapeThreadMill, id: str | None = None):
-        Path.Log.track(f"ToolBitThreadMill __init__ called with shape: {shape}, id: {id}")
-        super().__init__(shape, id=id)
+    def __init__(
+        self, shape: ToolBitShapeThreadMill, id: str | None = None, attrs: Optional[Mapping] = None
+    ):
+        Path.Log.track(f"ToolBitThreadmill __init__ called with shape: {shape}, id: {id}")
+        super().__init__(shape, id=id, attrs=attrs)
         CuttingToolMixin.__init__(self, self.obj)
 
     @property

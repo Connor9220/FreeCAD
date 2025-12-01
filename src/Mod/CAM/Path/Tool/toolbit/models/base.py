@@ -83,7 +83,12 @@ class ToolBit(Asset, ABC):
     asset_type: str = "toolbit"
     SHAPE_CLASS: Type[ToolBitShape]  # Abstract class attribute
 
-    def __init__(self, tool_bit_shape: ToolBitShape, id: Optional[str] = None):
+    def __init__(
+        self,
+        tool_bit_shape: ToolBitShape,
+        id: Optional[str] = None,
+        attrs: Optional[Mapping] = None,
+    ):
         Path.Log.track("ToolBit __init__ called")
         self.id = id if id is not None else str(uuid.uuid4())
         self.obj = DetachedDocumentObject()
@@ -96,10 +101,13 @@ class ToolBit(Asset, ABC):
         self.obj.ShapeID = tool_bit_shape.get_id()
         self.obj.ShapeType = tool_bit_shape.name
         self.obj.Label = tool_bit_shape.label or f"New {tool_bit_shape.name}"
-
         # Initialize properties
         self._update_tool_properties()
-        self.subtype: Optional[str] = None
+
+        # Preserve the original shape-type from attrs (e.g., "compression", "roughing")
+        # This is what the user selected and should be saved back to disk
+        # If not provided, default to the class name (e.g., "Endmill")
+        self._shape_type = attrs.get("shape-type") if attrs else tool_bit_shape.name
 
     def __eq__(self, other):
         """Compare ToolBit objects based on their unique ID."""
@@ -135,8 +143,6 @@ class ToolBit(Asset, ABC):
         shape_type = attrs.get("shape-type")
         shape_class = ToolBitShape.get_shape_class_from_id(shape_id, shape_type)
 
-        print(shape_type, shape_id, shape_class)
-
         if not shape_class:
             Path.Log.debug(
                 f"Failed to find usable shape for ID '{shape_id}'"
@@ -154,22 +160,6 @@ class ToolBit(Asset, ABC):
                 # Rely on the fallback below
             else:
                 toolbit = cls.from_shape(tool_bit_shape, attrs, id=attrs.get("id"))
-                # Store the alias/subtype if shape-type or shape is an alias for the class
-                if (
-                    shape_type
-                    and shape_type.lower() != shape_class.name.lower()
-                    and hasattr(shape_class, "aliases")
-                    and shape_type.lower() in shape_class.aliases
-                ):
-                    toolbit.subtype = shape_type.lower()
-                elif (
-                    shape_id.lower() != shape_class.name.lower()
-                    and hasattr(shape_class, "aliases")
-                    and shape_id.lower() in shape_class.aliases
-                ):
-                    toolbit.subtype = shape_id.lower()
-                else:
-                    toolbit.subtype = None
                 return toolbit
 
         # Ending up here means we either could not load the shape asset,
@@ -185,23 +175,6 @@ class ToolBit(Asset, ABC):
         # Now that we have a shape, create the toolbit instance.
         toolbit = cls.from_shape(tool_bit_shape, attrs, id=attrs.get("id"))
 
-        # Store the alias/subtype if shape-type or shape is an alias for the class
-        if (
-            shape_type
-            and shape_type.lower() != shape_class.name.lower()
-            and hasattr(shape_class, "aliases")
-            and shape_type.lower() in shape_class.aliases
-        ):
-            toolbit.subtype = shape_type.lower()
-        elif (
-            shape_id.lower() != shape_class.name.lower()
-            and hasattr(shape_class, "aliases")
-            and shape_id.lower() in shape_class.aliases
-        ):
-            toolbit.subtype = shape_id.lower()
-        else:
-            toolbit.subtype = None
-
         return toolbit
 
     @classmethod
@@ -212,7 +185,7 @@ class ToolBit(Asset, ABC):
         id: Optional[str] = None,
     ) -> "ToolBit":
         selected_toolbit_subclass = cls._find_subclass_for_shape(tool_bit_shape)
-        toolbit = selected_toolbit_subclass(tool_bit_shape, id=id)
+        toolbit = selected_toolbit_subclass(tool_bit_shape, id=id, attrs=attrs)
         toolbit.label = attrs.get("name") or tool_bit_shape.label
 
         # Get params and attributes.
@@ -941,7 +914,10 @@ class ToolBit(Asset, ABC):
         attrs["id"] = self.id
         attrs["name"] = self.obj.Label
         attrs["shape"] = self._tool_bit_shape.get_id() + ".fcstd"
-        attrs["shape-type"] = self._tool_bit_shape.name
+        if self._tool_bit_shape.name.lower() == self._shape_type.lower():
+            attrs["shape-type"] = self._tool_bit_shape.name
+        else:
+            attrs["shape-type"] = self._shape_type
         attrs["parameter"] = {}
         attrs["attribute"] = {}
 
@@ -1022,4 +998,7 @@ class ToolBit(Asset, ABC):
 
     def get_subtype(self) -> Optional[str]:
         """Returns the alias/subtype used to instantiate this toolbit, if any."""
-        return self.subtype
+        # Only return the subtype if it differs from the class name
+        if self._shape_type.lower() != self._tool_bit_shape.name.lower():
+            return self._shape_type.lower()
+        return None

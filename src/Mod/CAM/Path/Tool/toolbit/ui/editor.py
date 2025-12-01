@@ -27,6 +27,8 @@ from typing import Optional
 from PySide import QtGui, QtCore
 import FreeCAD
 import FreeCADGui
+import os
+from Path.Preferences import getAssetPath
 from ...shape.ui.shapewidget import ShapeWidget
 from ...docobject.ui import DocumentObjectEditorWidget
 from ..models.base import ToolBit
@@ -67,6 +69,14 @@ class ToolBitPropertiesWidget(QtGui.QWidget):
 
         # UI Elements
         self._label_edit = QtGui.QLineEdit()
+        self._toolbit_type_container = QtGui.QWidget()
+        container_layout = QtGui.QHBoxLayout(self._toolbit_type_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        self._toolbit_type_edit = QtGui.QLineEdit()
+        self._toolbit_type_edit.setReadOnly(True)
+        self._toolbit_type_combo = QtGui.QComboBox()
+        container_layout.addWidget(self._toolbit_type_edit)
+        container_layout.addWidget(self._toolbit_type_combo)
         self._id_label = QtGui.QLabel()  # Read-only ID
         self._id_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
 
@@ -82,6 +92,7 @@ class ToolBitPropertiesWidget(QtGui.QWidget):
         toolbit_group_box = QtGui.QGroupBox(translate("CAM", "Toolbit"))
         form_layout = QtGui.QFormLayout(toolbit_group_box)
         form_layout.addRow(translate("CAM", "Label:"), self._label_edit)
+        form_layout.addRow(translate("CAM", "Toolbit Type:"), self._toolbit_type_container)
         form_layout.addRow(translate("CAM", "ID:"), self._id_label)
 
         # Optional tool number edit field.
@@ -122,6 +133,7 @@ class ToolBitPropertiesWidget(QtGui.QWidget):
         # Connections
         self._label_edit.editingFinished.connect(self._on_label_changed)
         self._tool_no_edit.valueChanged.connect(self._on_tool_no_changed)
+        self._toolbit_type_combo.currentIndexChanged.connect(self._on_toolbit_type_changed)
         self._property_editor.propertyChanged.connect(self.toolBitChanged)
 
         if toolbit:
@@ -141,6 +153,14 @@ class ToolBitPropertiesWidget(QtGui.QWidget):
             self._tool_no = value
             self.toolNoChanged.emit(value)
 
+    def _on_toolbit_type_changed(self, index):
+        """Update the toolbit's type when the combo changes."""
+        if self._toolbit:
+            selected = self._toolbit_type_combo.itemData(index)
+            self._toolbit._shape_type = selected  # Save the user's selection
+            self._toolbit.obj.ShapeType = selected
+            self.toolBitChanged.emit()
+
     def load_toolbit(self, toolbit: ToolBit):
         """Load a ToolBit object into the editor."""
         self._toolbit = toolbit
@@ -148,6 +168,10 @@ class ToolBitPropertiesWidget(QtGui.QWidget):
             # Clear or disable fields if toolbit is invalid
             self._label_edit.clear()
             self._label_edit.setEnabled(False)
+            self._toolbit_type_edit.clear()
+            self._toolbit_type_edit.hide()
+            self._toolbit_type_combo.clear()
+            self._toolbit_type_combo.hide()
             self._id_label.clear()
             self._tool_no_edit.clear()
             self._property_editor.setObject(None)
@@ -164,6 +188,74 @@ class ToolBitPropertiesWidget(QtGui.QWidget):
         self._label_edit.setEnabled(True)
         self._label_edit.setText(self._toolbit.obj.Label)
         self._id_label.setText(self._toolbit.get_id())
+
+        # Set toolbit type
+        shape_class = self._toolbit._tool_bit_shape.__class__
+        base = shape_class.name
+        aliases = shape_class.aliases
+        current_type = (
+            self._toolbit._shape_type
+            if hasattr(self._toolbit, "_shape_type")
+            else shape_class.name.lower()
+        )
+        shape_dir = os.path.join(getAssetPath(), "Tools", "Shape")
+
+        has_file = (
+            bool(current_type)
+            and current_type != base.lower()
+            and os.path.isfile(os.path.join(shape_dir, f"{current_type}.fcstd"))
+        )
+
+        is_single_lowercase = len(aliases) == 1 and aliases[0] == base.lower()
+
+        if has_file or is_single_lowercase:
+            # Read-only
+            raw_text = current_type or base.lower()
+            display_text = raw_text.replace("_", " ").replace("-", " ").title()
+            self._toolbit_type_edit.setText(display_text)
+            self._toolbit_type_edit.show()
+            self._toolbit_type_combo.hide()
+        else:
+            # Editable - populate combo with aliases that don't have independent shape files
+            self._toolbit_type_combo.clear()
+
+            # Filter out aliases that have their own .fcstd files (independent geometry)
+            editable_aliases = []
+            for alias in aliases:
+                # Check if this alias has its own shape file (different geometry)
+                if alias != base.lower() and os.path.isfile(
+                    os.path.join(shape_dir, f"{alias}.fcstd")
+                ):
+                    # This alias has independent geometry, exclude it from dropdown
+                    continue
+                editable_aliases.append(alias)
+
+            # Populate combo with editable aliases only
+            for alias in editable_aliases:
+                display = alias.replace("_", " ").replace("-", " ").title()
+                self._toolbit_type_combo.addItem(display, alias)
+
+            # Set current selection
+            for i in range(self._toolbit_type_combo.count()):
+                if self._toolbit_type_combo.itemData(i) == current_type:
+                    self._toolbit_type_combo.setCurrentIndex(i)
+                    break
+            else:
+                # No match found - check if current_type is the base class name
+                if self._toolbit_type_combo.count() > 0:
+                    if current_type == base:
+                        # It's using the class name (e.g., "Endmill") - keep it
+                        # Set to first alias in combo for display but don't change _shape_type
+                        self._toolbit_type_combo.setCurrentIndex(0)
+                    else:
+                        # Unknown type - default to first alias
+                        self._toolbit_type_combo.setCurrentIndex(0)
+                        self._toolbit._shape_type = (
+                            editable_aliases[0] if editable_aliases else base
+                        )
+            self._toolbit_type_edit.hide()
+            self._toolbit_type_combo.show()
+
         self._tool_no_edit.setValue(int(self._tool_no or 1))
 
         # Get properties and suffixes

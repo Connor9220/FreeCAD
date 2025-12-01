@@ -188,48 +188,52 @@ class LibraryBrowserWidget(ToolBitBrowserWidget):
             Path.Preferences.setLastToolLibrary(str(library.get_uri()))
 
     def _get_available_tool_types(self):
-        """Get all available tool types and subtypes, grouped for display."""
-        # Build a mapping: {ParentType: set(subtypes)}
+        """Get all available tool types and subtypes, grouped for display.
+        Returns list of tuples: (display_text, actual_value)
+        """
+        # Build a mapping: {ParentType: {actual_subtype: display_subtype}}
         type_map = {}
         for asset in getattr(self, "_all_assets", []):
-            parent = asset.get_shape_name().title()
-            subtype = getattr(asset, "subtype", None)
-            print((parent, subtype))
+            parent = asset.get_shape_name()  # Preserve original case (e.g., "Probe")
+            subtype = asset.get_subtype()
             if subtype:
-                subtype_disp = subtype.title()
-                type_map.setdefault(parent, set()).add(subtype_disp)
+                # Preserve underscores/hyphens but make displayable
+                subtype_disp = subtype.replace("_", " ").replace("-", " ").title()
+                type_map.setdefault(parent, {})[subtype] = subtype_disp
             else:
-                type_map.setdefault(parent, set())
+                type_map.setdefault(parent, {})
         # Flatten for combo: parent, then indented subtypes
+        # Return tuples of (display, value)
         result = []
         for parent in sorted(type_map):
-            result.append(parent)
-            for subtype in sorted(type_map[parent]):
-                result.append(f"  {subtype}")  # Indent for display
+            result.append((parent, parent))  # Parent as both display and value
+            for subtype_val, subtype_disp in sorted(type_map[parent].items()):
+                result.append((f"  {subtype_disp}", subtype_val))  # Indent display, preserve value
         return result
 
     def _get_filtered_assets(self):
         """Filter assets by selected type or subtype, showing subtypes under parent."""
-        sel = self._selected_tool_type
-        if self._tool_type_combo.currentIndex() == 0 or not sel:
+        if self._tool_type_combo.currentIndex() == 0:
             return self._all_assets
 
-        sel = sel.strip()
-        # If indented, it's a subtype
-        if self._selected_tool_type.startswith("  "):
-            # Only show assets with this subtype
-            return [
-                a for a in self._all_assets
-                if (str(getattr(a, "subtype", "")) or "").title() == sel
-            ]
+        # Get the actual value (not display text) from combo item data
+        sel_value = self._tool_type_combo.currentData()
+        if not sel_value:
+            return self._all_assets
+
+        # Check if it's a subtype by looking at all subtypes
+        all_subtypes = set()
+        for asset in self._all_assets:
+            subtype = asset.get_subtype()
+            if subtype:
+                all_subtypes.add(subtype)
+
+        if sel_value in all_subtypes:
+            # It's a subtype - filter by exact subtype match
+            return [a for a in self._all_assets if a.get_subtype() == sel_value]
         else:
-            # Parent: include all with this shape name or any subtype under it
-            return [
-                a for a in self._all_assets
-                if a.get_shape_name().title() == sel or (str(getattr(a, "subtype", "")) or "").title() in [
-                    s for s in self._get_available_tool_types() if s.startswith("  ")
-                ]
-            ]
+            # It's a parent type - show all with this shape name (including those without subtypes)
+            return [a for a in self._all_assets if a.get_shape_name() == sel_value]
 
     def _update_tool_list(self):
         """Updates the tool list based on the current library."""
@@ -587,27 +591,34 @@ class LibraryBrowserWidget(ToolBitBrowserWidget):
 
     def _update_tool_type_combo(self):
         """Update the tool type combo box with available types."""
-        current_selection = self._tool_type_combo.currentText()
+        current_data = self._tool_type_combo.currentData()  # Save current selection by data
         self._tool_type_combo.blockSignals(True)
         try:
             self._tool_type_combo.clear()
-            self._tool_type_combo.addItem(FreeCAD.Qt.translate("CAM", "All Toolbit Types"))
+            self._tool_type_combo.addItem(
+                FreeCAD.Qt.translate("CAM", "All Toolbit Types"), None  # Data for "All" is None
+            )
 
-            for tool_type in self._get_available_tool_types():
-                self._tool_type_combo.addItem(tool_type)
+            for display, value in self._get_available_tool_types():
+                self._tool_type_combo.addItem(display, value)
 
-            # Restore selection if it still exists
-            index = self._tool_type_combo.findText(current_selection)
-            if index >= 0:
-                self._tool_type_combo.setCurrentIndex(index)
+            # Restore selection by matching data value
+            if current_data is not None:
+                for i in range(self._tool_type_combo.count()):
+                    if self._tool_type_combo.itemData(i) == current_data:
+                        self._tool_type_combo.setCurrentIndex(i)
+                        break
+                else:
+                    self._tool_type_combo.setCurrentIndex(0)
             else:
                 self._tool_type_combo.setCurrentIndex(0)
         finally:
             self._tool_type_combo.blockSignals(False)
 
-    def _on_tool_type_combo_changed(self, tool_type):
+    def _on_tool_type_combo_changed(self, index):
         """Handle tool type filter selection change."""
-        self._selected_tool_type = tool_type
+        # Store both text (for backward compat) and data
+        self._selected_tool_type = self._tool_type_combo.currentText()
         self._update_list()
 
 

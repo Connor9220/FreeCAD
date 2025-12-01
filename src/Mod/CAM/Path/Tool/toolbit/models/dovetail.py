@@ -22,6 +22,7 @@
 # ***************************************************************************
 import FreeCAD
 import Path
+from typing import Optional, Mapping
 from ...shape import ToolBitShapeDovetail
 from ..mixins import RotaryToolBitMixin, CuttingToolMixin
 from .base import ToolBit
@@ -30,9 +31,11 @@ from .base import ToolBit
 class ToolBitDovetail(ToolBit, CuttingToolMixin, RotaryToolBitMixin):
     SHAPE_CLASS = ToolBitShapeDovetail
 
-    def __init__(self, shape: ToolBitShapeDovetail, id: str | None = None):
+    def __init__(
+        self, shape: ToolBitShapeDovetail, id: str | None = None, attrs: Optional[Mapping] = None
+    ):
         Path.Log.track(f"ToolBitDovetail __init__ called with shape: {shape}, id: {id}")
-        super().__init__(shape, id=id)
+        super().__init__(shape, id=id, attrs=attrs)
         CuttingToolMixin.__init__(self, self.obj)
 
     @property
