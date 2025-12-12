@@ -108,6 +108,7 @@ from CAMTests.TestPathVoronoi import TestPathVoronoi
 from CAMTests.TestGenericPost import TestGenericPost
 from CAMTests.TestLinuxCNCPost import TestLinuxCNCPost
 from CAMTests.TestDxfPost import TestDxfPost
+from CAMTests.TestFanucPost import TestFanucPost
 from CAMTests.TestGrblPost import TestGrblPost
 from CAMTests.TestMassoG3Post import TestMassoG3Post
 from CAMTests.TestCentroidPost import TestCentroidPost

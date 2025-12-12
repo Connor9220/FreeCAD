@@ -29,6 +29,11 @@ import Path
 import FreeCAD
 
 
+class MockTool:
+    def __init__(self):
+        self.ShapeName = "endmill"
+
+
 class MockToolController:
     """Mock ToolController for operations."""
 
@@ -40,6 +45,7 @@ class MockToolController:
         spindle_dir="Forward",
         feed=FreeCAD.Units.Quantity("1 mm/s"),
     ):
+        self.Tool = MockTool()
         self.ToolNumber = tool_number
         self.Label = label
         self.SpindleSpeed = spindle_speed
