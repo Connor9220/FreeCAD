@@ -350,7 +350,7 @@ class ObjectMillFacing(PathOp.ObjectOp):
 
         boundary_wire = boundary_wire.makeOffset2D(
             obj.StockExtension.Value, 2
-        )  # offset with interesection joins
+        )  # offset with intersection joins
 
         # Convert boundary to a rectangular polygon aligned to the cut angle.
         # Stock faces may have curved edges (e.g. cylindrical stock) and all
