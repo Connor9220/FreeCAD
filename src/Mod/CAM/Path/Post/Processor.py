@@ -140,7 +140,7 @@ class PostProcessor:
         if not self._operations:
             # get all operations from 'Operations' group
             self._job = job
-            self._operations = getattr(job.Operations, "Group", [])
+            self._operations = getattr(job.Operations, "Group", []) if job is not None else []
 
     @classmethod
     def exists(cls, processor):

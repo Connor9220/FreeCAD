@@ -27,6 +27,11 @@ import TestApp
 from CAMTests.TestAreaOperations import TestAreaOperations
 from CAMTests.TestCAMSanity import TestCAMSanity
 from CAMTests.TestLinkingGenerator import TestGetLinkingMoves
+from CAMTests.TestMachine import (
+    TestMachineDataclass,
+    TestMachineFactory,
+    TestSpindle,
+)
 from CAMTests.TestPathProfile import TestPathProfile
 
 from CAMTests.TestPathAdaptive import TestPathAdaptive
