@@ -429,6 +429,10 @@ private:
                 &pend,
                 PARAM_PY_FIELDS(PARAM_FARG, AREA_PARAMS_PATH)
             );
+
+            // Enable arc filtering on generated paths
+            path->setFilterArcs(true);
+
             if (!Base::asBoolean(return_end)) {
                 return Py::asObject(new Path::PathPy(path.release()));
             }

@@ -224,6 +224,41 @@ PyObject* PathPy::setFromGCode(PyObject* args)
     throw Py::TypeError("Argument must be a string");
 }
 
+PyObject* PathPy::filterArcs(PyObject* args)
+{
+    double deflection = -1.0;
+    if (!PyArg_ParseTuple(args, "|d", &deflection)) {
+        return nullptr;
+    }
+
+    getToolpathPtr()->filterArcs(deflection);
+
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+PyObject* PathPy::setFilterArcs(PyObject* args)
+{
+    PyObject* enable = nullptr;
+    if (!PyArg_ParseTuple(args, "O!", &PyBool_Type, &enable)) {
+        return nullptr;
+    }
+
+    getToolpathPtr()->setFilterArcs(PyObject_IsTrue(enable));
+
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+PyObject* PathPy::getFilterArcs(PyObject* args)
+{
+    if (!PyArg_ParseTuple(args, "")) {
+        return nullptr;
+    }
+
+    return PyBool_FromLong(getToolpathPtr()->getFilterArcs());
+}
+
 // custom attributes get/set
 
 PyObject* PathPy::getCustomAttributes(const char* /*attr*/) const

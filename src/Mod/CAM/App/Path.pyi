@@ -49,6 +49,25 @@ class Path(Persistence):
         """sets the contents of the path from a gcode string"""
         ...
 
+    def filterArcs(self, deflection: float = -1.0, /) -> None:
+        """
+        Filter arc commands, replacing low-curvature arcs with linear moves.
+        If deflection is not specified or negative, uses the user preference
+        LibAreaCurveAccuracy (default: 0.01).
+        """
+        ...
+
+    def setFilterArcs(self, enable: bool, /) -> None:
+        """
+        Enable or disable arc filtering.
+        When enabled, filterArcs is automatically applied whenever the path is modified.
+        """
+        ...
+
+    def getFilterArcs(self) -> bool:
+        """Returns whether arc filtering is enabled."""
+        ...
+
     @constmethod
     def toGCode(self) -> str:
         """returns a gcode string representing the path"""

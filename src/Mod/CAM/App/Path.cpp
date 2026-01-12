@@ -24,7 +24,9 @@
 
 #include <App/Application.h>
 #include <Base/Console.h>
+#include <Base/Parameter.h>
 #include <Base/Reader.h>
+#include <Base/Rotation.h>
 #include <Base/Stream.h>
 #include <Base/Writer.h>
 #include <Mod/CAM/App/PathSegmentWalker.h>
@@ -38,11 +40,13 @@ using namespace Base;
 TYPESYSTEM_SOURCE(Path::Toolpath, Base::Persistence)
 
 Toolpath::Toolpath()
+    : enableFilterArcs(false)  // Default to false for backward compatibility
 {}
 
 Toolpath::Toolpath(const Toolpath& otherPath)
     : vpcCommands(otherPath.vpcCommands.size())
     , center(otherPath.center)
+    , enableFilterArcs(otherPath.enableFilterArcs)
 {
     *this = otherPath;
     recalculate();
@@ -68,6 +72,7 @@ Toolpath& Toolpath::operator=(const Toolpath& otherPath)
         vpcCommands[i] = new Command(**it);
     }
     center = otherPath.center;
+    enableFilterArcs = otherPath.enableFilterArcs;
     recalculate();
     return *this;
 }
@@ -405,6 +410,16 @@ void Toolpath::recalculate()  // recalculates the path cache
         return;
     }
 
+    // Filter arcs if enabled
+    if (enableFilterArcs) {
+        // Temporarily disable to prevent recursion
+        bool wasEnabled = enableFilterArcs;
+        enableFilterArcs = false;
+        filterArcs(-1.0);
+        enableFilterArcs = wasEnabled;
+        return;  // filterArcs already calls recalculate
+    }
+
     // TODO recalculate the KDL stuff. At the moment, this is unused.
 
 #if 0
@@ -555,4 +570,91 @@ void Toolpath::RestoreDocFile(Base::Reader& reader)
         }
     }
     recalculate();  // Only once, after all commands are loaded
+}
+
+double Toolpath::getArcDeflectionTolerance()
+{
+    ParameterGrp::handle hGrp = App::GetApplication().GetParameterGroupByPath(
+        "User parameter:BaseApp/Preferences/Mod/CAM"
+    );
+    return hGrp->GetFloat("LibAreaCurveAccuracy", 0.01);
+}
+
+void Toolpath::filterArcs(double deflection)
+{
+    if (deflection < 0.0) {
+        deflection = getArcDeflectionTolerance();
+    }
+
+    Base::Vector3d currentPos(0, 0, 0);
+
+    for (size_t i = 0; i < vpcCommands.size(); i++) {
+        Command* cmd = vpcCommands[i];
+
+        // Check if this is an arc command (G2 or G3)
+        if (cmd->Name == "G2" || cmd->Name == "G02" || cmd->Name == "G3" || cmd->Name == "G03") {
+
+            // Get arc geometry
+            Base::Vector3d endPos = cmd->getPlacement(currentPos).getPosition();
+            Base::Vector3d center = currentPos + cmd->getCenter();
+
+            // Calculate vectors from center to start and end
+            Base::Vector3d toStart = currentPos - center;
+            Base::Vector3d toEnd = endPos - center;
+
+            double radius1 = toStart.Length();
+            double radius2 = toEnd.Length();
+
+            // Check if radii are approximately equal (valid arc)
+            if (std::abs(radius1 - radius2) > 0.001) {
+                currentPos = vpcCommands[i]->getPlacement(currentPos).getPosition();
+                continue;
+            }
+
+            double radius = (radius1 + radius2) / 2.0;
+            double chordLength = (endPos - currentPos).Length();
+
+            // Calculate deflection using geometry: deflection = radius - sqrt(radius² - (chord/2)²)
+            double halfChord = chordLength / 2.0;
+            double deflectionCalc = radius - sqrt(radius * radius - halfChord * halfChord);
+
+            if (deflectionCalc < deflection) {
+                // Replace arc with linear move
+                std::map<std::string, double> params;
+                params["X"] = endPos.x;
+                params["Y"] = endPos.y;
+                params["Z"] = endPos.z;
+
+                if (cmd->has("F")) {
+                    params["F"] = cmd->getValue("F");
+                }
+
+                // Replace the command
+                delete vpcCommands[i];
+                vpcCommands[i] = new Command("G1", params);
+            }
+        }
+
+        // Update current position for next iteration
+        currentPos = vpcCommands[i]->getPlacement(currentPos).getPosition();
+    }
+
+    recalculate();
+}
+
+void Toolpath::setFilterArcs(bool enable)
+{
+    enableFilterArcs = enable;
+    // If enabling, apply filtering now to existing commands
+    if (enable && !vpcCommands.empty()) {
+        bool wasEnabled = enableFilterArcs;
+        enableFilterArcs = false;  // Prevent recursion
+        filterArcs(-1.0);
+        enableFilterArcs = wasEnabled;
+    }
+}
+
+bool Toolpath::getFilterArcs() const
+{
+    return enableFilterArcs;
 }

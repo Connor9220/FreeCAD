@@ -66,6 +66,8 @@ public:
     void setFromGCode(const std::string);  // sets the path from the contents of the given GCode string
     std::string toGCode() const;           // gets a gcode string representation from the Path
     Base::BoundBox3d getBoundBox() const;
+    void filterArcs(double deflection = -1.0);  // Filter arc commands, replacing low-curvature arcs with linear moves
+    static double getArcDeflectionTolerance();  // Get deflection tolerance from user preferences
 
     // shortcut functions
     unsigned int getSize() const
@@ -87,12 +89,15 @@ public:
         return center;
     }
     void setCenter(const Base::Vector3d& c);
+    void setFilterArcs(bool enable);  // Enable/disable arc filtering
+    bool getFilterArcs() const;
 
     static const int SchemaVersion = 2;
 
 protected:
     std::vector<Command*> vpcCommands;
     Base::Vector3d center;
+    bool enableFilterArcs;  // Apply filterArcs when path is modified
     // KDL::Path_Composite *pcPath;
 
     /*
