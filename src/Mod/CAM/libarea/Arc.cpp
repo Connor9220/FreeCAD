@@ -7,6 +7,7 @@
 
 #include "Arc.h"
 #include "Curve.h"
+#include "Area.h"  // For CArea::m_accuracy
 
 void CArc::SetDirWithPoint(const Point& p)
 {
@@ -49,6 +50,7 @@ double CArc::IncludedAngle() const
 
 bool CArc::AlmostALine() const
 {
+    // Use the original method to maintain exact backward compatibility
     Point mid_point = MidParam(0.5);
     if (Line(m_s, m_e - m_s).Dist(mid_point) <= Point::tolerance) {
         return true;
@@ -58,6 +60,30 @@ bool CArc::AlmostALine() const
     double radius = m_c.dist(m_s);
     if (radius > max_arc_radius) {
         return true;  // We don't want to produce an arc whose radius is too large.
+    }
+
+    // Additional check for shallow arcs using deflection-based filtering
+    // This matches the logic from filterArcs() but applies during arc generation
+    // Be selective to minimize cascading effects on normal geometry
+    double chordLength = m_s.dist(m_e);
+
+    if (chordLength > Point::tolerance) {
+        double halfChord = chordLength / 2.0;
+        double radiusSquared = radius * radius;
+        double halfChordSquared = halfChord * halfChord;
+
+        if (halfChordSquared <= radiusSquared) {
+            double sqrtTerm = sqrt(radiusSquared - halfChordSquared);
+            double deflection = radius - sqrtTerm;
+
+            // Only filter if BOTH conditions are met:
+            // 1. Deflection is small (< LibAreaCurveAccuracy, default 0.01)
+            // 2. Radius is large (> 200mm) - to avoid affecting normal corner arcs
+            // This targets problematic large-radius shallow arcs while preserving normal geometry
+            if (radius > 200.0 && deflection < CArea::m_accuracy) {
+                return true;
+            }
+        }
     }
 
     return false;
