@@ -153,6 +153,18 @@ bool CCurve::CheckForArc(
         return false;
     }
 
+    // Check if arc deflection is too small (arc is almost flat)
+    // Using same logic as filterArcs in Path.cpp
+    double radius = arc.m_s.dist(arc.m_c);
+    double chord = arc.m_s.dist(arc.m_e);
+    double halfChord = chord / 2.0;
+    double deflection = radius - sqrt(radius * radius - halfChord * halfChord);
+
+    // Use CArea::m_accuracy as the deflection threshold
+    if (deflection < CArea::m_accuracy) {
+        return false;  // Arc is too flat, treat as line segments
+    }
+
     for (std::list<const CVertex*>::iterator It = might_be_an_arc.begin();
          It != might_be_an_arc.end();
          It++) {
