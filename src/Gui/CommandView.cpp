@@ -144,31 +144,25 @@ StdOrthographicCamera::StdOrthographicCamera()
 void StdOrthographicCamera::activated(int iMsg)
 {
     if (iMsg == 1) {
-        auto view = qobject_cast<View3DInventor*>(getMainWindow()->activeWindow());
-        SoCamera* cam = view->getViewer()->getSoRenderManager()->getCamera();
-        if (!cam || cam->getTypeId() != SoOrthographicCamera::getClassTypeId()) {
-
-            doCommand(Command::Gui, "Gui.activeDocument().activeView().setCameraType(\"Orthographic\")");
-        }
+        getGuiApplication()->sendMsgToActiveView("OrthographicCamera");
     }
 }
 
 bool StdOrthographicCamera::isActive()
 {
-    auto view = qobject_cast<View3DInventor*>(getMainWindow()->activeWindow());
-    if (view) {
-        // update the action group if needed
-        bool check = _pcAction->isChecked();
-        SoCamera* cam = view->getViewer()->getSoRenderManager()->getCamera();
-        bool mode = cam ? cam->getTypeId() == SoOrthographicCamera::getClassTypeId() : false;
-
-        if (mode != check) {
-            _pcAction->setChecked(mode);
-        }
-        return true;
+    if (!getGuiApplication()->sendHasMsgToActiveView("OrthographicCamera")) {
+        return false;
     }
 
-    return false;
+    const std::string& camera = getMainWindow()->activeWindow()->getCamera();
+    if (camera.empty()) {
+        return false;
+    }
+
+    const bool mode = camera.find("OrthographicCamera") != std::string_view::npos;
+    _pcAction->setChecked(mode);
+
+    return true;
 }
 
 Action* StdOrthographicCamera::createAction()
@@ -196,32 +190,25 @@ StdPerspectiveCamera::StdPerspectiveCamera()
 void StdPerspectiveCamera::activated(int iMsg)
 {
     if (iMsg == 1) {
-        auto view = qobject_cast<View3DInventor*>(getMainWindow()->activeWindow());
-        SoCamera* cam = view->getViewer()->getSoRenderManager()->getCamera();
-        if (!cam || cam->getTypeId() != SoPerspectiveCamera::getClassTypeId()) {
-
-            doCommand(Command::Gui, "Gui.activeDocument().activeView().setCameraType(\"Perspective\")");
-        }
+        getGuiApplication()->sendMsgToActiveView("PerspectiveCamera");
     }
 }
 
 bool StdPerspectiveCamera::isActive()
 {
-    auto view = qobject_cast<View3DInventor*>(getMainWindow()->activeWindow());
-    if (view) {
-        // update the action group if needed
-        bool check = _pcAction->isChecked();
-        SoCamera* cam = view->getViewer()->getSoRenderManager()->getCamera();
-        bool mode = cam ? cam->getTypeId() == SoPerspectiveCamera::getClassTypeId() : false;
-
-        if (mode != check) {
-            _pcAction->setChecked(mode);
-        }
-
-        return true;
+    if (!getGuiApplication()->sendHasMsgToActiveView("PerspectiveCamera")) {
+        return false;
     }
 
-    return false;
+    const std::string& camera = getMainWindow()->activeWindow()->getCamera();
+    if (camera.empty()) {
+        return false;
+    }
+
+    const bool mode = camera.find("PerspectiveCamera") != std::string_view::npos;
+    _pcAction->setChecked(mode);
+
+    return true;
 }
 
 Action* StdPerspectiveCamera::createAction()
@@ -393,8 +380,15 @@ void StdCmdFreezeViews::activated(int iMsg)
     }
     else if (iMsg == 3) {
         // Create a new view
-        const char* ppReturn = nullptr;
-        getGuiApplication()->sendMsgToActiveView("GetCamera", &ppReturn);
+        auto* view = getGuiApplication()->activeView();
+        if (!view) {
+            return;
+        }
+
+        const std::string& camera = view->getCamera();
+        if (camera.empty()) {
+            return;
+        }
 
         QList<QAction*> acts = pcAction->actions();
         int index = 1;
@@ -403,7 +397,7 @@ void StdCmdFreezeViews::activated(int iMsg)
                 savedViews++;
                 QString viewnr = QString(QObject::tr("Restore view &%1")).arg(index);
                 (*it)->setText(viewnr);
-                (*it)->setToolTip(QString::fromLatin1(ppReturn));
+                (*it)->setToolTip(QString::fromLatin1(camera.c_str()));
                 (*it)->setVisible(true);
                 if (index < 10) {
                     (*it)->setShortcut(QKeySequence(QStringLiteral("CTRL+%1").arg(index)));
@@ -423,9 +417,29 @@ void StdCmdFreezeViews::activated(int iMsg)
         // Activate a view
         QList<QAction*> acts = pcAction->actions();
         QString data = acts[iMsg]->toolTip();
-        QString send = QStringLiteral("SetCamera %1").arg(data);
-        getGuiApplication()->sendMsgToActiveView(send.toLatin1());
+
+        MDIView* view = getGuiApplication()->activeView();
+        if (!view) {
+            return;
+        }
+
+        view->setCamera(data.toStdString().c_str());
     }
+}
+
+bool StdCmdFreezeViews::isActive()
+{
+    auto view = getMainWindow()->activeWindow();
+
+    separator->setVisible(savedViews > 0);
+    if (view && !view->getCamera().empty()) {
+        saveView->setEnabled(savedViews > 0);
+        freezeView->setEnabled(savedViews < maxViews);
+        clearView->setEnabled(savedViews > 0);
+        return true;
+    }
+
+    return false;
 }
 
 void StdCmdFreezeViews::onSaveViews()
@@ -587,23 +601,6 @@ void StdCmdFreezeViews::onRestoreViews()
             acts[index]->setVisible(false);
         }
     }
-}
-
-bool StdCmdFreezeViews::isActive()
-{
-    auto view = qobject_cast<View3DInventor*>(getMainWindow()->activeWindow());
-    if (view) {
-        saveView->setEnabled(savedViews > 0);
-        freezeView->setEnabled(savedViews < maxViews);
-        clearView->setEnabled(savedViews > 0);
-        separator->setVisible(savedViews > 0);
-        return true;
-    }
-    else {
-        separator->setVisible(savedViews > 0);
-    }
-
-    return false;
 }
 
 void StdCmdFreezeViews::languageChange()
@@ -1376,7 +1373,7 @@ void StdCmdViewHome::activated(int iMsg)
 //===========================================================================
 // Std_ViewBottom
 //===========================================================================
-DEF_3DV_CMD(StdCmdViewBottom)
+DEF_STD_CMD_A(StdCmdViewBottom)
 
 StdCmdViewBottom::StdCmdViewBottom()
     : Command("Std_ViewBottom")
@@ -1394,13 +1391,18 @@ StdCmdViewBottom::StdCmdViewBottom()
 void StdCmdViewBottom::activated(int iMsg)
 {
     Q_UNUSED(iMsg);
-    doCommand(Command::Gui, "Gui.activeDocument().activeView().viewBottom()");
+    doCommand(Command::Gui, "Gui.SendMsgToActiveView(\"ViewBottom\")");
+}
+
+bool StdCmdViewBottom::isActive()
+{
+    return getGuiApplication()->sendHasMsgToActiveView("ViewBottom");
 }
 
 //===========================================================================
 // Std_ViewFront
 //===========================================================================
-DEF_3DV_CMD(StdCmdViewFront)
+DEF_STD_CMD_A(StdCmdViewFront)
 
 StdCmdViewFront::StdCmdViewFront()
     : Command("Std_ViewFront")
@@ -1418,13 +1420,18 @@ StdCmdViewFront::StdCmdViewFront()
 void StdCmdViewFront::activated(int iMsg)
 {
     Q_UNUSED(iMsg);
-    doCommand(Command::Gui, "Gui.activeDocument().activeView().viewFront()");
+    doCommand(Command::Gui, "Gui.SendMsgToActiveView(\"ViewFront\")");
+}
+
+bool StdCmdViewFront::isActive()
+{
+    return getGuiApplication()->sendHasMsgToActiveView("ViewFront");
 }
 
 //===========================================================================
 // Std_ViewLeft
 //===========================================================================
-DEF_3DV_CMD(StdCmdViewLeft)
+DEF_STD_CMD_A(StdCmdViewLeft)
 
 StdCmdViewLeft::StdCmdViewLeft()
     : Command("Std_ViewLeft")
@@ -1442,13 +1449,18 @@ StdCmdViewLeft::StdCmdViewLeft()
 void StdCmdViewLeft::activated(int iMsg)
 {
     Q_UNUSED(iMsg);
-    doCommand(Command::Gui, "Gui.activeDocument().activeView().viewLeft()");
+    doCommand(Command::Gui, "Gui.SendMsgToActiveView(\"ViewLeft\")");
+}
+
+bool StdCmdViewLeft::isActive()
+{
+    return getGuiApplication()->sendHasMsgToActiveView("ViewLeft");
 }
 
 //===========================================================================
 // Std_ViewRear
 //===========================================================================
-DEF_3DV_CMD(StdCmdViewRear)
+DEF_STD_CMD_A(StdCmdViewRear)
 
 StdCmdViewRear::StdCmdViewRear()
     : Command("Std_ViewRear")
@@ -1466,13 +1478,18 @@ StdCmdViewRear::StdCmdViewRear()
 void StdCmdViewRear::activated(int iMsg)
 {
     Q_UNUSED(iMsg);
-    doCommand(Command::Gui, "Gui.activeDocument().activeView().viewRear()");
+    doCommand(Command::Gui, "Gui.SendMsgToActiveView(\"ViewRear\")");
+}
+
+bool StdCmdViewRear::isActive()
+{
+    return getGuiApplication()->sendHasMsgToActiveView("ViewRear");
 }
 
 //===========================================================================
 // Std_ViewRight
 //===========================================================================
-DEF_3DV_CMD(StdCmdViewRight)
+DEF_STD_CMD_A(StdCmdViewRight)
 
 StdCmdViewRight::StdCmdViewRight()
     : Command("Std_ViewRight")
@@ -1490,13 +1507,18 @@ StdCmdViewRight::StdCmdViewRight()
 void StdCmdViewRight::activated(int iMsg)
 {
     Q_UNUSED(iMsg);
-    doCommand(Command::Gui, "Gui.activeDocument().activeView().viewRight()");
+    doCommand(Command::Gui, "Gui.SendMsgToActiveView(\"ViewRight\")");
+}
+
+bool StdCmdViewRight::isActive()
+{
+    return getGuiApplication()->sendHasMsgToActiveView("ViewRight");
 }
 
 //===========================================================================
 // Std_ViewTop
 //===========================================================================
-DEF_3DV_CMD(StdCmdViewTop)
+DEF_STD_CMD_A(StdCmdViewTop)
 
 StdCmdViewTop::StdCmdViewTop()
     : Command("Std_ViewTop")
@@ -1514,14 +1536,19 @@ StdCmdViewTop::StdCmdViewTop()
 void StdCmdViewTop::activated(int iMsg)
 {
     Q_UNUSED(iMsg);
-    doCommand(Command::Gui, "Gui.activeDocument().activeView().viewTop()");
+    doCommand(Command::Gui, "Gui.SendMsgToActiveView(\"ViewTop\")");
+}
+
+bool StdCmdViewTop::isActive()
+{
+    return getGuiApplication()->sendHasMsgToActiveView("ViewTop");
 }
 
 
 //===========================================================================
 // Std_ViewIsometric
 //===========================================================================
-DEF_3DV_CMD(StdCmdViewIsometric)
+DEF_STD_CMD_A(StdCmdViewIsometric)
 
 StdCmdViewIsometric::StdCmdViewIsometric()
     : Command("Std_ViewIsometric")
@@ -1539,13 +1566,18 @@ StdCmdViewIsometric::StdCmdViewIsometric()
 void StdCmdViewIsometric::activated(int iMsg)
 {
     Q_UNUSED(iMsg);
-    doCommand(Command::Gui, "Gui.activeDocument().activeView().viewIsometric()");
+    doCommand(Command::Gui, "Gui.SendMsgToActiveView(\"ViewAxo\")");
+}
+
+bool StdCmdViewIsometric::isActive()
+{
+    return getGuiApplication()->sendHasMsgToActiveView("ViewAxo");
 }
 
 //===========================================================================
 // Std_ViewDimetric
 //===========================================================================
-DEF_3DV_CMD(StdCmdViewDimetric)
+DEF_STD_CMD_A(StdCmdViewDimetric)
 
 StdCmdViewDimetric::StdCmdViewDimetric()
     : Command("Std_ViewDimetric")
@@ -1562,13 +1594,18 @@ StdCmdViewDimetric::StdCmdViewDimetric()
 void StdCmdViewDimetric::activated(int iMsg)
 {
     Q_UNUSED(iMsg);
-    doCommand(Command::Gui, "Gui.activeDocument().activeView().viewDimetric()");
+    doCommand(Command::Gui, "Gui.SendMsgToActiveView(\"ViewDimetric\")");
+}
+
+bool StdCmdViewDimetric::isActive()
+{
+    return getGuiApplication()->sendHasMsgToActiveView("ViewDimetric");
 }
 
 //===========================================================================
 // Std_ViewTrimetric
 //===========================================================================
-DEF_3DV_CMD(StdCmdViewTrimetric)
+DEF_STD_CMD_A(StdCmdViewTrimetric)
 
 StdCmdViewTrimetric::StdCmdViewTrimetric()
     : Command("Std_ViewTrimetric")
@@ -1585,7 +1622,12 @@ StdCmdViewTrimetric::StdCmdViewTrimetric()
 void StdCmdViewTrimetric::activated(int iMsg)
 {
     Q_UNUSED(iMsg);
-    doCommand(Command::Gui, "Gui.activeDocument().activeView().viewTrimetric()");
+    doCommand(Command::Gui, "Gui.SendMsgToActiveView(\"ViewTrimetric\")");
+}
+
+bool StdCmdViewTrimetric::isActive()
+{
+    return getGuiApplication()->sendHasMsgToActiveView("ViewTrimetric");
 }
 
 //===========================================================================
@@ -1659,13 +1701,11 @@ StdCmdViewFitAll::StdCmdViewFitAll()
 void StdCmdViewFitAll::activated(int iMsg)
 {
     Q_UNUSED(iMsg);
-    // doCommand(Command::Gui,"Gui.activeDocument().activeView().fitAll()");
     doCommand(Command::Gui, "Gui.SendMsgToActiveView(\"ViewFit\")");
 }
 
 bool StdCmdViewFitAll::isActive()
 {
-    // return isViewOfType(Gui::View3DInventor::getClassTypeId());
     return getGuiApplication()->sendHasMsgToActiveView("ViewFit");
 }
 
@@ -2632,11 +2672,18 @@ void StdCmdViewIvIssueCamPos::activated(int iMsg)
     std::string Temp, Temp2;
     std::string::size_type pos;
 
-    const char* ppReturn = nullptr;
-    getGuiApplication()->sendMsgToActiveView("GetCamera", &ppReturn);
+    auto* view = getGuiApplication()->activeView();
+    if (!view) {
+        return;
+    }
+
+    std::string camera = view->getCamera();
+    if (camera.empty()) {
+        return;
+    }
 
     // remove the #inventor line...
-    Temp2 = ppReturn;
+    Temp2 = camera;
     pos = Temp2.find_first_of("\n");
     Temp2.erase(0, pos);
 
@@ -2656,7 +2703,12 @@ void StdCmdViewIvIssueCamPos::activated(int iMsg)
 
 bool StdCmdViewIvIssueCamPos::isActive()
 {
-    return getGuiApplication()->sendHasMsgToActiveView("GetCamera");
+    auto view = getGuiApplication()->activeView();
+    if (!view) {
+        return false;
+    }
+
+    return !view->getCamera().empty();
 }
 
 
@@ -4146,14 +4198,12 @@ StdStoreWorkingView::StdStoreWorkingView()
 void StdStoreWorkingView::activated(int iMsg)
 {
     Q_UNUSED(iMsg);
-    if (auto view = dynamic_cast<Gui::View3DInventor*>(Gui::getMainWindow()->activeWindow())) {
-        view->getViewer()->saveHomePosition();
-    }
+    doCommand(Command::Gui, "Gui.SendMsgToActiveView(\"StoreWorkingView\")");
 }
 
 bool StdStoreWorkingView::isActive()
 {
-    return dynamic_cast<Gui::View3DInventor*>(Gui::getMainWindow()->activeWindow());
+    return getGuiApplication()->sendHasMsgToActiveView("StoreWorkingView");
 }
 
 //===========================================================================
@@ -4176,17 +4226,12 @@ StdRecallWorkingView::StdRecallWorkingView()
 void StdRecallWorkingView::activated(int iMsg)
 {
     Q_UNUSED(iMsg);
-    if (auto view = dynamic_cast<Gui::View3DInventor*>(Gui::getMainWindow()->activeWindow())) {
-        if (view->getViewer()->hasHomePosition()) {
-            view->getViewer()->resetToHomePosition();
-        }
-    }
+    doCommand(Command::Gui, "Gui.SendMsgToActiveView(\"RecallWorkingView\")");
 }
 
 bool StdRecallWorkingView::isActive()
 {
-    auto view = dynamic_cast<Gui::View3DInventor*>(Gui::getMainWindow()->activeWindow());
-    return view && view->getViewer()->hasHomePosition();
+    return getGuiApplication()->sendHasMsgToActiveView("RecallWorkingView");
 }
 
 //===========================================================================

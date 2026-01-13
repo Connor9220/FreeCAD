@@ -1895,12 +1895,8 @@ void Document::RestoreDocFile(Base::Reader& reader)
         if (!Base::Tools::isNullOrEmpty(ppReturn)) {
             saveCameraSettings(ppReturn);
             try {
-                const char** pReturnIgnore = nullptr;
-                std::list<MDIView*> mdi = getMDIViews();
-                for (const auto& it : mdi) {
-                    if (it->onHasMsg("SetCamera")) {
-                        it->onMsg(cameraSettings.c_str(), pReturnIgnore);
-                    }
+                for (const auto& it : getMDIViews()) {
+                    it->setCamera(getCameraSettings());
                 }
             }
             catch (const Base::Exception& e) {
@@ -2020,12 +2016,10 @@ void Document::SaveDocFile(Base::Writer& writer) const
     writer.decInd();  // indentation for 'ViewProviderData Count'
 
     // save camera settings
-    std::list<MDIView*> mdi = getMDIViews();
-    for (const auto& it : mdi) {
-        if (it->onHasMsg("GetCamera")) {
-            const char* ppReturn = nullptr;
-            it->onMsg("GetCamera", &ppReturn);
-            if (saveCameraSettings(ppReturn)) {
+    for (const auto& it : getMDIViews()) {
+        const std::string& camera = it->getCamera();
+        if (!camera.empty()) {
+            if (saveCameraSettings(camera.c_str())) {
                 break;
             }
         }
@@ -2214,9 +2208,8 @@ MDIView* Document::createView(const Base::Type& typeId, CreateViewMode mode)
             auto firstView = static_cast<View3DInventor*>(theViews.front());
             shareWidget = qobject_cast<QOpenGLWidget*>(firstView->getViewer()->getGLWidget());
 
-            const char* ppReturn = nullptr;
-            firstView->onMsg("GetCamera", &ppReturn);
-            saveCameraSettings(ppReturn);
+            const std::string& camera = firstView->getCamera();
+            saveCameraSettings(camera.c_str());
         }
 
         auto view3D = new View3DInventor(this, getMainWindow(), shareWidget);
@@ -2262,8 +2255,7 @@ MDIView* Document::createView(const Base::Type& typeId, CreateViewMode mode)
         view3D->resize(400, 300);
 
         if (!cameraSettings.empty()) {
-            const char* ppReturn = nullptr;
-            view3D->onMsg(cameraSettings.c_str(), &ppReturn);
+            view3D->setCamera(cameraSettings.c_str());
         }
 
         // When cloning the view, don't add the view to the main window. The whole purpose of the
@@ -2281,7 +2273,7 @@ MDIView* Document::createView(const Base::Type& typeId, CreateViewMode mode)
 
 const char* Document::getCameraSettings() const
 {
-    return cameraSettings.size() > 10 ? cameraSettings.c_str() + 10 : cameraSettings.c_str();
+    return cameraSettings.c_str();
 }
 
 bool Document::saveCameraSettings(const char* settings) const
@@ -2311,7 +2303,7 @@ bool Document::saveCameraSettings(const char* settings) const
         return false;
     }
 
-    cameraSettings = std::string("SetCamera ") + settings;
+    cameraSettings = settings;
     return true;
 }
 
@@ -2496,7 +2488,7 @@ bool Document::canClose(bool checkModify, bool checkLink)
     return ok;
 }
 
-std::list<MDIView*> Document::getMDIViews() const
+std::list<MDIView*> Document::getMDIViews(bool includePassive) const
 {
     std::list<MDIView*> views;
     for (std::list<BaseView*>::const_iterator it = d->baseViews.begin(); it != d->baseViews.end();
@@ -2507,10 +2499,21 @@ std::list<MDIView*> Document::getMDIViews() const
         }
     }
 
+    if (includePassive) {
+        for (std::list<BaseView*>::const_iterator it = d->passiveViews.begin();
+             it != d->passiveViews.end();
+             ++it) {
+            auto view = dynamic_cast<MDIView*>(*it);
+            if (view) {
+                views.push_back(view);
+            }
+        }
+    }
+
     return views;
 }
 
-std::list<MDIView*> Document::getMDIViewsOfType(const Base::Type& typeId) const
+std::list<MDIView*> Document::getMDIViewsOfType(const Base::Type& typeId, bool includePassive) const
 {
     std::list<MDIView*> views;
     for (std::list<BaseView*>::const_iterator it = d->baseViews.begin(); it != d->baseViews.end();
@@ -2518,6 +2521,17 @@ std::list<MDIView*> Document::getMDIViewsOfType(const Base::Type& typeId) const
         auto view = dynamic_cast<MDIView*>(*it);
         if (view && view->isDerivedFrom(typeId)) {
             views.push_back(view);
+        }
+    }
+
+    if (includePassive) {
+        for (std::list<BaseView*>::const_iterator it = d->passiveViews.begin();
+             it != d->passiveViews.end();
+             ++it) {
+            auto view = dynamic_cast<MDIView*>(*it);
+            if (view && view->isDerivedFrom(typeId)) {
+                views.push_back(view);
+            }
         }
     }
 
@@ -2573,7 +2587,7 @@ MDIView* Document::getActiveView() const
     MDIView* active = getMainWindow()->activeWindow();
 
     // get all MDI views of the document
-    std::list<MDIView*> mdis = getMDIViews();
+    std::list<MDIView*> mdis = getMDIViews(true);
 
     // check whether the active view is part of this document
     bool ok = false;
@@ -2678,7 +2692,7 @@ void Document::setActiveWindow(Gui::MDIView* view)
     }
 
     // get all MDI views of the document
-    std::list<MDIView*> mdis = getMDIViews();
+    std::list<MDIView*> mdis = getMDIViews(true);
 
     // this document is not active
     if (std::ranges::find(mdis, active) == mdis.end()) {

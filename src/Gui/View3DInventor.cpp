@@ -385,54 +385,44 @@ bool View3DInventor::onMsg(const char* pMsg, const char** ppReturn)
         _viewer->setStereoMode(Quarter::SoQTQuarterAdaptor::MONO);
         return true;
     }
-    else if (strcmp("GetCamera", pMsg) == 0) {
-        SoCamera* Cam = _viewer->getSoRenderManager()->getCamera();
-        if (!Cam) {
-            return false;
-        }
-        *ppReturn = SoFCDB::writeNodesToString(Cam).c_str();
-        return true;
-    }
-    else if (strncmp("SetCamera", pMsg, 9) == 0) {
-        return setCamera(pMsg + 10);
-    }
     else if (strncmp("Dump", pMsg, 4) == 0) {
         dump(pMsg + 5);
         return true;
     }
     else if (strcmp("ViewBottom", pMsg) == 0) {
         _viewer->setCameraOrientation(Camera::rotation(Camera::Bottom));
-        _viewer->viewAll();
         return true;
     }
     else if (strcmp("ViewFront", pMsg) == 0) {
         _viewer->setCameraOrientation(Camera::rotation(Camera::Front));
-        _viewer->viewAll();
         return true;
     }
     else if (strcmp("ViewLeft", pMsg) == 0) {
         _viewer->setCameraOrientation(Camera::rotation(Camera::Left));
-        _viewer->viewAll();
         return true;
     }
     else if (strcmp("ViewRear", pMsg) == 0) {
         _viewer->setCameraOrientation(Camera::rotation(Camera::Rear));
-        _viewer->viewAll();
         return true;
     }
     else if (strcmp("ViewRight", pMsg) == 0) {
         _viewer->setCameraOrientation(Camera::rotation(Camera::Right));
-        _viewer->viewAll();
         return true;
     }
     else if (strcmp("ViewTop", pMsg) == 0) {
         _viewer->setCameraOrientation(Camera::rotation(Camera::Top));
-        _viewer->viewAll();
         return true;
     }
     else if (strcmp("ViewAxo", pMsg) == 0) {
         _viewer->setCameraOrientation(Camera::rotation(Camera::Isometric));
-        _viewer->viewAll();
+        return true;
+    }
+    else if (strcmp("ViewDimetric", pMsg) == 0) {
+        _viewer->setCameraOrientation(Camera::rotation(Camera::Dimetric));
+        return true;
+    }
+    else if (strcmp("ViewTrimetric", pMsg) == 0) {
+        _viewer->setCameraOrientation(Camera::rotation(Camera::Trimetric));
         return true;
     }
     else if (strcmp("OrthographicCamera", pMsg) == 0) {
@@ -468,13 +458,21 @@ bool View3DInventor::onMsg(const char* pMsg, const char** ppReturn)
         return true;
     }
     else if (strcmp("ZoomIn", pMsg) == 0) {
-        View3DInventorViewer* viewer = getViewer();
-        viewer->navigationStyle()->zoomIn();
+        _viewer->navigationStyle()->zoomIn();
         return true;
     }
     else if (strcmp("ZoomOut", pMsg) == 0) {
-        View3DInventorViewer* viewer = getViewer();
-        viewer->navigationStyle()->zoomOut();
+        _viewer->navigationStyle()->zoomOut();
+        return true;
+    }
+    else if (strcmp("StoreWorkingView", pMsg) == 0) {
+        _viewer->saveHomePosition();
+        return true;
+    }
+    else if (strcmp("RecallWorkingView", pMsg) == 0) {
+        if (_viewer->hasHomePosition()) {
+            _viewer->resetToHomePosition();
+        }
         return true;
     }
 
@@ -561,10 +559,16 @@ bool View3DInventor::onHasMsg(const char* pMsg) const
     else if (strcmp("ViewAxo", pMsg) == 0) {
         return true;
     }
-    else if (strcmp("GetCamera", pMsg) == 0) {
+    else if (strcmp("ViewDimetric", pMsg) == 0) {
         return true;
     }
-    else if (strncmp("SetCamera", pMsg, 9) == 0) {
+    else if (strcmp("ViewTrimetric", pMsg) == 0) {
+        return true;
+    }
+    else if (strcmp("OrthographicCamera", pMsg) == 0) {
+        return true;
+    }
+    else if (strcmp("PerspectiveCamera", pMsg) == 0) {
         return true;
     }
     else if (strncmp("Dump", pMsg, 4) == 0) {
@@ -573,85 +577,38 @@ bool View3DInventor::onHasMsg(const char* pMsg) const
     else if (strcmp("AlignToSelection", pMsg) == 0) {
         return true;
     }
-    if (strcmp("ZoomIn", pMsg) == 0) {
+    else if (strcmp("ZoomIn", pMsg) == 0) {
         return true;
     }
-    if (strcmp("ZoomOut", pMsg) == 0) {
+    else if (strcmp("ZoomOut", pMsg) == 0) {
         return true;
     }
-    if (strcmp("AllowsOverlayOnHover", pMsg) == 0) {
+    else if (strcmp("AllowsOverlayOnHover", pMsg) == 0) {
         return true;
+    }
+    else if (strcmp("StoreWorkingView", pMsg) == 0) {
+        return true;
+    }
+    else if (strcmp("RecallWorkingView", pMsg) == 0) {
+        return _viewer->hasHomePosition();
     }
 
     return false;
 }
 
+const std::string& View3DInventor::getCamera() const
+{
+    SoCamera* Cam = _viewer->getSoRenderManager()->getCamera();
+    if (!Cam) {
+        static const std::string empty;
+        return empty;
+    }
+    return SoFCDB::writeNodesToString(Cam);
+}
+
 bool View3DInventor::setCamera(const char* pCamera)
 {
-    SoCamera* CamViewer = _viewer->getSoRenderManager()->getCamera();
-    if (!CamViewer) {
-        throw Base::RuntimeError("No camera set so far…");
-    }
-
-    SoInput in;
-    in.setBuffer((void*)pCamera, std::strlen(pCamera));
-
-    SoNode* Cam;
-    SoDB::read(&in, Cam);
-
-    if (!Cam || !Cam->isOfType(SoCamera::getClassTypeId())) {
-        throw Base::RuntimeError("Camera settings failed to read");
-    }
-
-    // this is to make sure to reliably delete the node
-    CoinPtr<SoNode> camPtr(Cam, true);
-
-    // toggle between perspective and orthographic camera
-    if (Cam->getTypeId() != CamViewer->getTypeId()) {
-        _viewer->setCameraType(Cam->getTypeId());
-        CamViewer = _viewer->getSoRenderManager()->getCamera();
-    }
-
-    SoPerspectiveCamera* CamViewerP = nullptr;
-    SoOrthographicCamera* CamViewerO = nullptr;
-
-    if (CamViewer->getTypeId() == SoPerspectiveCamera::getClassTypeId()) {
-        CamViewerP = static_cast<SoPerspectiveCamera*>(CamViewer);  // safe downward cast, knows the type
-    }
-    else if (CamViewer->getTypeId() == SoOrthographicCamera::getClassTypeId()) {
-        CamViewerO = static_cast<SoOrthographicCamera*>(CamViewer);  // safe downward cast, knows
-                                                                     // the type
-    }
-
-    if (Cam->getTypeId() == SoPerspectiveCamera::getClassTypeId()) {
-        if (CamViewerP) {
-            CamViewerP->position = static_cast<SoPerspectiveCamera*>(Cam)->position;
-            CamViewerP->orientation = static_cast<SoPerspectiveCamera*>(Cam)->orientation;
-            CamViewerP->nearDistance = static_cast<SoPerspectiveCamera*>(Cam)->nearDistance;
-            CamViewerP->farDistance = static_cast<SoPerspectiveCamera*>(Cam)->farDistance;
-            CamViewerP->focalDistance = static_cast<SoPerspectiveCamera*>(Cam)->focalDistance;
-        }
-        else {
-            throw Base::TypeError("Camera type mismatch");
-        }
-    }
-    else if (Cam->getTypeId() == SoOrthographicCamera::getClassTypeId()) {
-        if (CamViewerO) {
-            CamViewerO->viewportMapping = static_cast<SoOrthographicCamera*>(Cam)->viewportMapping;
-            CamViewerO->position = static_cast<SoOrthographicCamera*>(Cam)->position;
-            CamViewerO->orientation = static_cast<SoOrthographicCamera*>(Cam)->orientation;
-            CamViewerO->nearDistance = static_cast<SoOrthographicCamera*>(Cam)->nearDistance;
-            CamViewerO->farDistance = static_cast<SoOrthographicCamera*>(Cam)->farDistance;
-            CamViewerO->focalDistance = static_cast<SoOrthographicCamera*>(Cam)->focalDistance;
-            CamViewerO->aspectRatio = static_cast<SoOrthographicCamera*>(Cam)->aspectRatio;
-            CamViewerO->height = static_cast<SoOrthographicCamera*>(Cam)->height;
-        }
-        else {
-            throw Base::TypeError("Camera type mismatch");
-        }
-    }
-
-    return true;
+    return _viewer->setCamera(pCamera);
 }
 
 void View3DInventor::toggleClippingPlane()

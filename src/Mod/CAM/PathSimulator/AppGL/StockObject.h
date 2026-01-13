@@ -22,12 +22,12 @@
  *                                                                         *
  ***************************************************************************/
 
-#ifndef __stock_object_h__
-#define __stock_object_h__
+#pragma once
+
 #include "SolidObject.h"
 #include "linmath.h"
 
-namespace MillSim
+namespace CAMSimulator
 {
 
 class StockObject: public SolidObject
@@ -40,6 +40,5 @@ public:
 private:
     float mProfile[8] = {};
 };
-}  // namespace MillSim
 
-#endif
+}  // namespace CAMSimulator
