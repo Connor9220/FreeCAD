@@ -60,6 +60,18 @@ import KineticNCBeamicon2_post
 KineticNCBeamicon2_post.export(object,"/path/to/file.ncc","")
 """
 
+# Preamble text will appear at the beginning of the GCODE output file.
+PREAMBLE = """%
+G17 G21 G40 G49 G80 G90
+"""
+
+# Postamble text will appear following the last operation.
+POSTAMBLE = """M05
+M09
+G17 G90 G80 G40
+M30
+"""
+
 now = datetime.datetime.now()
 
 parser = argparse.ArgumentParser(
@@ -110,18 +122,6 @@ MACHINE_NAME = "not set"
 CORNER_MIN = {"x": 0, "y": 0, "z": 0}
 CORNER_MAX = {"x": 1000, "y": 600, "z": 300}
 PRECISION = 3
-
-# Preamble text will appear at the beginning of the GCODE output file.
-PREAMBLE = """%
-G17 G21 G40 G49 G80 G90
-"""
-
-# Postamble text will appear following the last operation.
-POSTAMBLE = """M05
-M09
-G17 G90 G80 G40
-M30
-"""
 
 # Pre operation text will be inserted before every operation
 PRE_OPERATION = """"""
