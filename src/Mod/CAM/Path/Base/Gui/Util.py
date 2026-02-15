@@ -481,3 +481,27 @@ def findItem(docitem, objname):
         if res:
             return res
     return None
+
+
+class NaturalSortTableWidgetItem(QtGui.QTableWidgetItem):
+    """Custom QTableWidgetItem that implements natural (alphanumeric) sorting.
+
+    This handles mixed text and numbers correctly, so that:
+    - "Face9" comes before "Face10"
+    - "Model-Body.Face9" comes before "Model-Body.Face10"
+    - "0.5 mm" comes before "10 mm"
+
+    Uses the existing natural_sort_key function from Path.Tool.toolbit.ui.util
+    """
+
+    def __lt__(self, other):
+        """Override less-than comparison for natural sorting."""
+        from ...Tool.toolbit.ui.util import natural_sort_key
+
+        try:
+            self_text = self.text()
+            other_text = other.text()
+            return natural_sort_key(self_text) < natural_sort_key(other_text)
+        except (AttributeError, ValueError):
+            # Fallback to default comparison if conversion fails
+            return super(NaturalSortTableWidgetItem, self).__lt__(other)

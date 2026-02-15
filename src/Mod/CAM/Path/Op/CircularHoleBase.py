@@ -92,7 +92,7 @@ class ObjectOp(PathOp.ObjectOp):
                 "Base",
                 QT_TRANSLATE_NOOP("App::Property", "Manual or Automatic mode sorting of holes"),
             )
-            obj.SortingMode = ["Automatic", "Automatic TSP", "Manual"]  # Set available options
+            obj.SortingMode = ["Automatic", "Manual"]  # Set available options
             obj.SortingMode = "Automatic"  # Set default value
 
     def initCircularHoleOperation(self, obj):
@@ -184,14 +184,19 @@ class ObjectOp(PathOp.ObjectOp):
                 "Base",
                 QT_TRANSLATE_NOOP("App::Property", "Manual or Automatic mode sorting of holes"),
             )
-            obj.SortingMode = ["Automatic", "Automatic TSP", "Manual"]
+            obj.SortingMode = ["Automatic", "Manual"]
             obj.SortingMode = "Automatic"
         else:
             # Update enumeration if needed
             current_options = list(obj.SortingMode)
-            new_options = ["Automatic", "Automatic TSP", "Manual"]
+            new_options = ["Automatic", "Manual"]
+            current_value = obj.SortingMode
+
+            # Convert legacy "Automatic TSP" to "Automatic"
+            if current_value == "Automatic TSP":
+                current_value = "Automatic"
+
             if current_options != new_options:
-                current_value = obj.SortingMode
                 obj.SortingMode = new_options
                 if current_value in new_options:
                     obj.SortingMode = current_value
@@ -224,8 +229,7 @@ class ObjectOp(PathOp.ObjectOp):
 
         if len(holes) > 0:
             if obj.SortingMode == "Automatic":
-                holes = PathUtils.sort_locations(holes, ["x", "y"])
-            elif obj.SortingMode == "Automatic TSP":
+                # Use the c++ implementation of the TSP sorting algorithm for better performance
                 holes = PathUtils.sort_locations_tsp(holes, ["x", "y"])
             self.circularHoleExecute(obj, holes)
 
@@ -264,13 +268,18 @@ class ObjectOp(PathOp.ObjectOp):
                 "Base",
                 QT_TRANSLATE_NOOP("App::Property", "Manual or Automatic mode sorting of holes"),
             )
-            obj.SortingMode = ["Automatic", "Automatic TSP", "Manual"]
+            obj.SortingMode = ["Automatic", "Manual"]
             obj.SortingMode = "Automatic"
         else:
             current_options = list(obj.SortingMode)
-            new_options = ["Automatic", "Automatic TSP", "Manual"]
+            new_options = ["Automatic", "Manual"]
+            current_value = obj.SortingMode
+
+            # Convert legacy "Automatic TSP" to "Automatic"
+            if current_value == "Automatic TSP":
+                current_value = "Automatic"
+
             if current_options != new_options:
-                current_value = obj.SortingMode
                 obj.SortingMode = new_options
                 if current_value in new_options:
                     obj.SortingMode = current_value
