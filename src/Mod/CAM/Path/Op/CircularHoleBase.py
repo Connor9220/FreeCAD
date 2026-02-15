@@ -259,7 +259,7 @@ class ObjectOp(PathOp.ObjectOp):
         obj.Disabled = []
 
     def onDocumentRestored(self, obj):
-        super().onDocumentRestored(obj)
+        self.opOnDocumentRestored(obj)
         # Migration logic for SortingMode
         if not hasattr(obj, "SortingMode"):
             obj.addProperty(
