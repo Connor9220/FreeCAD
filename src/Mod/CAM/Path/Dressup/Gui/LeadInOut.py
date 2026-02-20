@@ -534,7 +534,7 @@ class ObjectDressup:
     # Create arc in XY plane with manually set G2|G3
     def createArcMoveN(self, obj, begin, end, offset, cmdName, feedRate):
         param = {"X": end.x, "Y": end.y, "I": offset.x, "J": offset.y, "F": feedRate}
-        if cmdName == "G2":
+        if cmdName in Path.Geom.CmdMoveCW:
             command = PathLanguage.MoveArcCW(begin, cmdName, param)
         else:
             command = PathLanguage.MoveArcCCW(begin, cmdName, param)
