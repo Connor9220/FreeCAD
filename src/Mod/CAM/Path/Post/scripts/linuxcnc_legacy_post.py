@@ -152,7 +152,7 @@ def processArguments(argstring):
             OUTPUT_LINE_NUMBERS = True
         if args.no_show_editor:
             SHOW_EDITOR = False
-        print("Show editor = %d" % SHOW_EDITOR)
+        # print("Show editor = %d" % SHOW_EDITOR)  # Commented to reduce test noise
         PRECISION = args.precision
         if args.preamble is not None:
             PREAMBLE = args.preamble.replace("\\n", "\n")
@@ -193,7 +193,7 @@ def export(objectslist, filename, argstring):
             )
             return None
 
-    print("postprocessing...")
+    # print("postprocessing...")  # Commented to reduce test noise
     gcode = ""
 
     # write header
@@ -267,7 +267,7 @@ def export(objectslist, filename, argstring):
     else:
         final = gcode
 
-    print("done postprocessing.")
+    # print("done postprocessing.")  # Commented to reduce test noise
 
     if not filename == "-":
         gfile = pyopen(filename, "w")
