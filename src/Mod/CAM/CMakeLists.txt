@@ -222,6 +222,7 @@ SET(PathPythonToolsToolBitUi_SRCS
     Path/Tool/toolbit/ui/toollist.py
     Path/Tool/toolbit/ui/util.py
     Path/Tool/toolbit/ui/view.py
+    Path/Tool/toolbit/ui/typefilter.py
 )
 
 SET(PathPythonToolsLibrary_SRCS
@@ -492,6 +493,7 @@ SET(Tools_Shape_SRCS
     Tools/Shape/thread-mill.svg
     Tools/Shape/v-bit.fcstd
     Tools/Shape/v-bit.svg
+    Tools/Shape/shape_aliases.json
 )
 
 SET(Tests_SRCS
