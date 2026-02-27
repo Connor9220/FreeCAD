@@ -37,8 +37,7 @@ from CAMTests.TestPathProfile import TestPathProfile
 from CAMTests.TestPathAdaptive import TestPathAdaptive
 from CAMTests.TestPathCommandAnnotations import TestPathCommandAnnotations
 from CAMTests.TestPathCore import TestPathCore
-from CAMTests.TestPathDepthParams import TestDepthCases
-from CAMTests.TestPathDressupDogbone import TestDressupDogbone
+from CAMTests.TestPathDepthParams import depthTestCases
 from CAMTests.TestPathDressupDogboneII import TestDressupDogboneII
 from CAMTests.TestPathDrillable import TestPathDrillable
 from CAMTests.TestPathDrillGenerator import TestPathDrillGenerator
@@ -135,10 +134,10 @@ from CAMTests.TestMarlinPost import TestMarlinPost
 from CAMTests.TestDxfPost import TestDxfPost
 from CAMTests.TestFanucPost import TestFanucPost
 
-# from CAMTests.TestGrblPost import TestGrblPost
-# from CAMTests.TestMassoG3Post import TestMassoG3Post
-# from CAMTests.TestCentroidPost import TestCentroidPost
-# from CAMTests.TestMach3Mach4Post import TestMach3Mach4Post
+from CAMTests.TestGrblPost import TestGrblPost
+from CAMTests.TestMassoG3Post import TestMassoG3Post
+from CAMTests.TestCentroidPost import TestCentroidPost
+from CAMTests.TestMach3Mach4Post import TestMach3Mach4Post
 from CAMTests.TestTestPost import TestTestPost
 from CAMTests.TestPostGCodes import TestPostGCodes
 from CAMTests.TestPostMCodes import TestPostMCodes
