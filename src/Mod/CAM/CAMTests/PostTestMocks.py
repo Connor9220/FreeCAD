@@ -31,7 +31,7 @@ import FreeCAD
 
 class MockTool:
     def __init__(self):
-        self.ShapeName = "endmill"
+        self.ShapeType = "endmill"
 
 
 class MockToolController:
@@ -62,6 +62,7 @@ class MockToolController:
             [Path.Command(f"M6 T{tool_number}"), Path.Command(f"M3 S{spindle_speed}")]
         )
 
+    @property
     def InList(self):
         return []
 
@@ -78,6 +79,7 @@ class MockOperation:
         # Create an empty path by default
         self.Path = Path.Path()
 
+    @property
     def InList(self):
         """Mock InList - operations belong to a job."""
         return []
@@ -178,7 +180,9 @@ class MockJob:
         self.Fixtures = ["G54"]
         self.OrderOutputBy = "Tool"
         self.SplitOutput = False
+        self.TypeId = "dummy"
 
+    @property
     def InList(self):
         """Mock InList for fixture setup."""
         return []
