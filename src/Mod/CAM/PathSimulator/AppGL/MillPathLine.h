@@ -30,5 +30,3 @@ protected:
 };
 
 }  // namespace MillSim
-
-#endif  // !__millpathline_h__
