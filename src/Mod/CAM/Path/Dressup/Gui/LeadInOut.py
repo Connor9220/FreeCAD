@@ -1132,7 +1132,6 @@ class ObjectDressup:
                 self.angleToVector(angleTangent + self.getArcPathDir(obj, cmdName)) * normalLength
             )
             arcEnd = arcBegin + tangent + normal
-            cmdName = "G2" if instr.isCW() else "G3"
             command = self.createArcMoveN(obj, arcBegin, arcEnd, arcOffset, cmdName, self.horizFeed)
 
         return command
@@ -1166,7 +1165,6 @@ class ObjectDressup:
             )
             arcBegin = arcEnd + tangent + normal
             arcOffset = arcCenter - arcBegin
-            cmdName = "G2" if instr.isCW() else "G3"
             command = self.createArcMoveN(obj, arcBegin, arcEnd, arcOffset, cmdName, self.horizFeed)
             return command
 
@@ -1229,6 +1227,7 @@ class ObjectDressup:
                         if self.lastMillIndex is None
                         else self.lastMillIndex
                     )
+
                     self.closedProfile = self.isProfileClosed()
 
                     overtravelIn = None
@@ -1268,7 +1267,6 @@ class ObjectDressup:
             last = bool(i == self.lastCuttingMoveIndex)
             if last or not self.isCuttingMove(source[i + 1]):
                 if obj.LeadOut:
-                    measuredLength = 0  # reset measured length for last profile
 
                     # Process negative Offset Lead-Out (cut travel from end)
                     if obj.OffsetOut.Value < 0 and obj.StyleOut != "No Retract":
@@ -1314,8 +1312,6 @@ class TaskDressupLeadInOut(SimpleEditPanel):
     def setupSpinBoxes(self):
         self.connectWidget("InvertIn", self.form.chkInvertDirectionIn)
         self.connectWidget("InvertOut", self.form.chkInvertDirectionOut)
-        self.connectWidget("PercentageRadiusIn", self.form.dspPercentageRadiusIn)
-        self.connectWidget("PercentageRadiusOut", self.form.dspPercentageRadiusOut)
         self.connectWidget("StyleIn", self.form.cboStyleIn)
         self.connectWidget("StyleOut", self.form.cboStyleOut)
         self.radiusIn = PathGuiUtil.QuantitySpinBox(self.form.dspRadiusIn, self.obj, "RadiusIn")
