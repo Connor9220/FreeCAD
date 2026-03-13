@@ -26,6 +26,7 @@ from PathScripts.PathUtils import waiting_effects
 from PySide.QtCore import QT_TRANSLATE_NOOP
 import Path
 import Path.Base.Util as PathUtil
+import Path.Geom
 import PathScripts.PathUtils as PathUtils
 import math
 import time
@@ -200,6 +201,14 @@ class ObjectOp(object):
             ),
         )
         obj.addProperty(
+            "App::PropertyBool",
+            "BlockDelete",
+            "Path",
+            QT_TRANSLATE_NOOP(
+                "App::Property", "Enable post processor to add block delete commands"
+            ),
+        )
+        obj.addProperty(
             "App::PropertyString",
             "Comment",
             "Path",
@@ -218,6 +227,12 @@ class ObjectOp(object):
             QT_TRANSLATE_NOOP("App::Property", "Operations Cycle Time Estimation"),
         )
         obj.setEditorMode("CycleTime", 1)  # read-only
+
+        # Add attachment extension to enable attaching operations to geometry
+        # This allows operations to automatically position/orient based on attached faces
+        # Only add to real objects, not OpPrototypes
+        if hasattr(obj, "hasExtension") and not obj.hasExtension("Part::AttachExtension"):
+            obj.addExtension("Part::AttachExtensionPython")
 
         features = self.opFeatures(obj)
 
@@ -478,6 +493,15 @@ class ObjectOp(object):
                 "CycleTime",
                 "Path",
                 QT_TRANSLATE_NOOP("App::Property", "Operations Cycle Time Estimation"),
+            )
+        if not hasattr(obj, "BlockDelete"):
+            obj.addProperty(
+                "App::PropertyBool",
+                "BlockDelete",
+                "Path",
+                QT_TRANSLATE_NOOP(
+                    "App::Property", "Enable post processor to add block delete commands"
+                ),
             )
 
         if FeatureStepDown & features and not hasattr(obj, "StepDown"):
@@ -903,6 +927,7 @@ class ObjectOp(object):
                     self.commandlist.insert(last_feed_index + 1, coolant_off)
 
         path = Path.Path(self.commandlist)
+
         obj.Path = path
         obj.CycleTime = getCycleTimeEstimate(obj)
         self.job.Proxy.getCycleTime()

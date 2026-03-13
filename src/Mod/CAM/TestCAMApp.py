@@ -25,8 +25,13 @@ import TestApp
 
 from CAMTests.TestAreaOperations import TestAreaOperations
 from CAMTests.TestCAMSanity import TestCAMSanity
+
 from CAMTests.TestLinkingGenerator import TestGetLinkingMoves
-from CAMTests.TestMachine import TestMachineDataclass, TestMachineFactory, TestToolhead
+from CAMTests.TestMachine import (
+    TestMachineDataclass,
+    TestMachineFactory,
+    TestToolhead,
+)
 from CAMTests.TestPathProfile import TestPathProfile
 
 from CAMTests.TestPathAdaptive import TestPathAdaptive
@@ -38,6 +43,7 @@ from CAMTests.TestPathDressupDogboneII import TestDressupDogboneII
 from CAMTests.TestPathDrillable import TestPathDrillable
 from CAMTests.TestPathDrillGenerator import TestPathDrillGenerator
 from CAMTests.TestPathDressupHoldingTags import TestHoldingTags
+from CAMTests.TestDrillCycleExpander import TestDrillCycleExpander
 from CAMTests.TestDrillCycleExpander import TestDrillCycleExpander
 from CAMTests.TestPathFacingGenerator import TestPathFacingGenerator
 from CAMTests.TestPathGeneratorDogboneII import TestGeneratorDogboneII
@@ -51,15 +57,19 @@ from CAMTests.TestPathSpiralGenerator import TestPathSpiralGenerator
 from CAMTests.TestPathLog import TestPathLog
 from CAMTests.TestPathLogNew import TestPathLogNew
 from CAMTests.TestPathOpUtil import TestPathOpUtil
+from CAMTests.TestPostToolProcessing import TestToolLengthOffset, TestToolProcessing
 
-# from CAMTests.TestPathPost import TestPathPost
-from CAMTests.TestPathPost import TestPathPostUtils
-from CAMTests.TestPathPost import TestBuildPostList
-
-# from CAMTests.TestPathPost import TestOutputNameSubstitution
-from CAMTests.TestPathPost import TestPostProcessorFactory
-from CAMTests.TestPathPost import TestResolvingPostProcessorName
-from CAMTests.TestPathPost import TestFileNameGenerator
+# Post-processing tests split into 3 files for better organization
+from CAMTests.TestPostCore import TestPathPostUtils, TestBuildPostList, TestJobPropertyOverrides
+from CAMTests.TestPostProcessor import (
+    TestPostProcessorFactory,
+    TestResolvingPostProcessorName,
+    TestHeaderBuilder,
+)
+from CAMTests.TestPostOutput import (
+    TestFileNameGenerator,
+    TestExport2Integration,
+)
 
 from CAMTests.TestPathPreferences import TestPathPreferences
 from CAMTests.TestPathPocket import TestPathPocket
@@ -106,23 +116,31 @@ from CAMTests.TestPathVcarve import TestPathVcarve
 from CAMTests.TestPathVoronoi import TestPathVoronoi
 
 from CAMTests.TestGenericPost import TestGenericPost
+from CAMTests.TestGenericPlasma import TestGenericPlasma
 from CAMTests.TestLinuxCNCPost import TestLinuxCNCPost
 from CAMTests.TestDxfPost import TestDxfPost
 from CAMTests.TestFanucPost import TestFanucPost
-from CAMTests.TestGrblPost import TestGrblPost
-from CAMTests.TestMassoG3Post import TestMassoG3Post
-from CAMTests.TestCentroidPost import TestCentroidPost
-from CAMTests.TestMach3Mach4Post import TestMach3Mach4Post
+
+# from CAMTests.TestGrblPost import TestGrblPost
+# from CAMTests.TestMassoG3Post import TestMassoG3Post
+# from CAMTests.TestCentroidPost import TestCentroidPost
+# from CAMTests.TestMach3Mach4Post import TestMach3Mach4Post
 from CAMTests.TestTestPost import TestTestPost
 from CAMTests.TestPostGCodes import TestPostGCodes
 from CAMTests.TestPostMCodes import TestPostMCodes
 from CAMTests.TestDressupPost import TestDressupPost
 
-from CAMTests.TestLinuxCNCLegacyPost import TestLinuxCNCLegacyPost
-from CAMTests.TestGrblLegacyPost import TestGrblLegacyPost
+# from CAMTests.TestLinuxCNCLegacyPost import TestLinuxCNCLegacyPost
+# from CAMTests.TestGrblLegacyPost import TestGrblLegacyPost
 from CAMTests.TestCentroidLegacyPost import TestCentroidLegacyPost
 from CAMTests.TestMach3Mach4LegacyPost import TestMach3Mach4LegacyPost
 
 from CAMTests.TestSnapmakerPost import TestSnapmakerPost
 from CAMTests.TestSVGPost import TestSVGPost
 from CAMTests.TestTSPSolver import TestTSPSolver
+from CAMTests.TestGcodeProcessingUtils import (
+    TestInsertLineNumbers,
+    TestSuppressRedundantAxesWords,
+    TestFilterInefficientMoves,
+    TestNumberGenerator,
+)

@@ -39,145 +39,309 @@ import Path.Post.UtilsExport as PostUtilsExport
 import Path.Post.UtilsParse as PostUtilsParse
 
 import Path
-Path.write(object,"/path/to/file.ncc","post_opensbp")
-"""
+import FreeCAD
 
-"""
-DONE:
-    uses native commands
-    handles feed and jog moves
-    handles XY, Z, and XYZ feed speeds
-    handles arcs
-    support for inch output
-ToDo
-    comments may not format correctly
-    drilling.  Haven't looked at it.
-    many other things
+translate = FreeCAD.Qt.translate
 
-"""
-
-TOOLTIP_ARGS = """
-Arguments for opensbp:
-    --comments          ... insert comments - mostly for debugging
-    --inches            ... convert output to inches
-    --no-header         ... suppress header output
-    --no-show-editor    ... don't show editor, just save result
-"""
-
-now = datetime.datetime.now()
-
-OUTPUT_COMMENTS = False
-OUTPUT_HEADER = True
-SHOW_EDITOR = True
-COMMAND_SPACE = ","
-
-# Preamble text will appear at the beginning of the GCODE output file.
-PREAMBLE = """"""
-# Postamble text will appear following the last operation.
-POSTAMBLE = """"""
-
-# Pre operation text will be inserted before every operation
-PRE_OPERATION = """"""
-
-# Post operation text will be inserted after every operation
-POST_OPERATION = """"""
-
-# Tool Change commands will be inserted before a tool change
-TOOL_CHANGE = """"""
+DEBUG = False
 
 
-CurrentState = {}
+# Set logging level based on DEBUG flag
+def _setup_logging():
+    if DEBUG:
+        Path.Log.setLevel(Path.Log.Level.DEBUG, Path.Log.thisModule())
+        Path.Log.trackModule(Path.Log.thisModule())
+    else:
+        Path.Log.setLevel(Path.Log.Level.INFO, Path.Log.thisModule())
 
 
-def getMetricValue(val):
-    return val
+_setup_logging()
+
+# Define types
+Values = Dict[str, Any]
+
+POST_TYPE = "machine"
 
 
-def getImperialValue(val):
-    return val / 25.4
+class OpenSBPPost(PostProcessor):
+    """
+    OpenSBP postprocessor for ShopBot controllers.
 
+    This class demonstrates the new hook methods pattern by overriding only
+    the specific command conversion methods needed for OpenSBP dialect.
 
-GetValue = getMetricValue
+    OpenSBP uses native commands prefixed with '>' for non-G-code operations.
+    """
 
+    @classmethod
+    def get_common_property_schema(cls):
+        """Override common properties with OpenSBP-specific defaults."""
+        common_props = super().get_common_property_schema()
 
-def export(objectslist, filename, argstring):
-    global OUTPUT_COMMENTS
-    global OUTPUT_HEADER
-    global SHOW_EDITOR
-    global CurrentState
-    global GetValue
+        # Override defaults for OpenSBP
+        for prop in common_props:
+            if prop["name"] == "file_extension":
+                prop["default"] = "sbp"
+            elif prop["name"] == "preamble":
+                prop["default"] = (
+                    "'OpenSBP output from FreeCAD\n"
+                    "'NOTE: In OpenSBP, M3 is a 3-axis MOVE command, NOT spindle control\n"
+                    "'Spindle control is via TR (speed) and C6/C7 (on/off) commands"
+                )
+            elif prop["name"] == "postamble":
+                prop["default"] = ">C7\n'End of program"
 
-    for arg in argstring.split():
-        if arg == "--comments":
-            OUTPUT_COMMENTS = True
-        if arg == "--inches":
-            GetValue = getImperialValue
-        if arg == "--no-header":
-            OUTPUT_HEADER = False
-        if arg == "--no-show-editor":
-            SHOW_EDITOR = False
+        return common_props
 
-    for obj in objectslist:
-        if not hasattr(obj, "Path"):
-            s = "the object " + obj.Name
-            s += " is not a path. Please select only path and Compounds."
-            print(s)
-            return
+    @classmethod
+    def get_property_schema(cls):
+        """Return schema for OpenSBP-specific configurable properties."""
+        return [
+            {
+                "name": "automatic_tool_changer",
+                "type": "bool",
+                "label": translate("CAM", "Automatic Tool Changer"),
+                "default": False,
+                "help": translate(
+                    "CAM",
+                    "Enable if machine has automatic tool changer. "
+                    "If disabled, tool changes will pause for manual intervention.",
+                ),
+            },
+            {
+                "name": "automatic_spindle",
+                "type": "bool",
+                "label": translate("CAM", "Automatic Spindle Control"),
+                "default": False,
+                "help": translate(
+                    "CAM",
+                    "Enable if machine has automatic spindle speed control. "
+                    "If disabled, spindle commands will prompt for manual adjustment.",
+                ),
+            },
+        ]
 
-    CurrentState = {
-        "X": 0,
-        "Y": 0,
-        "Z": 0,
-        "F": 0,
-        "S": 0,
-        "JSXY": 0,
-        "JSZ": 0,
-        "MSXY": 0,
-        "MSZ": 0,
-    }
-    print("postprocessing...")
-    gcode = ""
+    def __init__(
+        self,
+        job,
+        tooltip=translate("CAM", "OpenSBP post processor for ShopBot controllers"),
+        tooltipargs=[],
+        units="Metric",
+    ) -> None:
+        super().__init__(
+            job=job,
+            tooltip=tooltip,
+            tooltipargs=tooltipargs,
+            units=units,
+        )
+        Path.Log.debug("OpenSBP post processor initialized.")
 
-    # write header
-    if OUTPUT_HEADER:
-        gcode += linenumber() + "'Exported by FreeCAD\n"
-        gcode += linenumber() + "'Post Processor: " + __name__ + "\n"
-        gcode += linenumber() + "'Output Time:" + str(now) + "\n"
+        # Track current speeds for OpenSBP (separate XY and Z speeds)
+        self._current_move_speed_xy = None
+        self._current_move_speed_z = None
+        self._current_jog_speed_xy = None
+        self._current_jog_speed_z = None
 
-    # Write the preamble
-    if OUTPUT_COMMENTS:
-        gcode += linenumber() + "'(begin preamble)\n"
-    for line in PREAMBLE.splitlines(True):
-        gcode += linenumber() + line
+    def init_values(self, values: Values) -> None:
+        """Initialize values that are used throughout the postprocessor."""
+        super().init_values(values)
 
-    for obj in objectslist:
+        # OpenSBP-specific settings
+        values["MACHINE_NAME"] = "ShopBot"
+        values["POSTPROCESSOR_FILE_NAME"] = __name__
 
-        # do the pre_op
-        if OUTPUT_COMMENTS:
-            gcode += linenumber() + "'(begin operation: " + obj.Label + ")\n"
-        for line in PRE_OPERATION.splitlines(True):
-            gcode += linenumber() + line
+        # Load configuration from machine properties if available
+        if self._machine and hasattr(self._machine, "postprocessor_properties"):
+            props = self._machine.postprocessor_properties
+            values["AUTOMATIC_TOOL_CHANGER"] = props.get("automatic_tool_changer", False)
+            values["AUTOMATIC_SPINDLE"] = props.get("automatic_spindle", False)
+        else:
+            values["AUTOMATIC_TOOL_CHANGER"] = False
+            values["AUTOMATIC_SPINDLE"] = False
 
-        gcode += parse(obj)
+    def _convert_comment(self, command):
+        """
+        Convert comments to OpenSBP format (single quote prefix).
+        """
+        # Extract comment text
+        comment_text = (
+            command.Name[1:-1]
+            if command.Name.startswith("(") and command.Name.endswith(")")
+            else command.Name[1:]
+        )
 
-        # do the post_op
-        if OUTPUT_COMMENTS:
-            gcode += linenumber() + "'(finish operation: " + obj.Label + ")\n"
-        for line in POST_OPERATION.splitlines(True):
-            gcode += linenumber() + line
+        # OpenSBP uses single quote for comments
+        return f"'{comment_text}"
 
-    # do the post_amble
-    if OUTPUT_COMMENTS:
-        gcode += "'(begin postamble)\n"
-    for line in POSTAMBLE.splitlines(True):
-        gcode += linenumber() + line
+    def _convert_rapid_move(self, command):
+        """
+        Convert rapid moves (G0) to OpenSBP jog commands (JX, JY, JZ, J2, J3).
+        """
+        return self._convert_move_command(command, is_rapid=True)
 
-    if SHOW_EDITOR:
-        dia = PostUtils.GCodeEditorDialog()
-        dia.editor.setPlainText(gcode)
-        result = dia.exec_()
-        if result:
-            final = dia.editor.toPlainText()
+    def _convert_linear_move(self, command):
+        """
+        Convert linear moves (G1) to OpenSBP move commands (MX, MY, MZ, M2, M3).
+        """
+        return self._convert_move_command(command, is_rapid=False)
+
+    def _convert_move_command(self, command, is_rapid):
+        """
+        Convert move commands to OpenSBP format.
+
+        OpenSBP uses different commands based on:
+        - Move type: M (feed) or J (jog/rapid)
+        - Axes involved: X, Y, Z, 2 (XY), 3 (XYZ)
+
+        Native OpenSBP commands are prefixed with '>'
+        """
+        params = command.Parameters
+        output = []
+
+        # Determine which axes are moving
+        has_x = "X" in params
+        has_y = "Y" in params
+        has_z = "Z" in params
+
+        # Get unit conversion function
+        def get_value(val):
+            """Convert value based on machine units."""
+            if self._machine and hasattr(self._machine, "output"):
+                from Machine.models.machine import OutputUnits
+
+                if self._machine.output.units == OutputUnits.IMPERIAL:
+                    return val / 25.4
+            return val
+
+        # Handle speed settings (MS/JS commands)
+        if "F" in params:
+            speed = params["F"] * 60.0  # Convert mm/sec to mm/min
+            speed = get_value(speed)
+
+            prefix = "JS" if is_rapid else "MS"
+
+            # OpenSBP has separate speeds for XY and Z
+            xy_speed = ""
+            z_speed = ""
+
+            if has_z:
+                speed_attr = "_current_jog_speed_z" if is_rapid else "_current_move_speed_z"
+                if getattr(self, speed_attr) != speed:
+                    setattr(self, speed_attr, speed)
+                    z_speed = f"{speed:.4f}"
+
+            if has_x or has_y:
+                speed_attr = "_current_jog_speed_xy" if is_rapid else "_current_move_speed_xy"
+                if getattr(self, speed_attr) != speed:
+                    setattr(self, speed_attr, speed)
+                    xy_speed = f"{speed:.4f}"
+
+            # Only output speed command if it changed
+            if xy_speed or z_speed:
+                output.append(f">{prefix},{xy_speed},{z_speed}")
+
+        # Generate move command based on axes
+        prefix = "J" if is_rapid else "M"
+
+        if has_x and has_y and has_z:
+            # XYZ move - use M3/J3
+            x_val = get_value(params["X"])
+            y_val = get_value(params["Y"])
+            z_val = get_value(params["Z"])
+            output.append(f">{prefix}3,{x_val:.4f},{y_val:.4f},{z_val:.4f}")
+
+        elif has_x and has_y:
+            # XY move - use M2/J2
+            x_val = get_value(params["X"])
+            y_val = get_value(params["Y"])
+            output.append(f">{prefix}2,{x_val:.4f},{y_val:.4f}")
+
+        elif has_x and has_z:
+            # XZ move - use M3/J3 with empty Y
+            x_val = get_value(params["X"])
+            z_val = get_value(params["Z"])
+            output.append(f">{prefix}3,{x_val:.4f},,{z_val:.4f}")
+
+        elif has_y and has_z:
+            # YZ move - use M3/J3 with empty X
+            y_val = get_value(params["Y"])
+            z_val = get_value(params["Z"])
+            output.append(f">{prefix}3,,{y_val:.4f},{z_val:.4f}")
+
+        elif has_x:
+            # X only - use MX/JX
+            x_val = get_value(params["X"])
+            output.append(f">{prefix}X,{x_val:.4f}")
+
+        elif has_y:
+            # Y only - use MY/JY
+            y_val = get_value(params["Y"])
+            output.append(f">{prefix}Y,{y_val:.4f}")
+
+        elif has_z:
+            # Z only - use MZ/JZ
+            z_val = get_value(params["Z"])
+            output.append(f">{prefix}Z,{z_val:.4f}")
+
+        return "\n".join(output) if output else None
+
+    def _convert_arc_move(self, command):
+        """
+        Convert arc moves (G2/G3) to OpenSBP CG command.
+
+        OpenSBP CG format: >CG,,X,Y,I,J,T,direction[,plunge]
+        where:
+        - direction is 1 for CW (G2) or -1 for CCW (G3)
+        - plunge is optional Z movement (relative, sign inverted)
+
+        Note: ShopBot only supports arcs in XY plane with I,J offsets.
+        If Z is present, it's converted to a helical arc with plunge parameter.
+        """
+        params = command.Parameters
+
+        # Get unit conversion function
+        def get_value(val):
+            if self._machine and hasattr(self._machine, "output"):
+                from Machine.models.machine import OutputUnits
+
+                if self._machine.output.units == OutputUnits.IMPERIAL:
+                    return val / 25.4
+            return val
+
+        # Determine direction
+        direction = "1" if command.Name in ["G2", "G02"] else "-1"
+
+        # Extract arc parameters
+        x_val = get_value(params.get("X", 0))
+        y_val = get_value(params.get("Y", 0))
+        i_val = get_value(params.get("I", 0))
+        j_val = get_value(params.get("J", 0))
+
+        # Check for helical arc (Z parameter present)
+        output = []
+        if "Z" in params:
+            # Helical arc - need to calculate plunge
+            # Get current Z from modal state (default to 0 if not set)
+            current_z = self._modal_state.get("Z", 0.0)
+            if current_z is None:
+                current_z = 0.0
+            target_z = params["Z"]
+            plunge = get_value(current_z - target_z)  # Relative, inverted sign
+
+            # Set move speed if feed rate is specified
+            if "F" in params:
+                speed = params["F"] * 60.0  # Convert mm/sec to mm/min
+                speed = get_value(speed)
+                # Only output if speed changed
+                if self._current_move_speed_xy != speed or self._current_move_speed_z != speed:
+                    output.append(f">MS,{speed:.4f},{speed:.4f}")
+                    self._current_move_speed_xy = speed
+                    self._current_move_speed_z = speed
+
+            # Use L (linear) instead of T (tool comp) for helical arcs
+            output.append(
+                f">CG,,{x_val:.4f},{y_val:.4f},{i_val:.4f},{j_val:.4f},L,{direction},{plunge:.4f}"
+            )
         else:
             return ""
 
