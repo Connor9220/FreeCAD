@@ -381,7 +381,7 @@ def splitArcs(path, deflection=None):
 
     if not deflection:
         prefGrp = FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Mod/CAM")
-        deflection = prefGrp.GetFloat("LibAreaCurveAccuracy", 0.01)
+        deflection = prefGrp.GetFloat("LibAreaCurveAccuracy", 0.01) or 0.01
 
     results = []
     machine = MachineState()
