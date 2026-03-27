@@ -701,7 +701,7 @@ class ObjectProfile(PathAreaOp.ObjectOp):
         Path.Log.debug("_flattenWire()")
         wBB = wire.BoundBox
 
-        if wBB.ZLength > 0.0:
+        if not Path.Geom.isRoughly(wBB.ZLength, 0):
             Path.Log.debug("Wire is not horizontally co-planar. Flattening it.")
 
             # Extrude non-horizontal wire
