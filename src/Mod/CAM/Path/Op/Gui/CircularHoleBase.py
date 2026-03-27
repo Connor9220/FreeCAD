@@ -213,7 +213,11 @@ class TaskPanelHoleGeometryPage(PathOpGui.TaskPanelBaseGeometryPage):
         """resetBase() ... push button callback"""
         self.obj.Base = []
         self.obj.Disabled = []
-        self.obj.Proxy.findAllHoles(self.obj)
+        self.form.baseList.horizontalHeader().setSortIndicator(-1, QtCore.Qt.AscendingOrder)
+        selection = FreeCADGui.Selection.getSelection()
+        self.obj.Proxy.findAllHoles(self.obj, selection)
+        self.obj.Proxy.execute(self.obj)
+        FreeCAD.ActiveDocument.recompute()
 
         self.obj.Proxy.execute(self.obj)
         FreeCAD.ActiveDocument.recompute()
