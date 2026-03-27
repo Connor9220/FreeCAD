@@ -157,6 +157,50 @@ class TaskPanelHoleGeometryPage(PathOpGui.TaskPanelBaseGeometryPage):
         self.obj.Disabled = disabled
         FreeCAD.ActiveDocument.recompute()
 
+    def updateChecked(self):
+        self.updating = True
+        for i in range(self.form.baseList.rowCount()):
+            item = self.form.baseList.item(i, COL_FEATURE)
+            base_name = item.data(self.DataObjectName)
+            base = FreeCAD.ActiveDocument.getObject(base_name)
+            sub = str(item.data(self.DataObjectSub))
+            guiState = item.checkState() == QtCore.Qt.Checked
+            holeEnabled = self.obj.Proxy.isHoleEnabled(self.obj, base, sub)
+            if not holeEnabled and guiState:
+                item.setCheckState(QtCore.Qt.Unchecked)
+            elif holeEnabled and not guiState:
+                item.setCheckState(QtCore.Qt.Checked)
+        self.updating = False
+
+    def updateOrderNumbers(self):
+        """Update the order numbers in the first column after row reordering or sorting."""
+        table = self.form.baseList
+        for row in range(table.rowCount()):
+            item = table.item(row, COL_ORDER)
+            if item:
+                item.setData(QtCore.Qt.DisplayRole, row + 1)
+        self.updateBase()
+        self.filterBaseList(self.form.lineEdit.text())  # Reapply filter after
+        FreeCAD.ActiveDocument.recompute()
+
+    def updateSelectAllCheckbox(self):
+        """Set the Select All checkbox state based on visible rows."""
+        all_checked = True
+        any_visible = False
+        for row in range(self.form.baseList.rowCount()):
+            if not self.form.baseList.isRowHidden(row):
+                any_visible = True
+                item = self.form.baseList.item(row, COL_FEATURE)
+                if item.checkState() != QtCore.Qt.Checked:
+                    all_checked = False
+                    break
+        if not any_visible:
+            self.form.checkBox.setCheckState(QtCore.Qt.Unchecked)
+        else:
+            self.form.checkBox.setCheckState(
+                QtCore.Qt.Checked if all_checked else QtCore.Qt.Unchecked
+            )
+
     def registerSignalHandlers(self, obj):
         """registerSignalHandlers(obj) ... setup signal handlers"""
         self.form.baseList.itemSelectionChanged.connect(self.itemActivated)
@@ -179,6 +223,63 @@ class TaskPanelHoleGeometryPage(PathOpGui.TaskPanelBaseGeometryPage):
         if not self.updating and prop in ["Base", "Disabled"]:
             self.setFields(obj)
 
+    def cellManuallyChanged(self, row, column):
+        if column == COL_ORDER:
+            item = self.form.baseList.item(row, column)
+            try:
+                # Subtract 1 from the current order number so that it will be pushed to the top of the stack
+                self.form.baseList.blockSignals(True)
+                item.setText(str(int(item.text()) - 1))
+                self.form.baseList.blockSignals(False)
+            except (ValueError, AttributeError):
+                # If the input is invalid, reset to the original order number
+                self.form.baseList.blockSignals(True)
+                item.setText(str(row + 1))
+                self.form.baseList.blockSignals(False)
+                return  # Ignore invalid input
+
+            # Resort rows based on the new order numbers
+            rows = []
+            for row in range(self.form.baseList.rowCount()):
+                order_item = self.form.baseList.item(row, COL_ORDER)
+                feature_item = self.form.baseList.item(row, COL_FEATURE)
+                diameter_item = self.form.baseList.item(row, COL_DIAMETER)
+                try:
+                    order = int(order_item.text())
+                except (ValueError, AttributeError):
+                    order = row + 1
+                rows.append(
+                    (
+                        order,
+                        [
+                            order_item.clone() if order_item else None,
+                            feature_item.clone() if feature_item else None,
+                            diameter_item.clone() if diameter_item else None,
+                        ],
+                    )
+                )
+            # Sort rows by the order number
+            rows.sort(key=lambda x: x[0])
+            # Rebuild the table
+            self.form.baseList.blockSignals(True)
+            self.form.baseList.setRowCount(0)
+            for idx, (order, items) in enumerate(rows):
+                self.form.baseList.insertRow(idx)
+                # Set consecutive order numbers
+                items[0].setData(QtCore.Qt.DisplayRole, idx + 1)
+                for col, item in enumerate(items):
+                    if item:
+                        self.form.baseList.setItem(idx, col, item)
+            self.form.baseList.blockSignals(False)
+            self.updateOrderNumbers()
+            self.updateBase()
+            self.filterBaseList(self.form.lineEdit.text())  # Reapply filter after reordering
+
+    def itemChanged(self, item):
+        """itemChanged(item) ... callback when any item in the table changes"""
+        if not self.updating and item.column() == COL_FEATURE:
+            self.checkedChanged()
+
 
 class TaskPanelOpPage(PathOpGui.TaskPanelPage):
     """Base class for circular hole based operation's page controller."""
@@ -186,3 +287,22 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
     def taskPanelBaseGeometryPage(self, obj, features):
         """taskPanelBaseGeometryPage(obj, features) ... Return circular hole specific page controller for Base Geometry."""
         return TaskPanelHoleGeometryPage(obj, features)
+
+    def pageUpdateData(self, obj, prop):
+        if prop == "Disabled" and getattr(self, "parent", None):
+            for page in self.parent.featurePages:
+                if isinstance(page, TaskPanelHoleGeometryPage):
+                    page.updateChecked()
+
+        self.updateData(obj, prop)
+
+
+class LineEditEventFilter(QtCore.QObject):
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.KeyPress and event.key() in (
+            QtCore.Qt.Key_Return,
+            QtCore.Qt.Key_Enter,
+        ):
+            # Prevent Enter key from propagating to the main form
+            return True
+        return super(LineEditEventFilter, self).eventFilter(obj, event)
