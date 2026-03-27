@@ -210,8 +210,9 @@ class ObjectOp(PathOp.ObjectOp):
         Must be overwritten by subclasses."""
         pass
 
-    def findAllHoles(self, obj):
-        """findAllHoles(obj) ... find all holes of all base models and assign as features."""
+    def findAllHoles(self, obj, selection=[]):
+        """findAllHoles(obj) ...
+        find all holes of all base or selected models and assign as features."""
         Path.Log.track()
         job = self.getJob(obj)
         if not job:
@@ -221,7 +222,15 @@ class ObjectOp(PathOp.ObjectOp):
         tooldiameter = obj.ToolController.Tool.Diameter.Value
 
         features = []
-        for base in self.model:
+        models = []
+        for sel in selection:
+            if sel.isDerivedFrom("Part::Feature"):
+                models.append(sel)
+        if not models:
+            models = self.model
+        for base in models:
+            if not base.isDerivedFrom("Part::Feature"):
+                continue
             features.extend(
                 Drillable.getDrillableTargets(base, toolDiameter=tooldiameter, vector=matchvector)
             )
