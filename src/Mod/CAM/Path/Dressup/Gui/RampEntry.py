@@ -749,9 +749,10 @@ class CommandPathDressupRampEntry:
         }
 
     def IsActive(self):
-        op = PathDressup.selection()
-        if op:
-            return not PathDressup.hasEntryMethod(op)
+        if FreeCAD.ActiveDocument is not None:
+            for o in FreeCAD.ActiveDocument.Objects:
+                if o.Name[:3] == "Job":
+                    return True
         return False
 
     def Activated(self):
