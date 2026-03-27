@@ -949,6 +949,16 @@ class ObjectTagDressup:
             "Tag",
             QT_TRANSLATE_NOOP("App::Property", "IDs of disabled holding tags"),
         )
+        obj.addProperty(
+            "App::PropertyBool",
+            "Approximation",
+            "Path",
+            QT_TRANSLATE_NOOP(
+                "App::Property",
+                "Split B-Spline by arcs and ignore not vertical arcs axis (experimental).",
+            ),
+        )
+        obj.setEditorMode("Approximation", 2)  # hide
 
         self.obj = obj
         self.solids = []
@@ -978,6 +988,17 @@ class ObjectTagDressup:
 
     def onDocumentRestored(self, obj):
         self.obj = obj
+        if not hasattr(obj, "Approximation"):
+            obj.addProperty(
+                "App::PropertyBool",
+                "Approximation",
+                "Path",
+                QT_TRANSLATE_NOOP(
+                    "App::Property",
+                    "Split B-Spline by arcs and ignore not vertical arcs axis (experimental).",
+                ),
+            )
+            obj.setEditorMode("Approximation", 2)  # hide
 
     def supportsTagGeneration(self, obj):
         if not self.pathData:
@@ -1105,7 +1126,13 @@ class ObjectTagDressup:
                             )
                     else:
                         commands.extend(
-                            Path.Geom.cmdsForEdge(edge, hSpeed=horizFeed, vSpeed=vertFeed, tol=tol)
+                            Path.Geom.cmdsForEdge(
+                                edge,
+                                approximation=obj.Approximation,
+                                hSpeed=horizFeed,
+                                vSpeed=vertFeed,
+                                tol=tol,
+                            )
                         )
                 edge = None
                 t = 0
