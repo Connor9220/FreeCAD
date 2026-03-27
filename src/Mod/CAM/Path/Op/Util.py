@@ -175,12 +175,66 @@ def orientWire(w, forward=True):
     return wire
 
 
-def offsetWire(wire, base, offset, forward, Side=None):
-    """offsetWire(wire, base, offset, forward) ... offsets the wire away from base and orients the wire accordingly.
+def approximateWire(wire, tolerance=0.01):
+    """approximateWire approximates any non-line/arc edges with lines or arcs.
+    Edges that are lines or circular arcs are kept as-is.
+    tolerance: Deflection tolerance for approximation. Must be positive if wire contains non-line/arc edges.
+    Returns the wire with non-line/arc edges replaced by arcs and line segments.
+    """
+    processed_edges = []
+    modified = False
+    for edge in wire.Edges:
+        curve = edge.Curve
+        if isinstance(curve, (Part.Line, Part.LineSegment, Part.Circle, Part.ArcOfCircle)):
+            # Keep lines and arcs as-is
+            processed_edges.append(edge)
+        else:
+            # Approximate with lines and arcs
+            if tolerance <= 0:
+                raise ValueError(
+                    "tolerance parameter is required to be a positive value to approximate non-line/arc edges"
+                )
+            modified = True
+
+            # Convert to BSpline first if appropriate, to enable arc fitting
+            if isinstance(curve, (Part.Ellipse, Part.Hyperbola, Part.Parabola)):
+                # Convert edge to NURBS (BSpline)
+                shape = edge.toNurbs()
+                edge = shape.Edges[0]
+            elif isinstance(curve, Part.BezierCurve):
+                # Convert BezierCurve to BSpline
+                curve = edge.Curve.toBSpline()
+                edge = curve.toShape()
+
+            if isinstance(edge.Curve, Part.BSplineCurve):
+                # Convert BSpline to arcs
+                curves = edge.Curve.toBiArcs(tolerance)
+                for curve in curves:
+                    processed_edges.append(curve.toShape())
+            else:
+                # For other curve types, fall back to discretization to line segments
+                vertices = edge.discretize(Deflection=tolerance)
+                line_edges = [
+                    Part.makeLine(vertices[i], vertices[i + 1]) for i in range(len(vertices) - 1)
+                ]
+                processed_edges.extend(line_edges)
+
+    # Reassemble the wire if any edges were replaced
+    if modified:
+        return Part.Wire(processed_edges)
+    return wire
+
+
+def offsetWire(wire, base, offset, forward, Side=None, tolerance=0.01):
+    """offsetWire ... offsets the wire away from base and orients the wire accordingly.
     The function tries to avoid most of the pitfalls of Part.makeOffset2D which is possible because all offsetting
     happens in the XY plane.
+    tolerance: Deflection tolerance for discretization. Must be positive if wire contains non-line/arc edges.
     """
     Path.Log.track("offsetWire")
+
+    # Pre-process the wire: approximate any non-line/arc edges with arcs and lines
+    wire = approximateWire(wire, tolerance)
 
     if len(wire.Edges) == 1:
         edge = wire.Edges[0]
