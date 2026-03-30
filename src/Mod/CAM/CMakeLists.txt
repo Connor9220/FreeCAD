@@ -512,6 +512,7 @@ SET(Tests_SRCS
     CAMTests/TestCAMSanity.py
     CAMTests/TestCentroidPost.py
     CAMTests/TestCentroidLegacyPost.py
+    CAMTests/TestDxfPost.py
     CAMTests/TestGenericPost.py
     CAMTests/TestGrblPost.py
     CAMTests/TestGrblLegacyPost.py
