@@ -543,6 +543,7 @@ SET(Tests_SRCS
     CAMTests/TestPathOpDeburr.py
     CAMTests/TestPathOpUtil.py
     CAMTests/TestPathPost.py
+    CAMTests/TestPathPocket.py
     CAMTests/TestPathPreferences.py
     CAMTests/TestPathProfile.py
     CAMTests/TestPathPropertyBag.py

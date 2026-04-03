@@ -59,6 +59,7 @@ from CAMTests.TestPathPost import TestResolvingPostProcessorName
 from CAMTests.TestPathPost import TestFileNameGenerator
 
 from CAMTests.TestPathPreferences import TestPathPreferences
+from CAMTests.TestPathPocket import TestPathPocket
 from CAMTests.TestPathProfile import TestPathProfile
 from CAMTests.TestPathPropertyBag import TestPathPropertyBag
 from CAMTests.TestPathRotationGenerator import TestPathRotationGenerator
