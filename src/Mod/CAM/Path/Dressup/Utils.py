@@ -37,7 +37,7 @@ def selection():
 
 def baseOp(path):
     """baseOp(path) ... return the base operation underlying the given path"""
-    if "Dressup" in path.Name:
+    if hasattr(path, "Name") and "Dressup" in path.Name:
         return baseOp(path.Base)
     return path
 
