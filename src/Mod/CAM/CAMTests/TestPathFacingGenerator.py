@@ -1,27 +1,24 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# ***************************************************************************
-# *                                                                         *
-# *   Copyright (c) 2025 sliptonic sliptonic@freecad.org                    *
-# *                                                                         *
-# *   This file is part of FreeCAD.                                         *
-# *                                                                         *
-# *   FreeCAD is free software: you can redistribute it and/or modify it    *
-# *   under the terms of the GNU Lesser General Public License as           *
-# *   published by the Free Software Foundation, either version 2.1 of the  *
-# *   License, or (at your option) any later version.                       *
-# *                                                                         *
-# *   FreeCAD is distributed in the hope that it will be useful, but        *
-# *   WITHOUT ANY WARRANTY; without even the implied warranty of            *
-# *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU      *
-# *   Lesser General Public License for more details.                       *
-# *                                                                         *
-# *   You should have received a copy of the GNU Lesser General Public      *
-# *   License along with FreeCAD. If not, see                               *
-# *   <https://www.gnu.org/licenses/>.                                      *
-# *                                                                         *
-# ***************************************************************************
+# SPDX-FileCopyrightText: 2025 sliptonic sliptonic@freecad.org
+# SPDX-FileNotice: Part of the FreeCAD project.
 
+################################################################################
+#                                                                              #
+#   FreeCAD is free software: you can redistribute it and/or modify            #
+#   it under the terms of the GNU Lesser General Public License as             #
+#   published by the Free Software Foundation, either version 2.1              #
+#   of the License, or (at your option) any later version.                     #
+#                                                                              #
+#   FreeCAD is distributed in the hope that it will be useful,                 #
+#   but WITHOUT ANY WARRANTY; without even the implied warranty                #
+#   of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.                    #
+#   See the GNU Lesser General Public License for more details.                #
+#                                                                              #
+#   You should have received a copy of the GNU Lesser General Public           #
+#   License along with FreeCAD. If not, see https://www.gnu.org/licenses       #
+#                                                                              #
+################################################################################
 import FreeCAD
 import math
 import Path.Base.Generator.spiral_facing as spiral_facing
@@ -1173,6 +1170,108 @@ class TestPathFacingGenerator(PathTestBase):
             avg_dist_first,
             "Spiral should move inward - later moves should be closer to center",
         )
+
+    # ------------------------------------------------------------------ #
+    #  Boundary wire tests — verify facing_common functions handle        #
+    #  non-rectangular (e.g. circular) wires from cylindrical stock.      #
+    # ------------------------------------------------------------------ #
+
+    def test_project_bounds_rectangular_wire(self):
+        """project_bounds returns correct extents for a rectangular wire."""
+        origin = self.square_wire.BoundBox.Center
+        vec_x = FreeCAD.Vector(1, 0, 0)
+        vec_y = FreeCAD.Vector(0, 1, 0)
+
+        min_x, max_x = facing_common.project_bounds(self.square_wire, vec_x, origin)
+        min_y, max_y = facing_common.project_bounds(self.square_wire, vec_y, origin)
+
+        self.assertAlmostEqual(min_x, -5.0, places=2)
+        self.assertAlmostEqual(max_x, 5.0, places=2)
+        self.assertAlmostEqual(min_y, -5.0, places=2)
+        self.assertAlmostEqual(max_y, 5.0, places=2)
+
+    def test_project_bounds_circular_wire(self):
+        """project_bounds must return the full circular extent, not just seam vertices."""
+        # circle_wire is centred at (5,5) with radius 5
+        origin = self.circle_wire.BoundBox.Center
+        vec_x = FreeCAD.Vector(1, 0, 0)
+        vec_y = FreeCAD.Vector(0, 1, 0)
+
+        min_x, max_x = facing_common.project_bounds(self.circle_wire, vec_x, origin)
+        min_y, max_y = facing_common.project_bounds(self.circle_wire, vec_y, origin)
+
+        # True extents are ±5 from centre
+        self.assertAlmostEqual(min_x, -5.0, places=1)
+        self.assertAlmostEqual(max_x, 5.0, places=1)
+        self.assertAlmostEqual(min_y, -5.0, places=1)
+        self.assertAlmostEqual(max_y, 5.0, places=1)
+
+    def test_generate_t_values_circular_wire(self):
+        """generate_t_values must produce multiple step positions spanning the circular wire."""
+        origin = self.circle_wire.BoundBox.Center
+        step_vec = FreeCAD.Vector(0, 1, 0)
+
+        values = facing_common.generate_t_values(self.circle_wire, step_vec, 2.0, 50, origin)
+
+        # For a 10 mm diameter circle with 2 mm tool at 50% stepover (1 mm steps)
+        # we expect roughly 10 passes; definitely more than 2
+        self.assertGreater(
+            len(values), 2, f"Expected multiple t-values for circular wire, got {len(values)}"
+        )
+
+        # Values should span most of the ±5 range from centre
+        self.assertLess(min(values), -3.0)
+        self.assertGreater(max(values), 3.0)
+
+    def test_zigzag_circular_wire(self):
+        """Zigzag generator must produce a valid toolpath for a circular boundary wire."""
+        commands = zigzag_facing.zigzag(
+            polygon=self.circle_wire,
+            tool_diameter=2.0,
+            stepover_percent=50,
+            angle_degrees=0.0,
+        )
+
+        self.assertIsInstance(commands, list)
+        self.assertGreater(len(commands), 0, "Zigzag should produce commands for circular wire")
+
+        # Should have cutting moves
+        cutting = [c for c in commands if c.Name == "G1"]
+        self.assertGreater(len(cutting), 2, "Should have multiple cutting passes")
+
+    def test_bidirectional_circular_wire(self):
+        """Bidirectional generator must produce a valid toolpath for a circular boundary wire."""
+        commands = bidirectional_facing.bidirectional(
+            polygon=self.circle_wire,
+            tool_diameter=2.0,
+            stepover_percent=50,
+            angle_degrees=0.0,
+        )
+
+        self.assertIsInstance(commands, list)
+        self.assertGreater(
+            len(commands), 0, "Bidirectional should produce commands for circular wire"
+        )
+
+        cutting = [c for c in commands if c.Name == "G1"]
+        self.assertGreater(len(cutting), 2, "Should have multiple cutting passes")
+
+    def test_directional_circular_wire(self):
+        """Directional generator must produce a valid toolpath for a circular boundary wire."""
+        commands = directional_facing.directional(
+            polygon=self.circle_wire,
+            tool_diameter=2.0,
+            stepover_percent=50,
+            angle_degrees=0.0,
+        )
+
+        self.assertIsInstance(commands, list)
+        self.assertGreater(
+            len(commands), 0, "Directional should produce commands for circular wire"
+        )
+
+        cutting = [c for c in commands if c.Name == "G1"]
+        self.assertGreater(len(cutting), 2, "Should have multiple cutting passes")
 
     def _create_mock_tool_controller(self, spindle_dir):
         """Create a mock tool controller for testing."""
