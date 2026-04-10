@@ -33,6 +33,7 @@ import Path
 import Path.Op.Base as PathOp
 
 import Path.Base.Generator.spiral_facing as spiral_facing
+import Path.Base.Generator.facing_common as facing_common
 import Path.Base.Generator.zigzag_facing as zigzag_facing
 import Path.Base.Generator.directional_facing as directional_facing
 import Path.Base.Generator.bidirectional_facing as bidirectional_facing
@@ -350,6 +351,12 @@ class ObjectMillFacing(PathOp.ObjectOp):
         boundary_wire = boundary_wire.makeOffset2D(
             obj.StockExtension.Value, 2
         )  # offset with interesection joins
+
+        # Convert boundary to a rectangular polygon aligned to the cut angle.
+        # Stock faces may have curved edges (e.g. cylindrical stock) and all
+        # facing strategies assume a rectangular boundary.
+        cut_angle = getattr(obj.Angle, "Value", obj.Angle)
+        boundary_wire = facing_common.get_angled_polygon(boundary_wire, cut_angle)
 
         # Determine milling direction
         milling_direction = "climb" if obj.CutMode == "Climb" else "conventional"

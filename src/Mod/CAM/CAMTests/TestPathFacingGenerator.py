@@ -1273,6 +1273,103 @@ class TestPathFacingGenerator(PathTestBase):
         cutting = [c for c in commands if c.Name == "G1"]
         self.assertGreater(len(cutting), 2, "Should have multiple cutting passes")
 
+    def test_spiral_circular_wire_via_angled_polygon(self):
+        """Spiral strategy requires a rectangular boundary.  When the stock has
+        curved edges (e.g. cylindrical stock) MillFacing converts the boundary
+        to a bounding rectangle via get_angled_polygon before calling any
+        strategy.
+
+        Given:  A circular wire (radius 5, centred at 5,5).
+        Action: Convert it to a rectangle with get_angled_polygon(wire, 0),
+                then pass the rectangle to spiral().
+        Expect: - The converted wire has exactly 4 edges.
+                - The rectangle fully contains the original circle's bounding box.
+                - spiral() returns a non-empty list of commands with cutting moves.
+        """
+        rect_wire = facing_common.get_angled_polygon(self.circle_wire, 0)
+
+        # Must be a closed 4-edge rectangle
+        self.assertTrue(rect_wire.isClosed(), "Converted wire must be closed")
+        self.assertEqual(len(rect_wire.Edges), 4, "Converted wire must have exactly 4 edges")
+
+        # Rectangle must encompass the original circle bounding box
+        orig_bb = self.circle_wire.BoundBox
+        rect_bb = rect_wire.BoundBox
+        self.assertLessEqual(rect_bb.XMin, orig_bb.XMin + 1e-6)
+        self.assertGreaterEqual(rect_bb.XMax, orig_bb.XMax - 1e-6)
+        self.assertLessEqual(rect_bb.YMin, orig_bb.YMin + 1e-6)
+        self.assertGreaterEqual(rect_bb.YMax, orig_bb.YMax - 1e-6)
+
+        # Spiral must succeed on the rectangular boundary
+        commands = spiral_facing.spiral(
+            polygon=rect_wire,
+            tool_diameter=2.0,
+            stepover_percent=50,
+            milling_direction="climb",
+        )
+
+        self.assertIsInstance(commands, list)
+        self.assertGreater(len(commands), 0, "Spiral should produce commands")
+        cutting = [c for c in commands if c.Name == "G1"]
+        self.assertGreater(len(cutting), 2, "Should have multiple cutting passes")
+
+    def test_spiral_spline_wire_via_angled_polygon(self):
+        """Same boundary-rectification path but with a spline wire.
+
+        Given:  A closed B-spline wire (irregular curved shape).
+        Action: Convert via get_angled_polygon(wire, 0), pass to spiral().
+        Expect: - 4-edge closed rectangle that contains the spline bounding box.
+                - spiral() produces a valid toolpath.
+        """
+        rect_wire = facing_common.get_angled_polygon(self.spline_wire, 0)
+
+        self.assertTrue(rect_wire.isClosed())
+        self.assertEqual(len(rect_wire.Edges), 4)
+
+        orig_bb = self.spline_wire.BoundBox
+        rect_bb = rect_wire.BoundBox
+        self.assertLessEqual(rect_bb.XMin, orig_bb.XMin + 1e-6)
+        self.assertGreaterEqual(rect_bb.XMax, orig_bb.XMax - 1e-6)
+        self.assertLessEqual(rect_bb.YMin, orig_bb.YMin + 1e-6)
+        self.assertGreaterEqual(rect_bb.YMax, orig_bb.YMax - 1e-6)
+
+        commands = spiral_facing.spiral(
+            polygon=rect_wire,
+            tool_diameter=2.0,
+            stepover_percent=50,
+            milling_direction="climb",
+        )
+
+        self.assertIsInstance(commands, list)
+        self.assertGreater(len(commands), 0, "Spiral should produce commands for spline boundary")
+        cutting = [c for c in commands if c.Name == "G1"]
+        self.assertGreater(len(cutting), 2, "Should have multiple cutting passes")
+
+    def test_spiral_circular_wire_angled_45(self):
+        """Boundary rectification at a non-zero angle still yields a valid
+        rectangular boundary for spiral.
+
+        Given:  A circular wire, angle = 45 degrees.
+        Action: Convert via get_angled_polygon(wire, 45), pass to spiral().
+        Expect: - 4-edge closed rectangle.
+                - spiral() at 45 degrees produces a valid toolpath.
+        """
+        rect_wire = facing_common.get_angled_polygon(self.circle_wire, 45)
+
+        self.assertTrue(rect_wire.isClosed())
+        self.assertEqual(len(rect_wire.Edges), 4)
+
+        commands = spiral_facing.spiral(
+            polygon=rect_wire,
+            tool_diameter=2.0,
+            stepover_percent=50,
+            milling_direction="climb",
+            angle_degrees=45,
+        )
+
+        self.assertIsInstance(commands, list)
+        self.assertGreater(len(commands), 0, "Spiral should produce commands at 45 degrees")
+
     def _create_mock_tool_controller(self, spindle_dir):
         """Create a mock tool controller for testing."""
 
