@@ -46,6 +46,12 @@ public:
     void bind(const App::ObjectIdentifier& _path) override;
     void setExpression(std::shared_ptr<App::Expression> expr) override;
     int getMargin();
+    void discardExpression();
+    void handleFocusOut();
+    bool isTentativeDiscard() const
+    {
+        return m_tentativeDiscard;
+    }
 
 protected:
     /*! Expression handling */
@@ -74,6 +80,9 @@ protected:
 
 private:
     void showExpression(Number number);
+    bool m_tentativeDiscard {false};
+    std::shared_ptr<App::Expression> m_savedExpr;
+    QString m_textAtDiscard;
 
 protected:
     QLineEdit* lineedit;

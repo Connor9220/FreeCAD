@@ -614,14 +614,20 @@ public:
 
     void keyPressEvent(QKeyEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
 
 private Q_SLOTS:
     void finishFormulaDialog();
     void openFormulaDialog();
     void onChange() override;
+    void discardExpression();
 
 private:
     bool autoClose;
+    bool m_tentativeDiscard {false};
+    std::shared_ptr<App::Expression> m_savedExpr;
+    QString m_textAtDiscard;
 };
 
 /*!
