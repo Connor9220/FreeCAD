@@ -22,9 +22,7 @@
  *                                                                         *
  ***************************************************************************/
 
-#ifndef __texture_h__
-#define __texture_h__
-#include "OpenGlWrapper.h"
+#pragma once
 
 namespace MillSim
 {
@@ -59,5 +57,3 @@ protected:
 
 
 }  // namespace MillSim
-
-#endif  // !__texture_h__

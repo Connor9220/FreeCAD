@@ -25,13 +25,13 @@
 #ifndef __simdisplay_h__
 #define __simdisplay_h__
 
-#include "GlUtils.h"
 #include "Shader.h"
 #include "StockObject.h"
 #include "MillPathLine.h"
 #include <vector>
 #include <random>
 #include <algorithm>
+#include <numbers>
 
 namespace MillSim
 {
