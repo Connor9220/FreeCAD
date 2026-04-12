@@ -22,9 +22,9 @@
  *                                                                         *
  ***************************************************************************/
 
-#ifndef __sim_shapes_h__
-#define __sim_shapes_h__
-#include "OpenGlWrapper.h"
+#pragma once
+
+#include <QOpenGLFunctions>
 #include "linmath.h"
 
 #define SET_DUAL(var, idx, y, z) \
@@ -135,4 +135,3 @@ protected:
 };
 
 }  // namespace MillSim
-#endif

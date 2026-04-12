@@ -25,7 +25,7 @@
 #ifndef __shader_h__
 #define __shader_h__
 
-#include "OpenGlWrapper.h"
+#include <string>
 #include "linmath.h"
 
 namespace MillSim
