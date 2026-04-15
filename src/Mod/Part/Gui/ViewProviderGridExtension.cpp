@@ -443,6 +443,17 @@ Base::Vector3d GridExtensionP::getPointInSketchCoordinates(const SbVec3f& point)
 
 int GridExtensionP::getViewOrientationFactor() const
 {
+    auto* app = Gui::Application::Instance;
+    if (!app) {
+        return 1;
+    }
+
+    auto* editDoc = app->editDocument();
+    if (!editDoc) {
+        return 1;
+    }
+
+    auto* view = dynamic_cast<Gui::View3DInventor*>(editDoc->getActiveView());
     if (!view) {
         return 1;
     }
