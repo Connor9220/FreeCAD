@@ -22,8 +22,7 @@
  *                                                                         *
  ***************************************************************************/
 
-#ifndef __glutils_h__
-#define __glutils_h__
+#pragma once
 
 #include "linmath.h"
 
@@ -37,11 +36,9 @@ constexpr auto EPSILON = 0.00001f;
 #define MS_KBD_CONTROL 0x10
 #define MS_KBD_ALT 0x20
 
-namespace MillSim
+namespace CAMSimulator
 {
 
 extern const mat4x4 identityMat;
 
-}  // namespace MillSim
-
-#endif  // !__glutils_h__
+}  // namespace CAMSimulator

@@ -1,8 +1,11 @@
 from typing import Any
 
 from Base.BaseClass import BaseClass
-from Base.Metadata import export
-from Metadata import no_args
+from Base.Metadata import export, no_args
+
+from Gui import Document
+from Part.App.TopoShape import TopoShape
+from CAM.App.Command import Command
 
 @export(
     Include="Mod/CAM/PathSimulator/AppGL/CAMSim.h",
@@ -30,12 +33,10 @@ class CAMSim(BaseClass):
                   Start a simulation process on a box shape stock with given resolution"""
         ...
 
-    @no_args
-    def ResetSimulation(self) -> Any:
+    def ResetSimulation(self, document: Document, /) -> None:
         """
-        ResetSimulation():
-
-                  Clear the simulation and all gcode commands"""
+        Clear the simulation and all gcode commands
+        """
         ...
 
     def AddTool(self, **kwargs) -> Any:
