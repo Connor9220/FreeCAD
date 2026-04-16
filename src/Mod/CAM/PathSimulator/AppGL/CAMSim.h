@@ -60,7 +60,7 @@ public:
     CAMSim() = default;
 
     void BeginSimulation(const Part::TopoShape& stock, float resolution);
-    void resetSimulation();
+    void resetSimulation(Gui::Document* doc);
     void addTool(
         const std::vector<float>& toolProfilePoints,
         int toolNumber,

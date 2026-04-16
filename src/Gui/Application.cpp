@@ -88,6 +88,7 @@
 #include "PythonDebugger.h"
 #include "MainWindowPy.h"
 #include "MDIViewPy.h"
+#include "MDIViewWithCamera.h"
 #include "Placement.h"
 #include "SoFCDB.h"
 #include "Selection.h"
@@ -2301,6 +2302,7 @@ void Application::initTypes()
     // views
     Gui::BaseView                               ::init();
     Gui::MDIView                                ::init();
+    Gui::MDIViewWithCamera						::init();
     Gui::View3DInventor                         ::init();
     Gui::AbstractSplitView                      ::init();
     Gui::SplitView3DInventor                    ::init();
