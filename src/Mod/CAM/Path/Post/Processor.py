@@ -24,6 +24,7 @@
 """
 The base classes for post processors in the CAM workbench.
 """
+
 import argparse
 import importlib.util
 import json
@@ -281,30 +282,6 @@ def needsTcOp(oldTc, newTc):
 
 class PostProcessor:
     """Base Class.  All non-legacy postprocessors should inherit from this class."""
-
-    def __init_subclass__(cls, **kwargs):
-        """Automatically wrap pre_processing_dialog methods to check show_dialog setting."""
-        super().__init_subclass__(**kwargs)
-
-        # Auto-wrap pre_processing_dialog in subclasses
-        if hasattr(cls, "pre_processing_dialog"):
-            original = cls.pre_processing_dialog
-
-            def wrapped(self, *args, **kwargs):
-                # Base class logic - runs BEFORE subclass method
-                if hasattr(self, "_machine") and hasattr(self._machine, "postprocessor_properties"):
-                    show_dialog = self._machine.postprocessor_properties.get("show_dialog", True)
-                    if not show_dialog:
-                        Path.Log.debug(
-                            "Pre-processing dialog skipped (show_dialog=False in machine config)"
-                        )
-                        return True
-
-                # Call the original subclass method
-                return original(self, *args, **kwargs)
-
-            # Replace the subclass method with our wrapped version
-            cls.pre_processing_dialog = wrapped
 
     @classmethod
     def get_common_property_schema(cls) -> List[Dict[str, Any]]:
@@ -1807,7 +1784,7 @@ class PostProcessor:
 
         Path.Log.debug("Exporting the job")
 
-        (flag, args) = self.process_arguments()
+        flag, args = self.process_arguments()
         #
         # If the flag is True, then continue postprocessing the 'postables'.
         #
@@ -1885,7 +1862,7 @@ class PostProcessor:
         args: ParserArgs
         flag: bool
 
-        (flag, args) = PostUtilsArguments.process_shared_arguments(
+        flag, args = PostUtilsArguments.process_shared_arguments(
             self.values, self.parser, self._job.PostProcessorArgs, self.all_visible, "-"
         )
         #
@@ -1920,13 +1897,6 @@ class PostProcessor:
 
         postables = self._buildPostList()
         Path.Log.debug(f"postables {postables}")
-
-        # Process canned cycles for drilling operations
-        for _, section in enumerate(postables):
-            _, sublist = section
-            for obj in sublist:
-                if hasattr(obj, "Path"):
-                    obj.Path = PostUtils.cannedCycleTerminator(obj.Path)
 
         Path.Log.debug(f"postables count: {len(postables)}")
 
@@ -2357,6 +2327,12 @@ class PostProcessor:
                     # Update modal state for unhandled parameters too
                     self._modal_state[parameter] = params[parameter]
 
+        # Suppress commands where all parameters were removed by duplicate suppression
+        # or parameter_order exclusion (e.g., Z suppression for wire EDM).
+        # A bare move (G0, G1, G2, G3) or dwell (G4) with no parameters is meaningless.
+        if params and len(command_line) == 1:
+            return None
+
         # Handle tool length offset (G43) suppression
         if command_name in ("G43",):
             if not self.values.get("OUTPUT_TOOL_LENGTH_OFFSET", True):
@@ -2445,7 +2421,12 @@ class PostProcessor:
 
         This method can be overridden by derived postprocessors to customize tool change handling.
         """
-        return self._convert_move(command)
+        result = self._convert_move(command)
+        # Reset modal state after tool change so that subsequent commands
+        # (M3 S..., G4 P..., G0 X... etc.) are not suppressed as duplicates.
+        for key in self._modal_state:
+            self._modal_state[key] = None
+        return result
 
     def _convert_spindle_command(self, command: Path.Command) -> str:
         """
