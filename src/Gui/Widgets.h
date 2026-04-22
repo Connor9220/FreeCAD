@@ -621,9 +621,10 @@ private Q_SLOTS:
     void finishFormulaDialog();
     void openFormulaDialog();
     void onChange() override;
-    void discardExpression();
+    void stashExpression();
 
 private:
+    bool isValueTouched() const;
     bool autoClose;
     bool m_tentativeDiscard {false};
     std::shared_ptr<App::Expression> m_savedExpr;

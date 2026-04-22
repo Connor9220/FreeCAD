@@ -57,7 +57,7 @@ public:
     {
         if (event->type() == QEvent::MouseButtonDblClick && m_binding.hasExpression()
             && !m_binding.isTentativeDiscard()) {
-            m_binding.discardExpression();
+            m_binding.stashExpression();
             return true;
         }
         return false;
@@ -78,7 +78,7 @@ public:
     bool eventFilter(QObject*, QEvent* event) override
     {
         if (event->type() == QEvent::FocusOut) {
-            m_binding.handleFocusOut();
+            m_binding.restoreExpression();
         }
         return false;
     }
@@ -110,7 +110,7 @@ ExpressionSpinBox::ExpressionSpinBox(QAbstractSpinBox* sb)
 
 ExpressionSpinBox::~ExpressionSpinBox() = default;
 
-void ExpressionSpinBox::discardExpression()
+void ExpressionSpinBox::stashExpression()
 {
     if (!hasExpression() || m_tentativeDiscard) {
         return;
@@ -123,13 +123,18 @@ void ExpressionSpinBox::discardExpression()
     lineedit->selectAll();
 }
 
-void ExpressionSpinBox::handleFocusOut()
+bool ExpressionSpinBox::isValueTouched() const
+{
+    return lineedit->text() != m_textAtDiscard;
+}
+
+void ExpressionSpinBox::restoreExpression()
 {
     if (!m_tentativeDiscard) {
         return;
     }
     m_tentativeDiscard = false;
-    if (lineedit->text() == m_textAtDiscard) {
+    if (!isValueTouched()) {
         setExpression(m_savedExpr);
         m_savedExpr.reset();
         updateExpression();

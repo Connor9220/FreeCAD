@@ -1740,7 +1740,7 @@ void ExpLineEdit::keyPressEvent(QKeyEvent* event)
     }
 }
 
-void ExpLineEdit::discardExpression()
+void ExpLineEdit::stashExpression()
 {
     if (!hasExpression() || m_tentativeDiscard) {
         return;
@@ -1756,17 +1756,22 @@ void ExpLineEdit::discardExpression()
 void ExpLineEdit::mouseDoubleClickEvent(QMouseEvent* event)
 {
     if (hasExpression() && !m_tentativeDiscard) {
-        discardExpression();
+        stashExpression();
         return;
     }
     QLineEdit::mouseDoubleClickEvent(event);
+}
+
+bool ExpLineEdit::isValueTouched() const
+{
+    return text() != m_textAtDiscard;
 }
 
 void ExpLineEdit::focusOutEvent(QFocusEvent* event)
 {
     if (m_tentativeDiscard) {
         m_tentativeDiscard = false;
-        if (text() == m_textAtDiscard) {
+        if (!isValueTouched()) {
             setExpression(m_savedExpr);
             m_savedExpr.reset();
             onChange();
