@@ -132,11 +132,12 @@ class PostProcessor:
         self._kwargs = kwargs
         self.reinitialize()
 
+        self._operations = []
         if isinstance(job, dict):
             # process only selected operations
             self._job = job["job"]
             self._operations = job["operations"]
-        else:
+        if not self._operations:
             # get all operations from 'Operations' group
             self._job = job
             self._operations = getattr(job.Operations, "Group", [])
