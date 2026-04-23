@@ -46,6 +46,13 @@ public:
 
     void bind(const App::ObjectIdentifier& _path) override;
     void setExpression(std::shared_ptr<App::Expression> expr) override;
+    int getMargin();
+    void stashExpression();
+    void restoreExpression();
+    bool isTentativeDiscard() const
+    {
+        return m_tentativeDiscard;
+    }
 
 protected:
     /*! Expression handling */
@@ -66,7 +73,6 @@ protected:
     virtual void showIcon();
     virtual void validateInput();
     void resizeWidget();
-    int getMargin();
 
     bool handleKeyEvent(const QString&);
     virtual void openFormulaDialog();
@@ -75,6 +81,10 @@ protected:
 
 private:
     void showExpression(Number number);
+    bool isValueTouched() const;
+    bool m_tentativeDiscard {false};
+    std::shared_ptr<App::Expression> m_savedExpr;
+    QString m_textAtDiscard;
 
 protected:
     QLineEdit* lineedit;
