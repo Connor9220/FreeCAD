@@ -111,6 +111,11 @@ class ObjectPocket(PathAreaOp.ObjectOp):
             return
         super().opExecute(obj)
 
+    def areaOpOnChanged(self, obj, prop):
+        if prop == "ClearingPattern":
+            angleMode = 0 if obj.ClearingPattern != "Offset" else 2
+            obj.setEditorMode("Angle", angleMode)
+
     def pocketInvertExtraOffset(self):
         """pocketInvertExtraOffset() ... return True if ExtraOffset's direction is inward.
         Can safely be overwritten by subclass."""
@@ -156,9 +161,9 @@ class ObjectPocket(PathAreaOp.ObjectOp):
         )
         obj.addProperty(
             "App::PropertyFloat",
-            "ZigZagAngle",
+            "Angle",
             "Pocket",
-            QT_TRANSLATE_NOOP("App::Property", "Angle of the zigzag pattern"),
+            QT_TRANSLATE_NOOP("App::Property", "Angle of the grid, line and zigzag patterns"),
         )
         obj.addProperty(
             "App::PropertyEnumeration",
@@ -228,7 +233,7 @@ class ObjectPocket(PathAreaOp.ObjectOp):
         params["Coplanar"] = 0
         params["PocketMode"] = 1
         params["SectionCount"] = -1
-        params["Angle"] = obj.ZigZagAngle
+        params["Angle"] = obj.Angle
         params["FromCenter"] = obj.StartAt == "Center"
         params["PocketStepover"] = (self.radius * 2) * (float(obj.StepOver) / 100)
         extraOffset = obj.ExtraOffset.Value
@@ -298,6 +303,8 @@ class ObjectPocket(PathAreaOp.ObjectOp):
                     "\nManual: uses order of shapes selection",
                 ),
             )
+        if hasattr(obj, "ZigZagAngle"):
+            obj.renameProperty("ZigZagAngle", "Angle")
         if hasattr(obj, "OffsetPattern"):
             obj.setGroupOfProperty("OffsetPattern", "Pocket")
             obj.renameProperty("OffsetPattern", "ClearingPattern")
@@ -340,7 +347,7 @@ def SetupProperties():
     setup.append("CutMode")
     setup.append("ExtraOffset")
     setup.append("StepOver")
-    setup.append("ZigZagAngle")
+    setup.append("Angle")
     setup.append("ClearingPattern")
     setup.append("StartAt")
     setup.append("MinTravel")
