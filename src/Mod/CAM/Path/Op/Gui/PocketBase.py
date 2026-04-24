@@ -193,3 +193,17 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
             signals.append(self.form.clearEdges.clicked)
 
         return signals
+
+    def registerSignalHandlers(self, obj):
+        self.form.setStartPoint.clicked.connect(self.setStartPoint)
+
+    def setStartPoint(self):
+        selEx = FreeCADGui.Selection.getSelectionEx()
+        if selEx and selEx[0].PickedPoints:
+            point = selEx[0].PickedPoints[0]
+            self.obj.StartPoint = point
+            self.setDirty()
+            Path.Log.info(
+                translate("CAM_Pocket", "Set start point: %s, %s")
+                % (round(point.x, 3), round(point.y, 3))
+            )
