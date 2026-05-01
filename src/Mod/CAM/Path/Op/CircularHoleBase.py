@@ -65,6 +65,7 @@ class ObjectOp(PathOp.ObjectOp):
             | PathOp.FeatureBaseFaces
             | self.circularHoleFeatures(obj)
             | PathOp.FeatureCoolant
+            | PathOp.FeatureLinking
         )
 
     def circularHoleFeatures(self, obj):
