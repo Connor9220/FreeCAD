@@ -301,6 +301,7 @@ SET(PathPythonPost_SRCS
     Path/Post/Command.py
     Path/Post/PostList.py
     Path/Post/Processor.py
+    Path/Post/DrillCycleExpander.py
     Path/Post/Utils.py
     Path/Post/UtilsArguments.py
     Path/Post/UtilsExport.py
