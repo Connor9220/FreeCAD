@@ -440,14 +440,13 @@ class TestPathAdaptive(PathTestBase):
         # Set additional operation properties
         # setDepthsAndHeights(adaptive)
         adaptive.FinishingProfile = False
-        adaptive.HelixAngle = 75.0
+        adaptive.HelixMaxRampAngle = 75.0
         adaptive.LiftDistance.Value = 1.0
         adaptive.StepOver = 75
         adaptive.UseOutline = False
         adaptive.setExpression("StepDown", None)
-        adaptive.StepDown.Value = (
-            20.0  # Have to set expression to None before numerical value assignment
-        )
+        # Have to set expression to None before numerical value assignment
+        adaptive.StepDown.Value = 20.0
 
         _addViewProvider(adaptive)
         self.doc.recompute()
@@ -473,14 +472,13 @@ class TestPathAdaptive(PathTestBase):
         # Set additional operation properties
         # setDepthsAndHeights(adaptive)
         adaptive.FinishingProfile = False
-        adaptive.HelixAngle = 75.0
+        adaptive.HelixMaxRampAngle = 75.0
         adaptive.LiftDistance.Value = 1.0
         adaptive.StepOver = 75
         adaptive.UseOutline = False
         adaptive.setExpression("StepDown", None)
-        adaptive.StepDown.Value = (
-            20.0  # Have to set expression to None before numerical value assignment
-        )
+        # Have to set expression to None before numerical value assignment
+        adaptive.StepDown.Value = 20.0
 
         _addViewProvider(adaptive)
         self.doc.recompute()
@@ -500,14 +498,13 @@ class TestPathAdaptive(PathTestBase):
         # Set additional operation properties
         # setDepthsAndHeights(adaptive)
         adaptive.FinishingProfile = False
-        adaptive.HelixAngle = 75.0
+        adaptive.HelixMaxRampAngle = 75.0
         adaptive.LiftDistance.Value = 1.0
         adaptive.StepOver = 75
         adaptive.UseOutline = True
         adaptive.setExpression("StepDown", None)
-        adaptive.StepDown.Value = (
-            20.0  # Have to set expression to None before numerical value assignment
-        )
+        # Have to set expression to None before numerical value assignment
+        adaptive.StepDown.Value = 20.0
 
         _addViewProvider(adaptive)
         self.doc.recompute()
@@ -540,14 +537,13 @@ class TestPathAdaptive(PathTestBase):
         # Set additional operation properties
         # setDepthsAndHeights(adaptive)
         adaptive.FinishingProfile = False
-        adaptive.HelixAngle = 75.0
+        adaptive.HelixMaxRampAngle = 75.0
         adaptive.LiftDistance.Value = 1.0
         adaptive.StepOver = 75
         adaptive.UseOutline = False
         adaptive.setExpression("StepDown", None)
-        adaptive.StepDown.Value = (
-            20.0  # Have to set expression to None before numerical value assignment
-        )
+        # Have to set expression to None before numerical value assignment
+        adaptive.StepDown.Value = 20.0
 
         _addViewProvider(adaptive)
         self.doc.recompute()
@@ -582,14 +578,13 @@ class TestPathAdaptive(PathTestBase):
         # Set additional operation properties
         # setDepthsAndHeights(adaptive)
         adaptive.FinishingProfile = False
-        adaptive.HelixAngle = 75.0
+        adaptive.HelixMaxRampAngle = 75.0
         adaptive.LiftDistance.Value = 1.0
         adaptive.StepOver = 75
         adaptive.UseOutline = False
         adaptive.setExpression("StepDown", None)
-        adaptive.StepDown.Value = (
-            20.0  # Have to set expression to None before numerical value assignment
-        )
+        # Have to set expression to None before numerical value assignment
+        adaptive.StepDown.Value = 20.0
 
         _addViewProvider(adaptive)
         self.doc.recompute()
@@ -624,14 +619,13 @@ class TestPathAdaptive(PathTestBase):
         # Set additional operation properties
         # setDepthsAndHeights(adaptive)
         adaptive.FinishingProfile = False
-        adaptive.HelixAngle = 75.0
+        adaptive.HelixMaxRampAngle = 75.0
         adaptive.LiftDistance.Value = 1.0
         adaptive.StepOver = 75
         adaptive.UseOutline = False
         adaptive.setExpression("StepDown", None)
-        adaptive.StepDown.Value = (
-            20.0  # Have to set expression to None before numerical value assignment
-        )
+        # Have to set expression to None before numerical value assignment
+        adaptive.StepDown.Value = 20.0
 
         _addViewProvider(adaptive)
         self.doc.recompute()
@@ -666,14 +660,13 @@ class TestPathAdaptive(PathTestBase):
         # Set additional operation properties
         # setDepthsAndHeights(adaptive)
         adaptive.FinishingProfile = False
-        adaptive.HelixAngle = 75.0
+        adaptive.HelixMaxRampAngle = 75.0
         adaptive.LiftDistance.Value = 1.0
         adaptive.StepOver = 75
         adaptive.UseOutline = False
         adaptive.setExpression("StepDown", None)
-        adaptive.StepDown.Value = (
-            20.0  # Have to set expression to None before numerical value assignment
-        )
+        # Have to set expression to None before numerical value assignment
+        adaptive.StepDown.Value = 20.0
 
         _addViewProvider(adaptive)
         self.doc.recompute()
@@ -726,19 +719,14 @@ class TestPathAdaptive(PathTestBase):
         # Set additional operation properties
         setDepthsAndHeights(adaptive, 15, 0)
         adaptive.FinishingProfile = False
-        adaptive.HelixAngle = 75.0
+        adaptive.HelixMaxRampAngle = 75.0
         adaptive.LiftDistance.Value = 1.0
         adaptive.StepOver = 75
         adaptive.UseOutline = False
         adaptive.setExpression("StepDown", None)
         adaptive.ModelAwareExperiment = True
-        adaptive.StepDown.Value = (
-            5.0  # Have to set expression to None before numerical value assignment
-        )
-        # Don't use helix entry- ensures helix moves are counted in the path
-        # boundary calculation. This should be unnecessary, as the helices are
-        # grown out of the cut area, and thus must be inside of it.
-        adaptive.UseHelixArcs = False
+        # Have to set expression to None before numerical value assignment
+        adaptive.StepDown.Value = 5.0
 
         _addViewProvider(adaptive)
         self.doc.recompute()
@@ -795,14 +783,13 @@ class TestPathAdaptive(PathTestBase):
         # Set additional operation properties
         setDepthsAndHeights(adaptive, 15, 10)
         adaptive.FinishingProfile = False
-        adaptive.HelixAngle = 75.0
+        adaptive.HelixMaxRampAngle = 75.0
         adaptive.LiftDistance.Value = 1.0
         adaptive.StepOver = 75
         adaptive.UseOutline = False
         adaptive.setExpression("StepDown", None)
-        adaptive.StepDown.Value = (
-            5.0  # Have to set expression to None before numerical value assignment
-        )
+        # Have to set expression to None before numerical value assignment
+        adaptive.StepDown.Value = 5.0
         # Add some Z stock to leave so we avoid Face3 in this stepdown at Z=10
         adaptive.setExpression("ZStockToLeave", None)
         adaptive.ZStockToLeave.Value = 1
@@ -856,19 +843,14 @@ class TestPathAdaptive(PathTestBase):
         # Set additional operation properties
         setDepthsAndHeights(adaptive, 15, 0)
         adaptive.FinishingProfile = False
-        adaptive.HelixAngle = 75.0
+        adaptive.HelixMaxRampAngle = 75.0
         adaptive.LiftDistance.Value = 1.0
         adaptive.StepOver = 75
         adaptive.UseOutline = False
         adaptive.setExpression("StepDown", None)
         adaptive.ModelAwareExperiment = True
-        adaptive.StepDown.Value = (
-            5.0  # Have to set expression to None before numerical value assignment
-        )
-        # Don't use helix entry- ensures helix moves are counted in the path
-        # boundary calculation. This should be unnecessary, as the helices are
-        # grown out of the cut area, and thus must be inside of it.
-        adaptive.UseHelixArcs = False
+        # Have to set expression to None before numerical value assignment
+        adaptive.StepDown.Value = 5.0
 
         _addViewProvider(adaptive)
         self.doc.recompute()
@@ -937,19 +919,14 @@ class TestPathAdaptive(PathTestBase):
         # Set additional operation properties
         setDepthsAndHeights(adaptive, 15, 5)
         adaptive.FinishingProfile = False
-        adaptive.HelixAngle = 75.0
+        adaptive.HelixMaxRampAngle = 75.0
         adaptive.LiftDistance.Value = 1.0
         adaptive.StepOver = 75
         adaptive.UseOutline = False
         adaptive.setExpression("StepDown", None)
         adaptive.ModelAwareExperiment = True
-        adaptive.StepDown.Value = (
-            5.0  # Have to set expression to None before numerical value assignment
-        )
-        # Don't use helix entry- ensures helix moves are counted in the path
-        # boundary calculation. This should be unnecessary, as the helices are
-        # grown out of the cut area, and thus must be inside of it.
-        adaptive.UseHelixArcs = False
+        # Have to set expression to None before numerical value assignment
+        adaptive.StepDown.Value = 5.0
 
         # Create and assign new stock that will create different bounds at
         # different stepdowns
