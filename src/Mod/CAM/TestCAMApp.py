@@ -69,6 +69,7 @@ from CAMTests.TestPostProcessor import (
     TestPostProcessorFactory,
     TestResolvingPostProcessorName,
     TestHeaderBuilder,
+    TestPostProcessorClassification,
     TestConfigurationBundle,
 )
 from CAMTests.TestPostOutput import (
