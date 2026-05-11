@@ -372,6 +372,7 @@ def select(op):
     opsel["Profile Faces"] = fselect  # deprecated
     opsel["Profile"] = profileselect
     opsel["Slot"] = slotselect
+    opsel["RotarySurface"] = surfaceselect
     opsel["Surface"] = surfaceselect
     opsel["Waterline"] = surfaceselect
     opsel["Adaptive"] = adaptiveselect
