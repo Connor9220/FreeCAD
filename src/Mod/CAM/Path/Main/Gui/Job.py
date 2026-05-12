@@ -39,8 +39,8 @@ import Path.Main.Stock as PathStock
 import Path.Tool.Gui.Controller as PathToolControllerGui
 import PathScripts.PathUtils as PathUtils
 from Path.Tool.toolbit.ui.selector import ToolBitSelector
-from Machine.models import MachineFactory
-from Machine.ui.editor import MachineEditorDialog
+#from Machine.models import MachineFactory
+#from Machine.ui.editor import MachineEditorDialog
 import math
 import traceback
 from PySide import QtWidgets
@@ -1433,7 +1433,7 @@ class TaskPanel:
         try:
             entries = MachineFactory.list_configuration_files()
         except Exception as e:
-            Path.Log.warning("Failed to list machines: %s" % e)
+            # Path.Log.warning("Failed to list machines: %s" % e)
             entries = [("<none>", None)]
         for display, filename in entries:
             combo.addItem(display, filename or "")
@@ -1720,8 +1720,9 @@ class TaskPanel:
         self.form.jobModelEdit.clicked.connect(self.jobModelEdit)
 
         # Machine
-        self.form.jobMachine.currentIndexChanged.connect(self.machineChanged)
-        self.form.jobMachineNew.clicked.connect(self.newMachine)
+        #self.form.jobMachine.currentIndexChanged.connect(self.machineChanged)
+        #self.form.jobMachineNew.clicked.connect(self.newMachine)
+        self.form.machineGroup.hide()  # not supported yet
 
         # Post Processor
         self.form.postProcessor.currentIndexChanged.connect(self.getFields)
