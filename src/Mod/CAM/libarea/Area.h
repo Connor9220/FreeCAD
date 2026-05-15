@@ -9,7 +9,10 @@
 #define AREA_HEADER
 
 #include "Curve.h"
-#include "clipper.hpp"
+#include "clipper2/clipper.h"
+
+namespace heeks
+{
 
 enum PocketMode
 {
@@ -74,15 +77,14 @@ public:
     void Subtract(const CArea& a2);
     void Intersect(const CArea& a2);
     void Union(const CArea& a2);
-    static CArea UniteCurves(std::list<CCurve>& curves);
     void Xor(const CArea& a2);
     void Offset(double inwards_value);
     void OffsetWithClipper(
         double offset,
-        ClipperLib::JoinType joinType = ClipperLib::jtRound,
-        ClipperLib::EndType endType = ClipperLib::etOpenRound,
+        Clipper2Lib::JoinType joinType = Clipper2Lib::JoinType::Round,
+        Clipper2Lib::EndType endType = Clipper2Lib::EndType::Round,
         double miterLimit = 5.0,
-        double roundPrecision = 0.0
+        double arcTolerance = 0.0
     );
     void Thicken(double value);
     void FitArcs();
@@ -120,13 +122,14 @@ public:
     CAREA_PARAM_DECLARE(short, max_arc_points)
     CAREA_PARAM_DECLARE(double, clipper_scale)
 
+    void PopulateClipper(Clipper2Lib::Clipper64& c, bool as_clip) const;
+
     // Following functions is add to operate on possible open curves
-    void PopulateClipper(ClipperLib::Clipper& c, ClipperLib::PolyType type) const;
     void Clip(
-        ClipperLib::ClipType op,
-        const CArea* a,
-        ClipperLib::PolyFillType subjFillType = ClipperLib::pftEvenOdd,
-        ClipperLib::PolyFillType clipFillType = ClipperLib::pftEvenOdd
+        Clipper2Lib::ClipType op,
+        const CArea& clip_area,
+        Clipper2Lib::FillRule subjFillType = Clipper2Lib::FillRule::EvenOdd,
+        Clipper2Lib::FillRule clipFillType = Clipper2Lib::FillRule::EvenOdd
     );
 };
 
@@ -143,4 +146,4 @@ eOverlapType GetOverlapType(const CArea& a1, const CArea& a2);
 bool IsInside(const Point& p, const CCurve& c);
 bool IsInside(const Point& p, const CArea& a);
 
-#endif  // #define AREA_HEADER
+}  // namespace heeks
