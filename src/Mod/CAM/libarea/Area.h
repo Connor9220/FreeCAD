@@ -5,12 +5,9 @@
 // This program is released under the BSD license. See the file COPYING for details.
 // repository now moved to github
 
-#ifndef AREA_HEADER
-#define AREA_HEADER
 
 #include "Curve.h"
 #include "clipper2/clipper.h"
-
 namespace heeks
 {
 
