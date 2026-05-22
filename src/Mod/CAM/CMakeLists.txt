@@ -520,6 +520,7 @@ SET(Tests_SRCS
     CAMTests/TestGrblPost.py
     CAMTests/TestGrblLegacyPost.py
     CAMTests/TestLinuxCNCPost.py
+    CAMTests/TestLinuxCNCLegacyPost.py
     CAMTests/TestLinkingGenerator.py
     CAMTests/TestMach3Mach4Post.py
     CAMTests/TestMach3Mach4LegacyPost.py

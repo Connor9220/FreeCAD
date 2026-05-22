@@ -32,12 +32,13 @@ from CAMTests.TestPathProfile import TestPathProfile
 from CAMTests.TestPathAdaptive import TestPathAdaptive
 from CAMTests.TestPathCommandAnnotations import TestPathCommandAnnotations
 from CAMTests.TestPathCore import TestPathCore
-from CAMTests.TestPathDepthParams import depthTestCases
+from CAMTests.TestPathDepthParams import TestDepthCases
 from CAMTests.TestPathDressupDogbone import TestDressupDogbone
 from CAMTests.TestPathDressupDogboneII import TestDressupDogboneII
-from CAMTests.TestPathDressupHoldingTags import TestHoldingTags
 from CAMTests.TestPathDrillable import TestPathDrillable
 from CAMTests.TestPathDrillGenerator import TestPathDrillGenerator
+from CAMTests.TestPathDressupHoldingTags import TestHoldingTags
+from CAMTests.TestDrillCycleExpander import TestDrillCycleExpander
 from CAMTests.TestPathFacingGenerator import TestPathFacingGenerator
 from CAMTests.TestPathGeneratorDogboneII import TestGeneratorDogboneII
 from CAMTests.TestPathGeom import TestPathGeom
@@ -96,11 +97,11 @@ from CAMTests.TestPathToolLibrary import TestPathToolLibrary
 from CAMTests.TestPathToolLibrarySerializer import (
     TestCamoticsLibrarySerializer,
     TestLinuxCNCLibrarySerializer,
+    TestPathToolLibrarySerializerBase,
 )
 from CAMTests.TestPathToolChangeGenerator import TestPathToolChangeGenerator
 from CAMTests.TestPathToolController import TestPathToolController
-from CAMTests.TestPathToolMachine import TestPathToolMachine
-from CAMTests.TestPathUtil import TestPathUtil
+from CAMTests.TestPathUtil import TestPathUtil, TestCompass
 from CAMTests.TestPathVcarve import TestPathVcarve
 from CAMTests.TestPathVoronoi import TestPathVoronoi
 
