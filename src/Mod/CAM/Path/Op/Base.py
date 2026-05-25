@@ -174,6 +174,13 @@ class ObjectOp(object):
                 "\nTool Shape: safest - checks clearance using the cross section of the tool shape",
             ),
         )
+        obj.CollisionAvoidanceStrategy = [
+            "Clearance Height",
+            "Retract Height",
+            "Line of Sight",
+            "Tool Diameter",
+            "Tool Shape",
+        ]
         obj.addProperty(
             "App::PropertyLength",
             "CollisionClearance",
@@ -390,13 +397,6 @@ class ObjectOp(object):
                 (translate("CAM_Operation", "None"), "None"),
                 (translate("CAM_Operation", "Flood"), "Flood"),
                 (translate("CAM_Operation", "Mist"), "Mist"),
-            ],
-            "CollisionAvoidanceStrategy": [
-                (translate("CAM_Operation", "Clearance Height"), "Clearance Height"),
-                (translate("CAM_Operation", "Retract Height"), "Retract Height"),
-                (translate("CAM_Operation", "Line of Sight"), "Line of Sight"),
-                (translate("CAM_Operation", "Tool Diameter"), "Tool Diameter"),
-                (translate("CAM_Operation", "Tool Shape"), "Tool Shape"),
             ],
         }
 
@@ -656,7 +656,7 @@ class ObjectOp(object):
             obj.UseStartPoint = False
 
         if FeatureLinking & features:
-            obj.CollisionAvoidanceStrategy = "Clearance Height"
+            obj.CollisionAvoidanceStrategy = job.SetupSheet.CollisionAvoidanceStrategy
             self.applyExpression(obj, "CollisionClearance", "OpToolDiameter")
 
         self.opSetDefaultValues(obj, job)
@@ -1199,3 +1199,10 @@ def getCycleTimeEstimate(obj):
     cycleTime = time.strftime("%H:%M:%S", time.gmtime(seconds))
 
     return cycleTime
+
+
+def SetupPropertiesLinking():
+    setup = []
+    setup.append("CollisionAvoidanceStrategy")
+    setup.append("CollisionClearance")
+    return setup
