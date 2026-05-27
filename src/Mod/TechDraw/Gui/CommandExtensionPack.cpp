@@ -580,7 +580,7 @@ CmdTechDrawExtensionThreadsGroup::CmdTechDrawExtensionThreadsGroup()
     sAppModule = "TechDraw";
     sGroup = QT_TR_NOOP("TechDraw");
     sMenuText = QT_TR_NOOP("Cosmetic Thread Hole Side View");
-    sToolTipText = QT_TR_NOOP("Add a cosmetic thread to the side view of a selected hole between two selected parallel lines");
+    sToolTipText = QT_TR_NOOP("Adds a cosmetic thread to the side view of a selected hole between two selected parallel lines");
     sWhatsThis = "TechDraw_ExtensionThreadsGroup";
     sStatusTip = sMenuText;
 }
@@ -967,7 +967,7 @@ void execCosmeticCircleCenter(Gui::Command* cmd)
 
     if (points.empty()) {
         QMessageBox::warning(Gui::getMainWindow(), QObject::tr("Wrong Selection"),
-                             QObject::tr("Please select a center for the circle."));
+                             QObject::tr("Select a center for the circle."));
         return;
     }
 

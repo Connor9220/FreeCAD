@@ -124,7 +124,7 @@ int EditDatumDialog::exec(bool atCursor)
             datum = Base::toDegrees<double>(datum);
             dlg.setWindowTitle(tr("Insert Angle"));
             init_val.setUnit(Base::Unit::Angle);
-            ui_ins_datum->label->setText(tr("Angle:"));
+            ui_ins_datum->label->setText(tr("Angle"));
             ui_ins_datum->labelEdit->setParamGrpPath(
                 QByteArray("User parameter:BaseApp/History/SketcherAngle")
             );
@@ -132,7 +132,7 @@ int EditDatumDialog::exec(bool atCursor)
         else if (Constr->Type == Sketcher::Radius) {
             dlg.setWindowTitle(tr("Insert Radius"));
             init_val.setUnit(Base::Unit::Length);
-            ui_ins_datum->label->setText(tr("Radius:"));
+            ui_ins_datum->label->setText(tr("Radius"));
             ui_ins_datum->labelEdit->setParamGrpPath(
                 QByteArray("User parameter:BaseApp/History/SketcherLength")
             );
@@ -140,14 +140,14 @@ int EditDatumDialog::exec(bool atCursor)
         else if (Constr->Type == Sketcher::Diameter) {
             dlg.setWindowTitle(tr("Insert Diameter"));
             init_val.setUnit(Base::Unit::Length);
-            ui_ins_datum->label->setText(tr("Diameter:"));
+            ui_ins_datum->label->setText(tr("Diameter"));
             ui_ins_datum->labelEdit->setParamGrpPath(
                 QByteArray("User parameter:BaseApp/History/SketcherLength")
             );
         }
         else if (Constr->Type == Sketcher::Weight) {
             dlg.setWindowTitle(tr("Insert Weight"));
-            ui_ins_datum->label->setText(tr("Weight:"));
+            ui_ins_datum->label->setText(tr("Weight"));
             ui_ins_datum->labelEdit->setParamGrpPath(
                 QByteArray("User parameter:BaseApp/History/SketcherWeight")
             );
@@ -163,7 +163,7 @@ int EditDatumDialog::exec(bool atCursor)
         else {
             dlg.setWindowTitle(tr("Insert Length"));
             init_val.setUnit(Base::Unit::Length);
-            ui_ins_datum->label->setText(tr("Length:"));
+            ui_ins_datum->label->setText(tr("Length"));
             ui_ins_datum->labelEdit->setParamGrpPath(
                 QByteArray("User parameter:BaseApp/History/SketcherLength")
             );
