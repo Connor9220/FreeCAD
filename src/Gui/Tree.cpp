@@ -571,6 +571,15 @@ void TreeWidgetItemDelegate::initStyleOption(QStyleOptionViewItem* option, const
         return;
     }
 
+    // Clear State_Enabled for hidden objects so QSS ::item:disabled rules can
+    // override the overlay stylesheet's blanket ::item { color } for text fading.
+    if (item->type() == TreeWidget::ObjectType) {
+        if (auto* docItem = static_cast<DocumentObjectItem*>(item);
+            docItem->object() && !docItem->object()->isShow()) {
+            option->state &= ~QStyle::State_Enabled;
+        }
+    }
+
     option->textElideMode = Qt::ElideMiddle;
     auto mousePos = option->widget->mapFromGlobal(QCursor::pos());
     auto isHovered = option->rect.contains(mousePos);
@@ -4509,7 +4518,6 @@ void TreeWidget::_slotDeleteObject(const Gui::ViewProviderDocumentObject& view, 
     // during item creation or deletion
     bool lock = blockSelection(true);
     bool needUpdate = false;
-    QTreeWidgetItem* newFocusItem = nullptr;
     bool hadFocus = (QApplication::focusWidget() == this);
 
     for (const auto& data : itEntry->second) {
@@ -4528,24 +4536,6 @@ void TreeWidget::_slotDeleteObject(const Gui::ViewProviderDocumentObject& view, 
         for (auto cit = items.begin(), citNext = cit; cit != items.end(); cit = citNext) {
             ++citNext;
             DocumentObjectItem* itemToDelete = *cit;
-
-            // get next item based on currently deleted item to select it
-            // as the next one
-            if (currentItem() == itemToDelete && !newFocusItem) {
-                QTreeWidgetItem* parent = itemToDelete->parent();
-                int index = parent->indexOfChild(itemToDelete);
-                if (index > 0) {
-                    newFocusItem = parent->child(index - 1);
-                }
-                else if (parent->childCount() > 1) {
-                    newFocusItem = parent->child(index + 1);
-                }
-                else {
-                    // no siblings, move to parent
-                    newFocusItem = parent;
-                }
-            }
-
             itemToDelete->myOwner = nullptr;
             delete itemToDelete;
         }
@@ -4580,12 +4570,6 @@ void TreeWidget::_slotDeleteObject(const Gui::ViewProviderDocumentObject& view, 
 
     // Restore signal state
     blockSelection(lock);
-
-    // restore focus to the appropriate item after deletion
-    if (newFocusItem) {
-        setCurrentItem(newFocusItem);
-        newFocusItem->setSelected(true);
-    }
 
     // restore focus to the tree widget if it had focus before deletion
     if (hadFocus) {

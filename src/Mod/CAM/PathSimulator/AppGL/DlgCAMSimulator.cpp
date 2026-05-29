@@ -27,8 +27,8 @@
 
 #include "Dummy3DViewer.h"
 #include "GuiDisplay.h"
-#include "MillSimulation.h"
 #include "ViewCAMSimulator.h"
+#include "MillSimulation.h"
 #include <Gui/View3DInventorViewer.h>
 #include <Inventor/nodes/SoCamera.h>
 #include <QSurfaceFormat>

@@ -655,6 +655,7 @@ class ObjectVcarve(PathEngraveBase.ObjectOp):
             # This is done to avoid adding additional step-down engraving passes when it
             # would make no sense as depth is limited by Maximum Inscribed Circle anyway.
 
+            geom.stepDownPass = 1  # reset pass number
             maximumUsableDepth = geom.stop
 
             if geom.stepDown > 0:
