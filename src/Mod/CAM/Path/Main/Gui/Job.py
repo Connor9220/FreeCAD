@@ -912,12 +912,15 @@ class TaskPanel:
         Path.Log.track()
         FreeCADGui.Selection.removeObserver(self)
         # Restore natural selectability: model selectable, stock non-selectable
+        # and reset transparency after leaving the task panel.
         stock = self.obj.Stock
         if stock and stock.ViewObject:
             stock.ViewObject.Selectable = False
+            stock.ViewObject.Transparency = 85
         for base in self.obj.Model.Group:
             if base and base.ViewObject:
                 base.ViewObject.Selectable = True
+                #base.ViewObject.Transparency = 0
         self.vproxy.resetEditVisibility(self.obj)
         self.vproxy.resetTaskPanel()
 
@@ -1472,9 +1475,11 @@ class TaskPanel:
         stock = self.obj.Stock
         if stock and stock.ViewObject:
             stock.ViewObject.Selectable = not modelTarget
+            stock.ViewObject.Transparency = 95 if modelTarget else 85
         for base in self.obj.Model.Group:
             if base and base.ViewObject:
                 base.ViewObject.Selectable = modelTarget
+                #base.ViewObject.Transparency = 0 if modelTarget else 95
         self.form.pickTargetModel.setChecked(modelTarget)
         self.form.pickTargetStock.setChecked(not modelTarget)
         # Apply explicit highlight so the active button is visible regardless of theme.

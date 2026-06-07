@@ -398,10 +398,10 @@
         <item>
          <widget class="QGroupBox" name="modelAlignGroup">
           <property name="title">
-           <string>Alignment</string>
+           <string>Origin &amp;&amp; Alignment</string>
           </property>
           <layout class="QGridLayout" name="gridLayout_2">
-           <item row="0" column="0">
+           <item row="0" column="0" colspan="3">
             <widget class="QPushButton" name="moveToOrigin">
              <property name="text">
               <string>Move to Origin</string>
@@ -418,7 +418,7 @@
              </property>
             </widget>
            </item>
-           <item row="0" column="1">
+           <item row="0" column="3" colspan="3">
             <widget class="QPushButton" name="setOrigin">
              <property name="text">
               <string>Set Origin</string>
@@ -438,7 +438,7 @@
              </property>
             </widget>
            </item>
-           <item row="1" column="0">
+           <item row="1" column="0" colspan="3">
             <widget class="QPushButton" name="centerInStock">
              <property name="text">
               <string>Center in Stock</string>
@@ -455,7 +455,7 @@
              </property>
             </widget>
            </item>
-           <item row="1" column="1">
+           <item row="1" column="3" colspan="3">
             <widget class="QPushButton" name="centerInStockXY">
              <property name="text">
               <string>XY in Stock</string>
@@ -472,19 +472,7 @@
              </property>
             </widget>
            </item>
-          </layout>
-         </widget>
-        </item>
-        <item>
-         <widget class="QGroupBox" name="modelSetGroup">
-          <property name="title">
-           <string>Origin &amp;&amp; Orientation</string>
-          </property>
-          <property name="toolTip">
-           <string>Positions the model so a picked edge defines an axis and a picked vertex zeros the model on that axis. The G54-G59 fixture is set on the output tab.</string>
-          </property>
-          <layout class="QGridLayout" name="gridLayout_5">
-           <item row="0" column="0">
+           <item row="2" column="0" colspan="2">
             <widget class="QPushButton" name="modelSetXAxis">
              <property name="text">
               <string>X-Axis</string>
@@ -504,7 +492,7 @@
              </property>
             </widget>
            </item>
-           <item row="0" column="1">
+           <item row="2" column="2" colspan="2">
             <widget class="QPushButton" name="modelSetYAxis">
              <property name="text">
               <string>Y-Axis</string>
@@ -524,7 +512,7 @@
              </property>
             </widget>
            </item>
-           <item row="0" column="2">
+           <item row="2" column="4" colspan="2">
             <widget class="QPushButton" name="modelSetZAxis">
              <property name="text">
               <string>Z-Axis</string>
@@ -544,7 +532,7 @@
              </property>
             </widget>
            </item>
-           <item row="1" column="0">
+           <item row="3" column="0" colspan="2">
             <widget class="QPushButton" name="modelSetX0">
              <property name="text">
               <string>X=0</string>
@@ -554,7 +542,7 @@
              </property>
             </widget>
            </item>
-           <item row="1" column="1">
+           <item row="3" column="2" colspan="2">
             <widget class="QPushButton" name="modelSetY0">
              <property name="text">
               <string>Y=0</string>
@@ -564,7 +552,7 @@
              </property>
             </widget>
            </item>
-           <item row="1" column="2">
+           <item row="3" column="4" colspan="2">
             <widget class="QPushButton" name="modelSetZ0">
              <property name="text">
               <string>Z=0</string>
@@ -574,7 +562,7 @@
              </property>
             </widget>
            </item>
-           <item row="2" column="0" colspan="3">
+           <item row="4" column="0" colspan="6">
             <widget class="QCheckBox" name="linkStockAndModel">
              <property name="text">
               <string>Link stock and model</string>
