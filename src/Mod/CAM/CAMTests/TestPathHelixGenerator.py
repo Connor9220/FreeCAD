@@ -28,7 +28,6 @@ import Path.Base.Generator.helix as generator
 import CAMTests.PathTestUtils as PathTestUtils
 import math
 
-
 Path.Log.setLevel(Path.Log.Level.INFO, Path.Log.thisModule())
 Path.Log.trackModule(Path.Log.thisModule())
 

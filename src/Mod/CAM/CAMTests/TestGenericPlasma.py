@@ -28,7 +28,6 @@ from CAMTests import PostTestMocks
 from Path.Post.Processor import PostProcessorFactory
 from Machine.models.machine import Machine
 
-
 Path.Log.setLevel(Path.Log.Level.DEBUG, Path.Log.thisModule())
 Path.Log.trackModule(Path.Log.thisModule())
 
