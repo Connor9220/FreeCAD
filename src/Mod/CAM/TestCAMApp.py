@@ -31,18 +31,17 @@ from CAMTests.TestMachine import (
     TestMachineDataclass,
     TestMachineFactory,
     TestToolhead,
+    TestProcessingOptions,
 )
-from CAMTests.TestPathProfile import TestPathProfile
 
 from CAMTests.TestPathAdaptive import TestPathAdaptive
 from CAMTests.TestPathCommandAnnotations import TestPathCommandAnnotations
 from CAMTests.TestPathCore import TestPathCore
-from CAMTests.TestPathDepthParams import depthTestCases
+from CAMTests.TestPathDepthParams import TestDepthCases
 from CAMTests.TestPathDressupDogboneII import TestDressupDogboneII
 from CAMTests.TestPathDrillable import TestPathDrillable
 from CAMTests.TestPathDrillGenerator import TestPathDrillGenerator
 from CAMTests.TestPathDressupHoldingTags import TestHoldingTags
-from CAMTests.TestDrillCycleExpander import TestDrillCycleExpander
 from CAMTests.TestDrillCycleExpander import TestDrillCycleExpander
 from CAMTests.TestPathFacingGenerator import TestPathFacingGenerator
 from CAMTests.TestPathGeneratorDogboneII import TestGeneratorDogboneII
@@ -156,4 +155,5 @@ from CAMTests.TestGcodeProcessingUtils import (
     TestSuppressRedundantAxesWords,
     TestFilterInefficientMoves,
     TestNumberGenerator,
+    TestDeduplicateRepeatedCommands,
 )
