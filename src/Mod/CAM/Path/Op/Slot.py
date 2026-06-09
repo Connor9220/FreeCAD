@@ -1198,7 +1198,7 @@ class ObjectSlot(PathOp.ObjectOp):
             msg = translate("CAM_Slot", "Failed to determine point 2 from")
             FreeCAD.Console.PrintError(msg + " {}.\n".format(sub2))
             return False
-        (p2, dYdX2, shpType) = feature2
+        p2, dYdX2, shpType = feature2
         self.shapeType2 = shpType
         if dYdX2:
             self.dYdX2 = dYdX2

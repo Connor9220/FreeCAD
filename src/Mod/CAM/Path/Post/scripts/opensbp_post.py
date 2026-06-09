@@ -390,8 +390,7 @@ class OpenSBPPost(PostProcessor):
             # but only once per post
             if self.post.values["first_probe"]:
                 self.post.values["first_probe"] = False
-                self._postfix.append(
-                    """GOTO SkipProbeSubRoutines
+                self._postfix.append("""GOTO SkipProbeSubRoutines
 CaptureZPos:
   ' for g38.2 probe, write the data on probe-contact
   ' and set flag for didn't-fail
@@ -404,8 +403,7 @@ FailedToTouch:
   ' failed to trigger w/in movement
   MSGBOX(Failed to touch...Exiting,16,Probe Failed)
   END
-SkipProbeSubRoutines:"""
-                )
+SkipProbeSubRoutines:""")
         elif path_command.Name == "(PROBECLOSE)":
             rez += self.comment("Clear probe-switch-trigger")
             rez += "ON INPUT(&my_ZzeroInput, 1)" + nl

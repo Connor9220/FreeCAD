@@ -39,8 +39,9 @@ import Path.Main.Stock as PathStock
 import Path.Tool.Gui.Controller as PathToolControllerGui
 import PathScripts.PathUtils as PathUtils
 from Path.Tool.toolbit.ui.selector import ToolBitSelector
-#from Machine.models import MachineFactory
-#from Machine.ui.editor import MachineEditorDialog
+
+# from Machine.models import MachineFactory
+# from Machine.ui.editor import MachineEditorDialog
 import math
 import traceback
 from PySide import QtWidgets
@@ -1481,7 +1482,7 @@ class TaskPanel:
             self.form.pickTargetToggle.setText(translate("CAM_Job", "Picking: Stock"))
 
     def alignSetOrigin(self):
-        (obj, by) = self.alignMoveToOrigin()
+        obj, by = self.alignMoveToOrigin()
 
         for base in self.obj.Model.Group:
             if base != obj:
@@ -1720,8 +1721,8 @@ class TaskPanel:
         self.form.jobModelEdit.clicked.connect(self.jobModelEdit)
 
         # Machine
-        #self.form.jobMachine.currentIndexChanged.connect(self.machineChanged)
-        #self.form.jobMachineNew.clicked.connect(self.newMachine)
+        # self.form.jobMachine.currentIndexChanged.connect(self.machineChanged)
+        # self.form.jobMachineNew.clicked.connect(self.newMachine)
         self.form.machineGroup.hide()  # not supported yet
 
         # Post Processor
