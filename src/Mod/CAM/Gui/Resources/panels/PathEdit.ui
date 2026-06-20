@@ -335,65 +335,63 @@
          </widget>
         </item>
         <item>
-          <layout class="QGridLayout" name="gridLayout_2">
-            <property name="leftMargin">
-              <number>12</number>
-            </property>
-            <property name="topMargin">
-              <number>0</number>
-            </property>
-            <property name="rightMargin">
-              <number>12</number>
-            </property>
-            <item row="0" column="0" colspan="2">
-              <layout class="QHBoxLayout" name="chooseRefLayout">
-                <item>
-                <widget class="QLabel" name="pickTargetLabel">
-                  <property name="text">
-                  <string>Active Component</string>
-                  </property>
-                </widget>
-                </item>
-                <item>
-                <widget class="QPushButton" name="pickTargetModel">
-                  <property name="text">
-                  <string>Model</string>
-                  </property>
-                  <property name="toolTip">
-                  <string>Set selection target to Model (default): origin/axis picks target the Model object.</string>
-                  </property>
-                  <property name="icon">
-                  <iconset resource="../Path.qrc">
-                    <normaloff>:/icons/model.svg</normaloff>:/icons/model.svg</iconset>
-                  </property>
-                  <property name="checkable">
-                  <bool>true</bool>
-                  </property>
-                  <property name="checked">
-                  <bool>true</bool>
-                  </property>
-                </widget>
-                </item>
-                <item>
-                <widget class="QPushButton" name="pickTargetStock">
-                  <property name="text">
-                  <string>Stock</string>
-                  </property>
-                  <property name="toolTip">
-                  <string>Set selection target to Stock: origin/axis picks target the Stock object.</string>
-                  </property>
-                  <property name="icon">
-                  <iconset resource="../Path.qrc">
-                    <normaloff>:/icons/stock.svg</normaloff>:/icons/stock.svg</iconset>
-                  </property>
-                  <property name="checkable">
-                  <bool>true</bool>
-                  </property>
-                </widget>
-                </item>
-              </layout>
-            </item>
+         <widget class="QGroupBox" name="pickTargetGroup">
+          <property name="title">
+           <string>Select From</string>
+          </property>
+          <layout class="QHBoxLayout" name="chooseRefLayout">
+           <item>
+            <widget class="QPushButton" name="pickTargetModel">
+             <property name="text">
+              <string>Model</string>
+             </property>
+             <property name="toolTip">
+              <string>Set selection target to Model (default): origin/axis picks target the Model object.</string>
+             </property>
+             <property name="icon">
+              <iconset resource="../Path.qrc">
+               <normaloff>:/icons/model.svg</normaloff>:/icons/model.svg</iconset>
+             </property>
+             <property name="checkable">
+              <bool>true</bool>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="pickTargetStock">
+             <property name="text">
+              <string>Stock</string>
+             </property>
+             <property name="toolTip">
+              <string>Set selection target to Stock: origin/axis picks target the Stock object.</string>
+             </property>
+             <property name="icon">
+              <iconset resource="../Path.qrc">
+               <normaloff>:/icons/stock.svg</normaloff>:/icons/stock.svg</iconset>
+             </property>
+             <property name="checkable">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="pickTargetSpacer">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
           </layout>
+         </widget>
         </item>
         <item>
          <widget class="QGroupBox" name="modelAlignGroup">
@@ -441,7 +439,7 @@
            <item row="1" column="0" colspan="3">
             <widget class="QPushButton" name="centerInStock">
              <property name="text">
-              <string>Center in Stock</string>
+              <string>Center XYZ in Stock</string>
              </property>
              <property name="icon">
               <iconset resource="../Path.qrc">
@@ -458,7 +456,7 @@
            <item row="1" column="3" colspan="3">
             <widget class="QPushButton" name="centerInStockXY">
              <property name="text">
-              <string>XY in Stock</string>
+              <string>Center XY in Stock</string>
              </property>
              <property name="icon">
               <iconset resource="../Path.qrc">
@@ -578,25 +576,17 @@
         <item>
          <widget class="QGroupBox" name="modelMoveGroup">
           <property name="title">
-           <string>Move - XY</string>
+           <string>Transform</string>
           </property>
-          <layout class="QGridLayout" name="gridLayout_3">
+          <layout class="QVBoxLayout" name="verticalLayout_modelMove">
+           <property name="spacing"><number>6</number></property>
+           <property name="leftMargin"><number>0</number></property>
+           <property name="topMargin"><number>6</number></property>
+           <property name="rightMargin"><number>0</number></property>
+           <property name="bottomMargin"><number>6</number></property>
+           <item>
+            <layout class="QGridLayout" name="gridLayout_3">
            <item row="0" column="0">
-            <widget class="QPushButton" name="modelMoveLeftUp">
-             <property name="text">
-              <string/>
-             </property>
-             <property name="icon">
-              <iconset resource="../Path.qrc">
-               <normaloff>:/icons/arrow-left-up.svg</normaloff>:/icons/arrow-left-up.svg</iconset>
-             </property>
-             <property name="iconSize">
-              <size>
-               <width>24</width>
-               <height>24</height>
-              </size>
-             </property>
-            </widget>
            </item>
            <item row="0" column="1">
             <widget class="QPushButton" name="modelMoveUp">
@@ -616,13 +606,13 @@
             </widget>
            </item>
            <item row="0" column="2">
-            <widget class="QPushButton" name="modelMoveRightUp">
+            <widget class="QPushButton" name="modelMoveZUp">
              <property name="text">
               <string/>
              </property>
              <property name="icon">
               <iconset resource="../Path.qrc">
-               <normaloff>:/icons/arrow-right-up.svg</normaloff>:/icons/arrow-right-up.svg</iconset>
+               <normaloff>:/icons/arrow-up.svg</normaloff>:/icons/arrow-up.svg</iconset>
              </property>
              <property name="iconSize">
               <size>
@@ -674,21 +664,6 @@
             </widget>
            </item>
            <item row="2" column="0">
-            <widget class="QPushButton" name="modelMoveLeftDown">
-             <property name="text">
-              <string/>
-             </property>
-             <property name="icon">
-              <iconset resource="../Path.qrc">
-               <normaloff>:/icons/arrow-left-down.svg</normaloff>:/icons/arrow-left-down.svg</iconset>
-             </property>
-             <property name="iconSize">
-              <size>
-               <width>24</width>
-               <height>24</height>
-              </size>
-             </property>
-            </widget>
            </item>
            <item row="2" column="1">
             <widget class="QPushButton" name="modelMoveDown">
@@ -708,13 +683,13 @@
             </widget>
            </item>
            <item row="2" column="2">
-            <widget class="QPushButton" name="modelMoveRightDown">
+            <widget class="QPushButton" name="modelMoveZDown">
              <property name="text">
               <string/>
              </property>
              <property name="icon">
               <iconset resource="../Path.qrc">
-               <normaloff>:/icons/arrow-right-down.svg</normaloff>:/icons/arrow-right-down.svg</iconset>
+               <normaloff>:/icons/arrow-down.svg</normaloff>:/icons/arrow-down.svg</iconset>
              </property>
              <property name="iconSize">
               <size>
@@ -725,17 +700,9 @@
             </widget>
            </item>
           </layout>
-         </widget>
-        </item>
-        <item>
-         <widget class="QGroupBox" name="modelRotateGroup">
-          <property name="title">
-           <string>Rotate around Z</string>
-          </property>
-          <property name="toolTip">
-           <string>Rotates the model about the Z-axis. When the compound checkbox is enabled, rotations stack cumulatively.</string>
-          </property>
-          <layout class="QGridLayout" name="gridLayout_6">
+           </item>
+           <item>
+            <layout class="QGridLayout" name="gridLayout_6">
            <item row="0" column="0">
             <widget class="QPushButton" name="modelRotateLeft">
              <property name="sizePolicy">
@@ -823,6 +790,8 @@
               </size>
              </property>
             </widget>
+           </item>
+          </layout>
            </item>
           </layout>
          </widget>

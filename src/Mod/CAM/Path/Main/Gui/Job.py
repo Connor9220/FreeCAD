@@ -920,7 +920,7 @@ class TaskPanel:
         for base in self.obj.Model.Group:
             if base and base.ViewObject:
                 base.ViewObject.Selectable = True
-                #base.ViewObject.Transparency = 0
+                # base.ViewObject.Transparency = 0
         self.vproxy.resetEditVisibility(self.obj)
         self.vproxy.resetTaskPanel()
 
@@ -1479,7 +1479,7 @@ class TaskPanel:
         for base in self.obj.Model.Group:
             if base and base.ViewObject:
                 base.ViewObject.Selectable = modelTarget
-                #base.ViewObject.Transparency = 0 if modelTarget else 95
+                # base.ViewObject.Transparency = 0 if modelTarget else 95
         self.form.pickTargetModel.setChecked(modelTarget)
         self.form.pickTargetStock.setChecked(not modelTarget)
         # Apply explicit highlight so the active button is visible regardless of theme.
@@ -1662,14 +1662,14 @@ class TaskPanel:
             self.form.modelSetY0.setEnabled(True)
             self.form.modelSetZ0.setEnabled(True)
             self.form.modelMoveGroup.setEnabled(True)
-            self.form.modelRotateGroup.setEnabled(True)
+            # self.form.modelRotateGroup.setEnabled(True)
             self.form.modelRotateCompound.setEnabled(len(sel) > 1)
         else:
             self.form.modelSetX0.setEnabled(False)
             self.form.modelSetY0.setEnabled(False)
             self.form.modelSetZ0.setEnabled(False)
             self.form.modelMoveGroup.setEnabled(False)
-            self.form.modelRotateGroup.setEnabled(False)
+            # self.form.modelRotateGroup.setEnabled(False)
 
     def jobModelEdit(self):
         dialog = PathJobDlg.JobCreate()
@@ -1790,20 +1790,18 @@ class TaskPanel:
             self.form.modelMoveValue.setProperty("unit", "mm")
             self.form.modelMoveValue.setProperty("rawValue", 1.0)
 
-        self.form.modelMoveLeftUp.clicked.connect(lambda: self.modelMove(FreeCAD.Vector(-1, 1, 0)))
+        # self.form.modelMoveLeftUp.clicked.connect(lambda: self.modelMove(FreeCAD.Vector(-1, 1, 0)))
         self.form.modelMoveLeft.clicked.connect(lambda: self.modelMove(FreeCAD.Vector(-1, 0, 0)))
-        self.form.modelMoveLeftDown.clicked.connect(
-            lambda: self.modelMove(FreeCAD.Vector(-1, -1, 0))
-        )
+        # self.form.modelMoveLeftDown.clicked.connect(
+        #    lambda: self.modelMove(FreeCAD.Vector(-1, -1, 0))
+        # )
 
         self.form.modelMoveUp.clicked.connect(lambda: self.modelMove(FreeCAD.Vector(0, 1, 0)))
         self.form.modelMoveDown.clicked.connect(lambda: self.modelMove(FreeCAD.Vector(0, -1, 0)))
 
-        self.form.modelMoveRightUp.clicked.connect(lambda: self.modelMove(FreeCAD.Vector(1, 1, 0)))
+        self.form.modelMoveZUp.clicked.connect(lambda: self.modelMove(FreeCAD.Vector(0, 0, 1)))
         self.form.modelMoveRight.clicked.connect(lambda: self.modelMove(FreeCAD.Vector(1, 0, 0)))
-        self.form.modelMoveRightDown.clicked.connect(
-            lambda: self.modelMove(FreeCAD.Vector(1, -1, 0))
-        )
+        self.form.modelMoveZDown.clicked.connect(lambda: self.modelMove(FreeCAD.Vector(0, 0, -1)))
 
         self.form.modelRotateLeft.clicked.connect(lambda: self.modelRotate(FreeCAD.Vector(0, 0, 1)))
         self.form.modelRotateRight.clicked.connect(
