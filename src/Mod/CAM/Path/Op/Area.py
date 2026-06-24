@@ -24,6 +24,7 @@
 from PySide.QtCore import QT_TRANSLATE_NOOP
 import FreeCAD
 import Path
+import Path.Base.Generator.linking as linking
 import Path.Op.Base as PathOp
 import Path.Op.Util as PathOpUtil
 import PathScripts.PathUtils as PathUtils
@@ -73,6 +74,7 @@ class ObjectOp(PathOp.ObjectOp):
             | PathOp.FeatureStartPoint
             | self.areaOpFeatures(obj)
             | PathOp.FeatureCoolant
+            | PathOp.FeatureLinking
         )
 
     def areaOpFeatures(self, obj):
@@ -265,7 +267,7 @@ class ObjectOp(PathOp.ObjectOp):
 
         return candidate.discretize(3)[1]
 
-    def _buildPathArea(self, obj, baseobject, isHole, start, getsim):
+    def _buildPathArea(self, obj, baseobject, isHole, start, getsim, retraction=None):
         """_buildPathArea(obj, baseobject, isHole, start, getsim) ... internal function."""
         Path.Log.track()
         area = Path.Area()
@@ -307,7 +309,9 @@ class ObjectOp(PathOp.ObjectOp):
         pathParams["feedrate_v"] = self.vertFeed
         pathParams["verbose"] = True
         pathParams["resume_height"] = obj.SafeHeight.Value
-        pathParams["retraction"] = obj.ClearanceHeight.Value
+        pathParams["retraction"] = (
+            retraction if retraction is not None else obj.ClearanceHeight.Value
+        )
         pathParams["return_end"] = True
         # Note that emitting preambles between moves breaks some dressups and prevents path optimization on some controllers
         pathParams["preamble"] = False
@@ -356,7 +360,7 @@ class ObjectOp(PathOp.ObjectOp):
 
         return pp, simobj
 
-    def _buildProfileOpenEdges(self, obj, openWire, start, getsim):
+    def _buildProfileOpenEdges(self, obj, openWire, start, getsim, retraction=None):
         """_buildPathArea(obj, openWire, start, getsim) ... internal function."""
         Path.Log.track()
 
@@ -372,7 +376,9 @@ class ObjectOp(PathOp.ObjectOp):
             pathParams["feedrate_v"] = self.vertFeed
             pathParams["verbose"] = True
             pathParams["resume_height"] = obj.SafeHeight.Value
-            pathParams["retraction"] = obj.ClearanceHeight.Value
+            pathParams["retraction"] = (
+                retraction if retraction is not None else obj.ClearanceHeight.Value
+            )
             pathParams["return_end"] = True
             # Note that emitting preambles between moves breaks some dressups and prevents path optimization on some controllers
             pathParams["preamble"] = False
@@ -479,23 +485,100 @@ class ObjectOp(PathOp.ObjectOp):
 
             shapes = collectively
 
-        sims = []
-        for shape, isHole, sub in shapes:
-            profileEdgesIsOpen = False
+        # Build linking kwargs for collision-aware between-feature transitions.
+        # An empty dict means linking is active but collision checking is skipped (always raise).
+        # None means linking is disabled entirely.
+        linking_kwargs = {}
+        _retract_height = obj.ClearanceHeight.Value
+        if PathOp.FeatureLinking & self.opFeatures(obj):
+            solids = []
+            if getattr(self, "job", None) and hasattr(self.job, "Model"):
+                solids = [base.Shape for base in self.job.Model.Group if hasattr(base, "Shape")]
+            if obj.CollisionAvoidanceStrategy == "Retract Height":
+                _retract_height = obj.SafeHeight.Value
+            elif obj.CollisionAvoidanceStrategy == "Line of Sight":
+                linking_kwargs = {
+                    "solids": solids,
+                    "collision_clearance": obj.CollisionClearance.Value,
+                }
+            elif obj.CollisionAvoidanceStrategy == "Tool Diameter":
+                linking_kwargs = {
+                    "solids": solids,
+                    "collision_clearance": obj.CollisionClearance.Value,
+                    "tool_diameter": obj.ToolController.Tool.Diameter.Value,
+                }
+            elif obj.CollisionAvoidanceStrategy == "Tool Shape":
+                linking_kwargs = {
+                    "solids": solids,
+                    "collision_clearance": obj.CollisionClearance.Value,
+                    "tool_shape": obj.ToolController.Tool.BitBody.Shape,
+                }
 
-            if sub == "OpenEdge":
-                profileEdgesIsOpen = True
+        # Determine whether collision-aware linking is active for this operation.
+        _use_linking = linking_kwargs is not None and len(shapes) > 1
+
+        if _use_linking:
+            # Raise to ClearanceHeight before the first shape — previous op may have left
+            # the tool anywhere.
+            self.commandlist.append(
+                Path.Command("G0", {"Z": obj.ClearanceHeight.Value, "F": self.vertRapid})
+            )
+
+        sims = []
+        for shapeIdx, (shape, isHole, sub) in enumerate(shapes):
+            profileEdgesIsOpen = sub == "OpenEdge"
+
+            if profileEdgesIsOpen:
                 if PathOp.FeatureStartPoint & self.opFeatures(obj) and obj.UseStartPoint:
                     osp = obj.StartPoint
                     self.commandlist.append(
                         Path.Command("G0", {"X": osp.x, "Y": osp.y, "F": self.horizRapid})
                     )
 
+            # _strip_leading_z: when True, remove Path.Area's leading SafeHeight G0 Z because
+            # the tool is already above it (at ClearanceHeight) and descending would be wrong.
+            _strip_leading_z = _use_linking and shapeIdx == 0
+
+            # Between shapes: check if a direct lateral move at SafeHeight is collision-free.
+            # Default to raising (conservative); only skip if the check says it's clear.
+            if _use_linking and shapeIdx > 0:
+                _raise = True
+                if self.endVector is not None and linking_kwargs:
+                    try:
+                        shp = shape[0] if isinstance(shape, list) else shape
+                        bc = shp.BoundBox
+                        centroid = FreeCAD.Vector(
+                            (bc.XMin + bc.XMax) / 2,
+                            (bc.YMin + bc.YMax) / 2,
+                            obj.SafeHeight.Value,
+                        )
+                        start_pos = FreeCAD.Vector(
+                            self.endVector[0], self.endVector[1], obj.SafeHeight.Value
+                        )
+                        _raise = linking.check_collision(start_pos, centroid, **linking_kwargs)
+                    except Exception as ex:
+                        Path.Log.warning(
+                            "Linking collision check failed ({}), using ClearanceHeight.".format(ex)
+                        )
+                if _raise:
+                    self.commandlist.append(
+                        Path.Command("G0", {"Z": _retract_height, "F": self.vertRapid})
+                    )
+                    _strip_leading_z = True
+
+            # When linking is active, inter-pass retracts within each shape use SafeHeight.
+            # When not active (single shape or linking disabled), use ClearanceHeight as before.
+            retraction = obj.SafeHeight.Value if _use_linking else obj.ClearanceHeight.Value
+
             try:
                 if profileEdgesIsOpen:
-                    pp, sim = self._buildProfileOpenEdges(obj, shape, start, getsim)
+                    pp, sim = self._buildProfileOpenEdges(
+                        obj, shape, isHole, start, getsim, retraction=retraction
+                    )
                 else:
-                    pp, sim = self._buildPathArea(obj, shape, isHole, start, getsim)
+                    pp, sim = self._buildPathArea(
+                        obj, shape, isHole, start, getsim, retraction=retraction
+                    )
             except Exception as e:
                 FreeCAD.Console.PrintError(e)
                 FreeCAD.Console.PrintError(
@@ -503,16 +586,31 @@ class ObjectOp(PathOp.ObjectOp):
                 )
                 raise e
             else:
-                ppCmds = pp if profileEdgesIsOpen else pp.Commands
-
+                if profileEdgesIsOpen:
+                    ppCmds = list(pp)
+                else:
+                    ppCmds = list(pp.Commands)
+                    # Strip fromShapes' leading G0 Z-only command only when the tool is already
+                    # above SafeHeight (we raised it to ClearanceHeight), so the SafeHeight
+                    # retract emitted by fromShapes would be a downward move, not an upward one.
+                    if _strip_leading_z and ppCmds:
+                        cmd = ppCmds[0]
+                        if (
+                            cmd.Name == "G0"
+                            and "Z" in cmd.Parameters
+                            and "X" not in cmd.Parameters
+                            and "Y" not in cmd.Parameters
+                        ):
+                            ppCmds = ppCmds[1:]
                 self.commandlist.extend(ppCmds)
                 sims.append(sim)
 
-            if self.endVector is not None and len(self.commandlist) > 1:
-                self.endVector[2] = obj.ClearanceHeight.Value
-                self.commandlist.append(
-                    Path.Command("G0", {"Z": obj.ClearanceHeight.Value, "F": self.vertRapid})
-                )
+        # Final retract to clearance height after all shapes are complete
+        if self.endVector is not None and len(self.commandlist) > 1:
+            self.endVector[2] = obj.ClearanceHeight.Value
+            self.commandlist.append(
+                Path.Command("G0", {"Z": obj.ClearanceHeight.Value, "F": self.vertRapid})
+            )
 
         Path.Log.debug("obj.Name: " + str(obj.Name) + "\n\n")
         return sims
