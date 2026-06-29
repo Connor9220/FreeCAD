@@ -315,6 +315,12 @@ def adaptiveselect():
         FreeCAD.Console.PrintWarning("Adaptive Select Mode\n")
 
 
+def fluteselect():
+    FreeCADGui.Selection.addSelectionGate(FACEGate())
+    if not Path.Preferences.suppressSelectionModeWarning():
+        FreeCAD.Console.PrintWarning("Flute Select Mode\n")
+
+
 def slotselect():
     FreeCADGui.Selection.addSelectionGate(ALLGate())
     if not Path.Preferences.suppressSelectionModeWarning():
@@ -370,6 +376,7 @@ def select(op):
     opsel["Profile Edges"] = eselect  # deprecated
     opsel["Profile Faces"] = fselect  # deprecated
     opsel["Profile"] = profileselect
+    opsel["Flute"] = fluteselect
     opsel["Slot"] = slotselect
     opsel["RotarySurface"] = surfaceselect
     opsel["Surface"] = surfaceselect
