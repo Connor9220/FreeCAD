@@ -171,6 +171,15 @@ class FACEGate(PathBaseGate):
         return isFace
 
 
+class FLUTEGate(PathBaseGate):
+    def allow(self, doc, obj, sub):
+        if sub and sub[0:4] == "Edge":
+            return True
+        if sub and sub[0:4] == "Face":
+            return True
+        return False
+
+
 class PROFILEGate(PathBaseGate):
     def allow(self, doc, obj, sub):
         try:
@@ -316,7 +325,7 @@ def adaptiveselect():
 
 
 def fluteselect():
-    FreeCADGui.Selection.addSelectionGate(FACEGate())
+    FreeCADGui.Selection.addSelectionGate(FLUTEGate())
     if not Path.Preferences.suppressSelectionModeWarning():
         FreeCAD.Console.PrintWarning("Flute Select Mode\n")
 

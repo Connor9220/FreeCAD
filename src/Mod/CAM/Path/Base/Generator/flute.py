@@ -19,20 +19,20 @@
 #                                                                              #
 ################################################################################
 
-__title__  = "CAM Flute Generator"
+__title__ = "CAM Flute Generator"
 __author__ = "Connor (Billy Huddleston <billy@ivdc.com>)"
-__url__    = "https://www.freecad.org"
-__doc__    = "Pass and G-code generation for the Flute operation."
+__url__ = "https://www.freecad.org"
+__doc__ = "Pass and G-code generation for the Flute operation."
 
 import math
 
 import FreeCAD
 import Path
 
-
 # ---------------------------------------------------------------------------
 # Core depth-scaling helper
 # ---------------------------------------------------------------------------
+
 
 def _clip_and_scale(pts, f, stock_top_z):
     """Scale a full-depth path to depth fraction f.
@@ -112,6 +112,7 @@ def _close_xy(a, b, tol=0.5):
 # Pass generation  (segment-based generic API)
 # ---------------------------------------------------------------------------
 
+
 def generate_passes(segments, stock_top_z, step_down, finish_depth=0.0, reverse=False):
     """Compute waypoints for each pass of a flute cut.
 
@@ -141,7 +142,7 @@ def generate_passes(segments, stock_top_z, step_down, finish_depth=0.0, reverse=
 
     entry_stop = flat_idx if flat_idx is not None else len(segments)
     entry_segs = segments[:entry_stop]
-    exit_segs  = segments[last_flat_idx + 1:] if last_flat_idx is not None else []
+    exit_segs = segments[last_flat_idx + 1 :] if last_flat_idx is not None else []
 
     def _chain_to_pts(segs):
         """Flatten segment list into an ordered list of 3D waypoints."""
@@ -160,10 +161,10 @@ def generate_passes(segments, stock_top_z, step_down, finish_depth=0.0, reverse=
         return pts
 
     entry_pts = _chain_to_pts(entry_segs)
-    exit_pts  = _chain_to_pts(exit_segs)
+    exit_pts = _chain_to_pts(exit_segs)
 
-    flat_start = segments[flat_idx]["start"]       if flat_idx is not None else None
-    flat_end   = segments[last_flat_idx]["end"]    if last_flat_idx is not None else None
+    flat_start = segments[flat_idx]["start"] if flat_idx is not None else None
+    flat_end = segments[last_flat_idx]["end"] if last_flat_idx is not None else None
 
     # Determine floor Z and total depth
     if flat_idx is not None:
@@ -231,8 +232,19 @@ def generate_passes(segments, stock_top_z, step_down, finish_depth=0.0, reverse=
 # G-code generation
 # ---------------------------------------------------------------------------
 
-def generate(segments, stock_top_z, step_down, retract_z, horiz_feed, vert_feed,
-             horiz_rapid, vert_rapid, finish_depth=0.0, reverse=False):
+
+def generate(
+    segments,
+    stock_top_z,
+    step_down,
+    retract_z,
+    horiz_feed,
+    vert_feed,
+    horiz_rapid,
+    vert_rapid,
+    finish_depth=0.0,
+    reverse=False,
+):
     """Generate G-code commands for a single flute from a segment list.
 
     Args:
@@ -251,7 +263,9 @@ def generate(segments, stock_top_z, step_down, retract_z, horiz_feed, vert_feed,
     Returns a list of Path.Command objects.
     """
     passes = generate_passes(
-        segments, stock_top_z, step_down,
+        segments,
+        stock_top_z,
+        step_down,
         finish_depth=finish_depth,
         reverse=reverse,
     )
@@ -268,9 +282,7 @@ def generate(segments, stock_top_z, step_down, retract_z, horiz_feed, vert_feed,
         commands.append(Path.Command("G1", {"Z": first.z, "F": vert_feed}))
 
         for wp in waypoints[1:]:
-            commands.append(
-                Path.Command("G1", {"X": wp.x, "Y": wp.y, "Z": wp.z, "F": horiz_feed})
-            )
+            commands.append(Path.Command("G1", {"X": wp.x, "Y": wp.y, "Z": wp.z, "F": horiz_feed}))
 
         commands.append(Path.Command("G0", {"Z": retract_z, "F": vert_rapid}))
 

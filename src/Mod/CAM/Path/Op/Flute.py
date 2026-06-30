@@ -24,6 +24,7 @@ __author__ = "Connor (Billy Huddleston <billy@ivdc.com>)"
 __url__ = "https://www.freecad.org"
 __doc__ = "Class and implementation of the Flute operation."
 
+import collections
 import math
 
 import FreeCAD
@@ -46,33 +47,81 @@ if False:
 else:
     Path.Log.setLevel(Path.Log.Level.INFO, Path.Log.thisModule())
 
-_EDGE_TOL       = 1e-4   # geometric coincidence tolerance (mm)
-_FLAT_SLOPE     = 0.001  # dZ/ds below this → "flat" segment
-_ARC_SEGS       = 16     # discretisation points per arc segment
-
-# Section plane
-_SECTION_OVERSHOOT  = 10.0  # mm — extra margin added to each side of the section plane
+# Ratio / fraction / dimensionless thresholds. These do NOT need to scale
+# with job tolerance or part size -- they're already scale-invariant by
+# construction (slopes, fractions of a measured span, parametric positions).
+_FLAT_SLOPE = 0.001  # dZ/ds below this → "flat" segment
+_ARC_SEGS = 16  # discretisation points per arc segment
 _SECTION_Z_TOL_FRAC = 0.05  # z_tol = max(1mm, depth * this fraction)
+_CHAIN_MAX_EDGES = 200  # guard against infinite loop (not a tolerance)
+_WALL_SLOPE_MAX = 5.0  # dz/ds above this → discard as a side wall
+_WALL_DS_MIN = 1e-6  # floating-point "is this exactly zero" epsilon
+_PCA_DEGENERATE_T_VALUES = (0.35, 0.5, 0.65)  # sample points: MIDDLE of the
+# line only — endpoints are excluded since a
+# legitimately tapered channel's edges can
+# converge there too (not a degenerate signal)
 
-# Edge chaining
-_CHAIN_MAX_EDGES = 200        # guard against infinite loop
-_CHAIN_TOL2      = 4.0        # squared mm — 2 mm snap distance for vertex matching
-_WALL_SLOPE_MAX  = 5.0        # dz/ds above this → discard as a side wall
-_WALL_DS_MIN     = 1e-6       # ds below this (vertical) → also discard
+# ---------------------------------------------------------------------------
+# Job-tolerance-derived absolute distances
+#
+# Everything below is an absolute mm distance, so a fixed value baked into
+# the code is fragile: too loose for small/precision parts, potentially too
+# tight for large-format ones. Instead each is a multiplier applied to the
+# Job's own GeometryTolerance (the same property Profile/Deburr/Engrave/
+# Waterline/etc. already key off elsewhere in this codebase). Multipliers
+# are chosen so that at the typical default GeometryTolerance (0.01mm,
+# matching the existing fallback used across this codebase) the derived
+# values equal this operation's original fixed constants -- default
+# behaviour is unchanged; non-default jobs now scale proportionally.
+# ---------------------------------------------------------------------------
 
-# Floor Z snapping (removes seam artifacts at face junctions)
-_FLOOR_SNAP_TOL = 0.5         # mm — endpoints within this of floor_z are snapped
+_DEFAULT_GEOM_TOL = 0.01  # mm — fallback when no Job is available
 
-# Axial-leave raise / entry-exit trim
-_AXIAL_FLOOR_TOL = 0.5        # mm — same snap window used in _apply_axial_leave
+_EDGE_TOL_MULT = 0.01  # exact topological edge-coincidence
+_PCA_DEGENERATE_TOL_MULT = 5.0  # centerline-coincides-with-edge test
+_CHAIN_TOL_MULT = 200.0  # vertex snap distance while chaining (linear, squared below)
+_FLOOR_SNAP_TOL_MULT = 50.0  # floor-seam Z snapping
+_AXIAL_FLOOR_TOL_MULT = 50.0  # axial-leave floor-point detection
+_BB_OVERLAP_TOL_MULT = 100.0  # face grouping by bounding-box touch
+_SECTION_OVERSHOOT_MULT = 1000.0  # section-plane / candidate-filter margin
 
-# Bounding-box grouping
-_BB_OVERLAP_TOL = 1.0         # mm — faces touching within this distance are co-grouped
+_Tol = collections.namedtuple(
+    "_Tol",
+    [
+        "edge",
+        "chain2",
+        "floor_snap",
+        "axial_floor",
+        "bb_overlap",
+        "section_overshoot",
+        "pca_degenerate",
+    ],
+)
+
+
+def _make_tolerances(geom_tol):
+    """Derive all purpose-specific tolerances from a single base value
+    (normally the Job's GeometryTolerance.Value). Centralising the scaling
+    here means every absolute-distance tolerance in this module scales with
+    the job's configured precision instead of being fixed mm values tuned
+    for "typical" part sizes.
+    """
+    t = geom_tol if geom_tol and geom_tol > 0 else _DEFAULT_GEOM_TOL
+    return _Tol(
+        edge=t * _EDGE_TOL_MULT,
+        chain2=(t * _CHAIN_TOL_MULT) ** 2,
+        floor_snap=t * _FLOOR_SNAP_TOL_MULT,
+        axial_floor=t * _AXIAL_FLOOR_TOL_MULT,
+        bb_overlap=t * _BB_OVERLAP_TOL_MULT,
+        section_overshoot=t * _SECTION_OVERSHOOT_MULT,
+        pca_degenerate=t * _PCA_DEGENERATE_TOL_MULT,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Face analysis helpers
 # ---------------------------------------------------------------------------
+
 
 def _analyze_face_cylinder(face):
     """Centerline from a Part.Cylinder face using the face BoundBox directly.
@@ -94,9 +143,9 @@ def _analyze_face_cylinder(face):
         if not isinstance(surface, Part.Cylinder):
             return None
 
-        axis   = surface.Axis
+        axis = surface.Axis
         radius = surface.Radius
-        bb     = face.BoundBox
+        bb = face.BoundBox
 
         ax, ay, az = abs(axis.x), abs(axis.y), abs(axis.z)
 
@@ -106,21 +155,21 @@ def _analyze_face_cylinder(face):
             if axis.y < 0:
                 # Moving along +axis → Y decreases → deep end = YMin
                 p_start = FreeCAD.Vector(cx, bb.YMax, bb.ZMax)
-                p_end   = FreeCAD.Vector(cx, bb.YMin, bb.ZMin)
+                p_end = FreeCAD.Vector(cx, bb.YMin, bb.ZMin)
             else:
                 # Moving along +axis → Y increases → deep end = YMax
                 p_start = FreeCAD.Vector(cx, bb.YMin, bb.ZMax)
-                p_end   = FreeCAD.Vector(cx, bb.YMax, bb.ZMin)
+                p_end = FreeCAD.Vector(cx, bb.YMax, bb.ZMin)
 
         elif ax >= ay and ax >= az:
             # Groove runs primarily in X
             cy = (bb.YMin + bb.YMax) / 2.0
             if axis.x < 0:
                 p_start = FreeCAD.Vector(bb.XMax, cy, bb.ZMax)
-                p_end   = FreeCAD.Vector(bb.XMin, cy, bb.ZMin)
+                p_end = FreeCAD.Vector(bb.XMin, cy, bb.ZMin)
             else:
                 p_start = FreeCAD.Vector(bb.XMin, cy, bb.ZMax)
-                p_end   = FreeCAD.Vector(bb.XMax, cy, bb.ZMin)
+                p_end = FreeCAD.Vector(bb.XMax, cy, bb.ZMin)
 
         else:
             return None  # Z-dominant — not a typical flute orientation
@@ -132,12 +181,22 @@ def _analyze_face_cylinder(face):
             "  axis=({:.4f},{:.4f},{:.4f})  radius={:.4f}\n"
             "CAM_Flute centerline:\n"
             "  start=({:.4f},{:.4f},{:.4f})  end=({:.4f},{:.4f},{:.4f})\n".format(
-                bb.XMin, bb.XMax,
-                bb.YMin, bb.YMax,
-                bb.ZMin, bb.ZMax,
-                axis.x, axis.y, axis.z, radius,
-                p_start.x, p_start.y, p_start.z,
-                p_end.x,   p_end.y,   p_end.z,
+                bb.XMin,
+                bb.XMax,
+                bb.YMin,
+                bb.YMax,
+                bb.ZMin,
+                bb.ZMax,
+                axis.x,
+                axis.y,
+                axis.z,
+                radius,
+                p_start.x,
+                p_start.y,
+                p_start.z,
+                p_end.x,
+                p_end.y,
+                p_end.z,
             )
         )
 
@@ -146,7 +205,7 @@ def _analyze_face_cylinder(face):
 
         return {
             "start": p_start,
-            "end":   p_end,
+            "end": p_end,
             "top_z": _clean(bb.ZMax),
             "width": _clean(2.0 * radius),
         }
@@ -154,7 +213,45 @@ def _analyze_face_cylinder(face):
         return None
 
 
-def _analyze_face_pca(face):
+def _line_coincides_with_an_edge(face, p_a, p_b, tol):
+    """True if the MIDDLE portion of the line p_a->p_b lies ON one of the
+    face's own boundary edges (within tol.pca_degenerate).
+
+    A real floor's centerline runs through the face's interior. A face that
+    legitimately tapers to a point at one end (e.g. a pointed channel) will
+    have its boundary edges genuinely converge near that end -- that's not
+    a sign of a missing partner face, so the endpoints are deliberately
+    excluded. Only the middle of the line is tested: a single wall of an
+    unselected V-groove pair has zero interior width along its ENTIRE
+    length, so it still coincides with the shared valley edge there too.
+    """
+    try:
+        edges = face.Edges
+    except Exception:
+        return False
+
+    for edge in edges:
+        coincides = True
+        for t in _PCA_DEGENERATE_T_VALUES:
+            p = FreeCAD.Vector(
+                p_a.x + t * (p_b.x - p_a.x),
+                p_a.y + t * (p_b.y - p_a.y),
+                p_a.z + t * (p_b.z - p_a.z),
+            )
+            try:
+                dist = edge.distToShape(Part.Vertex(p))[0]
+            except Exception:
+                coincides = False
+                break
+            if dist > tol.pca_degenerate:
+                coincides = False
+                break
+        if coincides:
+            return True
+    return False
+
+
+def _analyze_face_pca(face, tol):
     """Centerline fallback via edge sampling + PCA for non-cylindrical faces.
 
     Samples all face edges, uses PCA to split into two end-zones, then
@@ -215,6 +312,20 @@ def _analyze_face_pca(face):
     if p_a.z < p_b.z:
         p_a, p_b = p_b, p_a
 
+    # Reject a degenerate result: if the computed centerline coincides with
+    # one of the face's own boundary edges, this face has no floor of its
+    # own -- it's most likely a single wall of an unselected V-groove pair.
+    if _line_coincides_with_an_edge(face, p_a, p_b, tol):
+        FreeCAD.Console.PrintWarning(
+            translate(
+                "CAM_Flute",
+                "Face appears to be a single wall of a V-groove (its "
+                "centerline coincides with a face edge). Select both walls "
+                "of the groove, or select the valley edge directly.\n",
+            )
+        )
+        return None
+
     top_z = max(p.z for p in pts)
 
     def _clean(v, tol=1e-7):
@@ -228,7 +339,7 @@ def _analyze_face_pca(face):
     }
 
 
-def _analyze_face(face):
+def _analyze_face(face, tol):
     """Determine the centerline of a single groove face.
 
     Tries exact cylinder-surface detection first; falls back to edge-
@@ -239,31 +350,33 @@ def _analyze_face(face):
         FreeCAD.Console.PrintLog("CAM_Flute: centerline via cylinder surface (exact)\n")
         return result
     FreeCAD.Console.PrintLog("CAM_Flute: centerline via edge-sampling PCA (fallback)\n")
-    return _analyze_face_pca(face)
+    return _analyze_face_pca(face, tol)
 
 
 # ---------------------------------------------------------------------------
 # V-bottom (multi-face) grouping helpers
 # ---------------------------------------------------------------------------
 
-def _find_shared_edges(face_a, face_b):
+
+def _find_shared_edges(face_a, face_b, tol):
     """Return edges that are geometrically coincident between two faces."""
     shared = []
     for ea in face_a.Edges:
         com_a = ea.CenterOfMass
         len_a = ea.Length
         for eb in face_b.Edges:
-            if abs(len_a - eb.Length) > _EDGE_TOL:
+            if abs(len_a - eb.Length) > tol.edge:
                 continue
-            if com_a.distanceToPoint(eb.CenterOfMass) > _EDGE_TOL:
+            if com_a.distanceToPoint(eb.CenterOfMass) > tol.edge:
                 continue
             # Verify endpoints match (in either order)
             pa0 = ea.Vertexes[0].Point
             pa1 = ea.Vertexes[-1].Point
             pb0 = eb.Vertexes[0].Point
             pb1 = eb.Vertexes[-1].Point
-            if (pa0.distanceToPoint(pb0) < _EDGE_TOL and pa1.distanceToPoint(pb1) < _EDGE_TOL) or \
-               (pa0.distanceToPoint(pb1) < _EDGE_TOL and pa1.distanceToPoint(pb0) < _EDGE_TOL):
+            if (pa0.distanceToPoint(pb0) < tol.edge and pa1.distanceToPoint(pb1) < tol.edge) or (
+                pa0.distanceToPoint(pb1) < tol.edge and pa1.distanceToPoint(pb0) < tol.edge
+            ):
                 shared.append(ea)
                 break
     return shared
@@ -317,13 +430,13 @@ def _is_valley_edge(edge, face_a, face_b):
         return False
 
 
-def _group_flutes(face_tuples):
+def _group_flutes(face_tuples, tol):
     """Group (face, sub_name, base_obj) tuples into flute groups.
 
     Primary grouping: faces whose XY bounding boxes overlap or touch (within
-    _BB_TOL) are treated as parts of the same groove.  This correctly merges
-    ramp + flat faces (which share an edge but are not a concave V-bottom) as
-    well as V-groove face pairs.
+    tol.bb_overlap) are treated as parts of the same groove.  This correctly
+    merges ramp + flat faces (which share an edge but are not a concave
+    V-bottom) as well as V-groove face pairs.
 
     Within each resulting group, valley-edge detection is still run so that
     two-face V-bottom groups can expose their shared concave edge for
@@ -340,10 +453,12 @@ def _group_flutes(face_tuples):
         return []
 
     def _bb_overlaps_xy(bb_a, bb_b):
-        return (bb_a.XMin <= bb_b.XMax + _BB_OVERLAP_TOL and
-                bb_a.XMax >= bb_b.XMin - _BB_OVERLAP_TOL and
-                bb_a.YMin <= bb_b.YMax + _BB_OVERLAP_TOL and
-                bb_a.YMax >= bb_b.YMin - _BB_OVERLAP_TOL)
+        return (
+            bb_a.XMin <= bb_b.XMax + tol.bb_overlap
+            and bb_a.XMax >= bb_b.XMin - tol.bb_overlap
+            and bb_a.YMin <= bb_b.YMax + tol.bb_overlap
+            and bb_a.YMax >= bb_b.YMin - tol.bb_overlap
+        )
 
     parent = list(range(n))
 
@@ -379,7 +494,7 @@ def _group_flutes(face_tuples):
         valley_edges = []
         if len(indices) == 2:
             fa, fb = flute_faces[0][0], flute_faces[1][0]
-            for edge in _find_shared_edges(fa, fb):
+            for edge in _find_shared_edges(fa, fb, tol):
                 if _is_valley_edge(edge, fa, fb):
                     valley_edges.append(edge)
 
@@ -388,7 +503,7 @@ def _group_flutes(face_tuples):
     return result
 
 
-def _centerline_from_valley_edge(edges, face_tuples):
+def _centerline_from_valley_edge(edges, face_tuples, tol):
     """Get start/end/top_z from one or more V-bottom valley edges.
 
     The valley boundary between two faces may consist of several colinear/
@@ -411,13 +526,13 @@ def _centerline_from_valley_edge(edges, face_tuples):
             changed = False
             for e in list(remaining):
                 p0, p1 = e.Vertexes[0].Point, e.Vertexes[-1].Point
-                if chain[-1].distanceToPoint(p0) < _EDGE_TOL:
+                if chain[-1].distanceToPoint(p0) < tol.edge:
                     chain.append(p1)
-                elif chain[-1].distanceToPoint(p1) < _EDGE_TOL:
+                elif chain[-1].distanceToPoint(p1) < tol.edge:
                     chain.append(p0)
-                elif chain[0].distanceToPoint(p0) < _EDGE_TOL:
+                elif chain[0].distanceToPoint(p0) < tol.edge:
                     chain.insert(0, p1)
-                elif chain[0].distanceToPoint(p1) < _EDGE_TOL:
+                elif chain[0].distanceToPoint(p1) < tol.edge:
                     chain.insert(0, p0)
                 else:
                     continue
@@ -502,17 +617,17 @@ def _centerline_from_faces(face_tuples):
     }
 
 
-def _get_centerline(group):
+def _get_centerline(group, tol):
     """Return the centerline dict for a flute group (any size)."""
     valley_edge = group.get("valley_edge")
     face_tuples = group["faces"]
 
     if valley_edge is not None:
         # 2-face V-bottom: the valley edge IS the centerline
-        return _centerline_from_valley_edge(valley_edge, face_tuples)
+        return _centerline_from_valley_edge(valley_edge, face_tuples, tol)
     elif len(face_tuples) == 1:
         # Single flat/bull-nose face: PCA
-        return _analyze_face(face_tuples[0][0])
+        return _analyze_face(face_tuples[0][0], tol)
     else:
         # >2 faces with no detected valley edge: run PCA across all faces
         Path.Log.warning(
@@ -522,11 +637,178 @@ def _get_centerline(group):
         return _centerline_from_faces(face_tuples)
 
 
+def _dist2(a, b):
+    return (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2
+
+
+def _classify_chain_segments(chain, path_proj):
+    """Classify an ordered chain of (seg_start, seg_end, edge) triples into
+    the generic segment-dict format used by the path generator.
+
+    - Part.Circle edges  -> "arc": exact radius, discretized arc_points.
+    - Straight-line edges -> "ramp"/"flat" by overall slope, exact endpoints.
+    - Anything else (BSpline, Bezier, ...) -> "ramp"/"flat" by overall slope,
+      discretized into arc_points to preserve the actual curve shape.
+    """
+    segments = []
+    for seg_start, seg_end, edge in chain:
+        dp = path_proj(seg_end) - path_proj(seg_start)
+        dz = seg_end.z - seg_start.z
+        slope = (dz / dp) if abs(dp) > 1e-6 else 0.0
+
+        try:
+            curve = edge.Curve
+        except Exception:
+            curve = None
+
+        if isinstance(curve, Part.Circle):
+            seg_type = "arc"
+            radius = curve.Radius
+            raw_pts = edge.discretize(Number=_ARC_SEGS + 1)
+            if _dist2(raw_pts[0], seg_start) > _dist2(raw_pts[-1], seg_start):
+                raw_pts = list(reversed(raw_pts))
+            arc_pts = raw_pts
+        elif curve is None or isinstance(curve, (Part.Line, Part.LineSegment)):
+            seg_type = "flat" if abs(slope) < _FLAT_SLOPE else "ramp"
+            radius = None
+            arc_pts = None
+        else:
+            # BSpline / Bezier / other curve types: discretize to preserve shape.
+            seg_type = "flat" if abs(slope) < _FLAT_SLOPE else "ramp"
+            radius = None
+            raw_pts = edge.discretize(Number=_ARC_SEGS + 1)
+            if _dist2(raw_pts[0], seg_start) > _dist2(raw_pts[-1], seg_start):
+                raw_pts = list(reversed(raw_pts))
+            arc_pts = raw_pts
+
+        segments.append(
+            {
+                "type": seg_type,
+                "start": FreeCAD.Vector(seg_start),
+                "end": FreeCAD.Vector(seg_end),
+                "radius": radius,
+                "arc_points": arc_pts,
+            }
+        )
+    return segments
+
+
+# ---------------------------------------------------------------------------
+# Centerline directly from a selected wire (edges) — bypasses face/solid
+# analysis entirely. The wire IS the centerline.
+# ---------------------------------------------------------------------------
+
+
+def _split_into_wires(edges, tol):
+    """Split a flat list of edges into connected components (separate wires).
+
+    Each component becomes one independent flute (mirrors how separate face
+    groups become separate flutes).
+    """
+    remaining = list(edges)
+    wires = []
+    while remaining:
+        comp = [remaining.pop(0)]
+        changed = True
+        while changed:
+            changed = False
+            for e in list(remaining):
+                v0, v1 = e.Vertexes[0].Point, e.Vertexes[-1].Point
+                for c in comp:
+                    cv0, cv1 = c.Vertexes[0].Point, c.Vertexes[-1].Point
+                    if (
+                        _dist2(v0, cv0) < tol.chain2
+                        or _dist2(v0, cv1) < tol.chain2
+                        or _dist2(v1, cv0) < tol.chain2
+                        or _dist2(v1, cv1) < tol.chain2
+                    ):
+                        comp.append(e)
+                        remaining.remove(e)
+                        changed = True
+                        break
+        wires.append(comp)
+    return wires
+
+
+def _chain_wire_edges(edges, tol):
+    """Chain a connected set of edges into ordered (seg_start, seg_end, edge)
+    triples by matching coincident endpoints.
+
+    Assumes edges form a single simple open path (no branching).  Returns
+    None if they don't all connect into one chain.
+    """
+    if not edges:
+        return None
+
+    remaining = list(edges[1:])
+    e0 = edges[0]
+    chain = [(e0.Vertexes[0].Point, e0.Vertexes[-1].Point, e0)]
+
+    changed = True
+    while remaining and changed:
+        changed = False
+        cur_s, cur_e = chain[0][0], chain[-1][1]
+        for e in list(remaining):
+            v0, v1 = e.Vertexes[0].Point, e.Vertexes[-1].Point
+            if _dist2(cur_e, v0) < tol.chain2:
+                chain.append((v0, v1, e))
+            elif _dist2(cur_e, v1) < tol.chain2:
+                chain.append((v1, v0, e))
+            elif _dist2(cur_s, v0) < tol.chain2:
+                chain.insert(0, (v1, v0, e))
+            elif _dist2(cur_s, v1) < tol.chain2:
+                chain.insert(0, (v0, v1, e))
+            else:
+                continue
+            remaining.remove(e)
+            changed = True
+            break
+
+    if remaining:
+        return None  # could not connect all edges into a single chain
+
+    return chain
+
+
+def _segments_from_wire(edges, tol):
+    """Convert a connected wire (chain of edges) directly into the generic
+    segment-chain format used by the path generator. The wire IS the
+    centerline — no face or solid-section analysis is performed.
+
+    Returns (segments, top_z, floor_z), or (None, None, None) on failure.
+    """
+    chain = _chain_wire_edges(edges, tol)
+    if not chain:
+        FreeCAD.Console.PrintWarning(
+            translate("CAM_Flute", "Selected edges do not form a single connected wire.\n")
+        )
+        return None, None, None
+
+    # Orient so the shallower (higher Z) free end is the start.
+    if chain[0][0].z < chain[-1][1].z:
+        chain = [(e, s, edge) for s, e, edge in reversed(chain)]
+
+    start = chain[0][0]
+    end = chain[-1][1]
+    dx, dy = end.x - start.x, end.y - start.y
+    L = math.sqrt(dx * dx + dy * dy)
+    path_dir = FreeCAD.Vector(dx / L, dy / L, 0.0) if L > 1e-7 else FreeCAD.Vector(0.0, 0.0, 0.0)
+
+    def path_proj(v):
+        return (v.x - start.x) * path_dir.x + (v.y - start.y) * path_dir.y
+
+    segments = _classify_chain_segments(chain, path_proj)
+
+    all_z = [v.z for s, e, _ in chain for v in (s, e)]
+    return segments, max(all_z), min(all_z)
+
+
 # ---------------------------------------------------------------------------
 # Profile detection via solid section
 # ---------------------------------------------------------------------------
 
-def _detect_floor_segments(face, base_obj, info, group_extent=None):
+
+def _detect_floor_segments(face, base_obj, info, tol, group_extent=None):
     """Section base_obj.Shape with a vertical plane through the groove
     centreline and return an ordered list of typed segment dicts.
 
@@ -536,14 +818,14 @@ def _detect_floor_segments(face, base_obj, info, group_extent=None):
     Returns [] on any failure; the caller falls back to a plain Ramp.
     """
     try:
-        start    = info["start"]
+        start = info["start"]
         end_info = info["end"]
-        top_z    = info["top_z"]
-        floor_z  = end_info.z
+        top_z = info["top_z"]
+        floor_z = end_info.z
 
         dx = end_info.x - start.x
         dy = end_info.y - start.y
-        L  = math.sqrt(dx * dx + dy * dy)
+        L = math.sqrt(dx * dx + dy * dy)
         if L < 1e-7:
             return []
 
@@ -559,10 +841,10 @@ def _detect_floor_segments(face, base_obj, info, group_extent=None):
         # describes the ramp cylinder face.  Without this, the flat section that
         # extends past the ramp end would fall outside the plane.
         extent = group_extent if (group_extent is not None and group_extent > L) else L
-        depth  = abs(top_z - floor_z)
-        half   = max(extent, depth) + _SECTION_OVERSHOOT
+        depth = abs(top_z - floor_z)
+        half = max(extent, depth) + tol.section_overshoot
         z_dir = FreeCAD.Vector(0.0, 0.0, 1.0)
-        ctr   = FreeCAD.Vector(cx, cy, cz)
+        ctr = FreeCAD.Vector(cx, cy, cz)
 
         p1 = ctr - half * path_dir - half * z_dir
         p2 = ctr + half * path_dir - half * z_dir
@@ -584,13 +866,13 @@ def _detect_floor_segments(face, base_obj, info, group_extent=None):
         def path_proj(v):
             return (v.x - start.x) * path_dir.x + (v.y - start.y) * path_dir.y
 
-        z_tol  = max(1.0, abs(top_z - floor_z) * _SECTION_Z_TOL_FRAC)
-        p_min  = path_proj(start) - _SECTION_OVERSHOOT
-        p_max  = path_proj(start) + extent + _SECTION_OVERSHOOT
+        z_tol = max(1.0, abs(top_z - floor_z) * _SECTION_Z_TOL_FRAC)
+        p_min = path_proj(start) - tol.section_overshoot
+        p_max = path_proj(start) + extent + tol.section_overshoot
 
         candidates = []
         for edge in all_edges:
-            bb  = edge.BoundBox
+            bb = edge.BoundBox
             if bb.ZMax < floor_z - z_tol or bb.ZMin > top_z + z_tol:
                 continue
             mid = edge.CenterOfMass
@@ -616,9 +898,6 @@ def _detect_floor_segments(face, base_obj, info, group_extent=None):
         )
 
         # --- chain from start ---------------------------------------------------
-        def _dist2(a, b):
-            return (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2
-
         def _orient(edge, toward_pt):
             v0 = edge.Vertexes[0].Point
             v1 = edge.Vertexes[-1].Point
@@ -629,8 +908,7 @@ def _detect_floor_segments(face, base_obj, info, group_extent=None):
         remaining = list(candidates)
         best_d, best_e = 1e18, None
         for e in remaining:
-            d = min(_dist2(e.Vertexes[0].Point, start),
-                    _dist2(e.Vertexes[-1].Point, start))
+            d = min(_dist2(e.Vertexes[0].Point, start), _dist2(e.Vertexes[-1].Point, start))
             if d < best_d:
                 best_d, best_e = d, e
 
@@ -643,7 +921,7 @@ def _detect_floor_segments(face, base_obj, info, group_extent=None):
 
         for _ in range(_CHAIN_MAX_EDGES):
             nxt_e = nxt_s = nxt_end = None
-            bd = _CHAIN_TOL2
+            bd = tol.chain2
             for e in remaining:
                 v0 = e.Vertexes[0].Point
                 v1 = e.Vertexes[-1].Point
@@ -657,63 +935,39 @@ def _detect_floor_segments(face, base_obj, info, group_extent=None):
                 break
             if nxt_end.z > top_z + z_tol:
                 break
+            if nxt_end.z < floor_z - z_tol:
+                # Deeper than the known groove floor: this is geometry outside
+                # the selected group (e.g. an adjacent groove or a step ledge
+                # past the tip), not a continuation of this flute's profile.
+                break
             remaining.remove(nxt_e)
             chain.append((nxt_s, nxt_end, nxt_e))
             cur_e = nxt_end
 
-        FreeCAD.Console.PrintMessage(
-            "CAM_Flute: chained {} edge(s)\n".format(len(chain))
-        )
+        FreeCAD.Console.PrintMessage("CAM_Flute: chained {} edge(s)\n".format(len(chain)))
 
         # --- classify each edge -------------------------------------------------
-        segments = []
-        for seg_start, seg_end, edge in chain:
-            dp = path_proj(seg_end) - path_proj(seg_start)
-            dz = seg_end.z - seg_start.z
-            slope = (dz / dp) if abs(dp) > 1e-6 else 0.0
-
-            try:
-                is_arc = isinstance(edge.Curve, Part.Circle)
-            except Exception:
-                is_arc = False
-
-            if is_arc:
-                seg_type = "arc"
-                radius   = edge.Curve.Radius
-                raw_pts  = edge.discretize(Number=_ARC_SEGS + 1)
-                # Orient so first point is nearest seg_start
-                if _dist2(raw_pts[0], seg_start) > _dist2(raw_pts[-1], seg_start):
-                    raw_pts = list(reversed(raw_pts))
-                arc_pts = raw_pts
-            else:
-                seg_type = "flat" if abs(slope) < _FLAT_SLOPE else "ramp"
-                radius   = None
-                arc_pts  = None
-
-            segments.append({
-                "type":       seg_type,
-                "start":      FreeCAD.Vector(seg_start),
-                "end":        FreeCAD.Vector(seg_end),
-                "radius":     radius,
-                "arc_points": arc_pts,
-            })
+        segments = _classify_chain_segments(chain, path_proj)
 
         # Snap all floor-level endpoints to the minimum Z found.
         # Two adjacent faces can produce slightly different Z values at their
         # shared edge when sectioned (modeling seam); snapping to the deeper
         # value removes any tiny unwanted Z step in the toolpath.
         if segments:
-            floor_z = min(
-                min(s["start"].z, s["end"].z) for s in segments
-            )
+            floor_z = min(min(s["start"].z, s["end"].z) for s in segments)
+
             def _snap_z(v):
-                return FreeCAD.Vector(v.x, v.y, floor_z) if abs(v.z - floor_z) < _FLOOR_SNAP_TOL else FreeCAD.Vector(v)
+                return (
+                    FreeCAD.Vector(v.x, v.y, floor_z)
+                    if abs(v.z - floor_z) < tol.floor_snap
+                    else FreeCAD.Vector(v)
+                )
 
             snapped = []
             for seg in segments:
                 s = dict(seg)
                 s["start"] = _snap_z(seg["start"])
-                s["end"]   = _snap_z(seg["end"])
+                s["end"] = _snap_z(seg["end"])
                 if seg.get("arc_points"):
                     s["arc_points"] = [_snap_z(p) for p in seg["arc_points"]]
                 snapped.append(s)
@@ -721,29 +975,27 @@ def _detect_floor_segments(face, base_obj, info, group_extent=None):
 
         FreeCAD.Console.PrintMessage(
             "CAM_Flute: segments → {}\n".format(
-                [(s["type"], round(s["start"].z, 3), round(s["end"].z, 3))
-                 for s in segments]
+                [(s["type"], round(s["start"].z, 3), round(s["end"].z, 3)) for s in segments]
             )
         )
         return segments
 
     except Exception as exc:
         import traceback
+
         FreeCAD.Console.PrintMessage(
-            "CAM_Flute: _detect_floor_segments error: {}\n{}\n".format(
-                exc, traceback.format_exc()
-            )
+            "CAM_Flute: _detect_floor_segments error: {}\n{}\n".format(exc, traceback.format_exc())
         )
         return []
 
 
-def _apply_axial_leave(segments, axial_leave, stock_top_z):
+def _apply_axial_leave(segments, axial_leave, stock_top_z, tol):
     """Raise the floor Z of all segments by axial_leave and trim the first/last
     ramp/arc entry/exit ends inward proportionally (same angle, less depth)."""
     if not segments or axial_leave <= 1e-7:
         return segments
 
-    all_z   = [s["start"].z for s in segments] + [s["end"].z for s in segments]
+    all_z = [s["start"].z for s in segments] + [s["end"].z for s in segments]
     floor_z = min(all_z)
     total_d = stock_top_z - floor_z
     if total_d <= axial_leave + 1e-7:
@@ -753,7 +1005,7 @@ def _apply_axial_leave(segments, axial_leave, stock_top_z):
     frac = axial_leave / total_d
 
     def _raise(v, ref_z, new_z):
-        if abs(v.z - ref_z) < _AXIAL_FLOOR_TOL:
+        if abs(v.z - ref_z) < tol.axial_floor:
             return FreeCAD.Vector(v.x, v.y, new_z)
         return FreeCAD.Vector(v)
 
@@ -761,14 +1013,14 @@ def _apply_axial_leave(segments, axial_leave, stock_top_z):
     for seg in segments:
         s = dict(seg)
         s["start"] = _raise(seg["start"], floor_z, new_floor_z)
-        s["end"]   = _raise(seg["end"],   floor_z, new_floor_z)
+        s["end"] = _raise(seg["end"], floor_z, new_floor_z)
         if seg.get("arc_points"):
             s["arc_points"] = [_raise(p, floor_z, new_floor_z) for p in seg["arc_points"]]
         result.append(s)
 
     # Trim entry: move the first segment's far start XY inward by frac.
     first = result[0]
-    if abs(first["start"].z - stock_top_z) < _AXIAL_FLOOR_TOL and first["type"] in ("ramp", "arc"):
+    if abs(first["start"].z - stock_top_z) < tol.axial_floor and first["type"] in ("ramp", "arc"):
         sx = first["start"].x + frac * (first["end"].x - first["start"].x)
         sy = first["start"].y + frac * (first["end"].y - first["start"].y)
         first["start"] = FreeCAD.Vector(sx, sy, stock_top_z)
@@ -777,7 +1029,7 @@ def _apply_axial_leave(segments, axial_leave, stock_top_z):
 
     # Trim exit: move the last segment's far end XY inward by frac.
     last = result[-1]
-    if abs(last["end"].z - stock_top_z) < _AXIAL_FLOOR_TOL and last["type"] in ("ramp", "arc"):
+    if abs(last["end"].z - stock_top_z) < tol.axial_floor and last["type"] in ("ramp", "arc"):
         ex = last["end"].x + frac * (last["start"].x - last["end"].x)
         ey = last["end"].y + frac * (last["start"].y - last["end"].y)
         last["end"] = FreeCAD.Vector(ex, ey, stock_top_z)
@@ -805,7 +1057,7 @@ def _rescale_segments_z(segments, stock_top_z, floor_z, op_start_z, op_final_z):
     for seg in segments:
         s = dict(seg)
         s["start"] = _remap(seg["start"])
-        s["end"]   = _remap(seg["end"])
+        s["end"] = _remap(seg["end"])
         if seg.get("arc_points"):
             s["arc_points"] = [_remap(p) for p in seg["arc_points"]]
         result.append(s)
@@ -815,6 +1067,7 @@ def _rescale_segments_z(segments, stock_top_z, floor_z, op_start_z, op_final_z):
 # ---------------------------------------------------------------------------
 # Operation class
 # ---------------------------------------------------------------------------
+
 
 class ObjectFlute(PathOp.ObjectOp):
     """Proxy object for the Flute operation.
@@ -843,6 +1096,7 @@ class ObjectFlute(PathOp.ObjectOp):
             | PathOp.FeatureStepDown
             | PathOp.FeatureCoolant
             | PathOp.FeatureBaseFaces
+            | PathOp.FeatureBaseEdges
             | PathOp.FeatureLinking
         )
 
@@ -968,8 +1222,120 @@ class ObjectFlute(PathOp.ObjectOp):
         self._initOpProperties(obj, warn=True)
         self._applyPropertyDefaults(obj, job, self.addNewProps)
 
+    def _emitFluteSegments(
+        self,
+        obj,
+        segments,
+        geo_top_z,
+        geo_floor_z,
+        sub_names,
+        op_start_z,
+        op_final_z,
+        axial_leave,
+        finish_d,
+        step_down,
+        retract_z,
+        linking_kwargs,
+        tool_pos,
+        tol,
+    ):
+        """Take a segment chain (from face/solid analysis OR a directly
+        selected centerline wire) through Z remap, axial-leave, blind-end
+        compensation, pass generation, linking, and G-code emission.
+
+        Returns (new_tool_pos, emitted) where emitted is True if any G-code
+        was appended to self.commandlist.
+        """
+        # --- remap Z from geometry to operation Depths tab -------------------
+        if abs(geo_top_z - geo_floor_z) > 1e-7:
+            segments = _rescale_segments_z(segments, geo_top_z, geo_floor_z, op_start_z, op_final_z)
+
+        # --- axial stock to leave ---------------------------------------------
+        if axial_leave > 1e-7:
+            segments = _apply_axial_leave(segments, axial_leave, op_start_z, tol)
+
+        # --- blind end compensation ---------------------------------------------
+        # When the path terminates at depth (no exit ramp), pull the last
+        # endpoint back by the tool radius so the cutting edge — not the
+        # centre — aligns with the groove end.  No effect when the last
+        # segment exits back to stock surface.
+        if getattr(obj, "BlindEndCompensation", False) and segments:
+            last = segments[-1]
+            floor_z_seg = min(min(s["start"].z, s["end"].z) for s in segments)
+            if abs(last["end"].z - floor_z_seg) < tol.floor_snap:
+                try:
+                    tool_radius = obj.ToolController.Tool.Diameter.Value / 2.0
+                except Exception:
+                    tool_radius = 0.0
+                if tool_radius > 1e-6:
+                    dx = last["end"].x - last["start"].x
+                    dy = last["end"].y - last["start"].y
+                    seg_len = math.sqrt(dx * dx + dy * dy)
+                    if seg_len > 1e-6:
+                        pd = FreeCAD.Vector(dx / seg_len, dy / seg_len, 0.0)
+                        s = dict(last)
+                        s["end"] = FreeCAD.Vector(
+                            last["end"].x - pd.x * tool_radius,
+                            last["end"].y - pd.y * tool_radius,
+                            last["end"].z,
+                        )
+                        if last.get("arc_points"):
+                            ap = list(last["arc_points"])
+                            ap[-1] = FreeCAD.Vector(
+                                ap[-1].x - pd.x * tool_radius,
+                                ap[-1].y - pd.y * tool_radius,
+                                ap[-1].z,
+                            )
+                            s["arc_points"] = ap
+                        segments = segments[:-1] + [s]
+
+        # --- compute passes -------------------------------------------------
+        passes = FluteGenerator.generate_passes(
+            segments,
+            op_start_z,
+            step_down,
+            finish_depth=finish_d,
+            reverse=obj.ReverseDirection,
+        )
+        if not passes:
+            FreeCAD.Console.PrintWarning(
+                translate("CAM_Flute", "No passes computed for: {}\n").format(sub_names)
+            )
+            return tool_pos, False
+
+        first_cut = passes[0][0]
+        entry_pos = FreeCAD.Vector(first_cut.x, first_cut.y, obj.SafeHeight.Value)
+
+        if tool_pos is not None:
+            linking_kwargs["start_position"] = tool_pos
+            linking_kwargs["target_position"] = entry_pos
+            self.commandlist.extend(linking.get_linking_moves(**linking_kwargs))
+
+        cmds = FluteGenerator.generate(
+            segments,
+            op_start_z,
+            step_down,
+            retract_z,
+            self.horizFeed,
+            self.vertFeed,
+            self.horizRapid,
+            self.vertRapid,
+            finish_depth=finish_d,
+            reverse=obj.ReverseDirection,
+        )
+
+        if not cmds:
+            FreeCAD.Console.PrintWarning(
+                translate("CAM_Flute", "No path generated for: {}\n").format(sub_names)
+            )
+            return tool_pos, False
+
+        self.commandlist.extend(cmds)
+        last_deep = passes[-1][-1]
+        return FreeCAD.Vector(last_deep.x, last_deep.y, retract_z), True
+
     def opExecute(self, obj):
-        """Build the path for all selected flute faces."""
+        """Build the path for all selected flute faces and/or edges."""
         Path.Log.track()
 
         self.commandlist = []
@@ -987,25 +1353,40 @@ class ObjectFlute(PathOp.ObjectOp):
             )
             return False
 
+        # All absolute-distance tolerances used below scale with the Job's
+        # configured GeometryTolerance (same property Profile/Deburr/Engrave/
+        # Waterline/etc. already use), rather than being fixed mm values.
+        geom_tol = self.job.GeometryTolerance.Value if getattr(self, "job", None) else None
+        tol = _make_tolerances(geom_tol)
+
+        # Selected subelements can be faces (analysed via solid section) or
+        # edges (used directly as the centerline wire, no analysis needed).
         face_tuples = []
+        edge_tuples = []
         for base, sub_list in obj.Base:
             for sub in sub_list:
                 try:
-                    face = base.Shape.getElement(sub)
-                    face_tuples.append((face, sub, base))
+                    elem = base.Shape.getElement(sub)
                 except Part.OCCError as err:
                     Path.Log.error(err)
+                    continue
+                if elem.ShapeType == "Face":
+                    face_tuples.append((elem, sub, base))
+                elif elem.ShapeType == "Edge":
+                    edge_tuples.append((elem, sub, base))
 
-        if not face_tuples:
+        if not face_tuples and not edge_tuples:
             FreeCAD.Console.PrintError(
-                translate("CAM_Flute", "No valid faces found in base geometry.\n")
+                translate("CAM_Flute", "No valid faces or edges found in base geometry.\n")
             )
             return False
 
-        groups = _group_flutes(face_tuples)
+        groups = _group_flutes(face_tuples, tol) if face_tuples else []
 
         FreeCAD.Console.PrintMessage(
-            "CAM_Flute: {} face(s) → {} group(s)\n".format(len(face_tuples), len(groups))
+            "CAM_Flute: {} face(s) -> {} group(s), {} edge(s)\n".format(
+                len(face_tuples), len(groups), len(edge_tuples)
+            )
         )
 
         if obj.Comment:
@@ -1040,7 +1421,9 @@ class ObjectFlute(PathOp.ObjectOp):
             linking_kwargs["solids"] = solids
             linking_kwargs["tool_shape"] = obj.ToolController.Tool.BitBody.Shape
 
-        retract_z = obj.ClearanceHeight.Value if strategy == "Clearance Height" else obj.SafeHeight.Value
+        retract_z = (
+            obj.ClearanceHeight.Value if strategy == "Clearance Height" else obj.SafeHeight.Value
+        )
 
         op_start_z = obj.StartDepth.Value
         op_final_z = obj.FinalDepth.Value
@@ -1050,7 +1433,7 @@ class ObjectFlute(PathOp.ObjectOp):
         finish_d = finish_d.Value if finish_d is not None else 0.0
 
         any_path = False
-        tool_pos  = None
+        tool_pos = None
 
         for group in groups:
             sub_names = [ft[1] for ft in group["faces"]]
@@ -1067,7 +1450,7 @@ class ObjectFlute(PathOp.ObjectOp):
             section_base = None
 
             if group.get("valley_edge") is not None:
-                section_info = _get_centerline(group)
+                section_info = _get_centerline(group, tol)
                 section_face = group["faces"][0][0]
                 section_base = group["faces"][0][2]
             else:
@@ -1080,24 +1463,30 @@ class ObjectFlute(PathOp.ObjectOp):
                         break
 
                 if section_info is None:
-                    section_info = _get_centerline(group)
+                    section_info = _get_centerline(group, tol)
                     section_face = group["faces"][0][0]
                     section_base = group["faces"][0][2]
 
             if section_info is None:
                 FreeCAD.Console.PrintWarning(
-                    translate("CAM_Flute", "Could not determine centerline for: {}\n").format(sub_names)
+                    translate("CAM_Flute", "Could not determine centerline for: {}\n").format(
+                        sub_names
+                    )
                 )
                 continue
 
-            geo_top_z   = section_info["top_z"]
+            geo_top_z = section_info["top_z"]
             geo_floor_z = section_info["end"].z
 
             FreeCAD.Console.PrintMessage(
                 "CAM_Flute: centerline start=({:.3f},{:.3f},{:.3f}) "
                 "end=({:.3f},{:.3f},{:.3f})\n".format(
-                    section_info["start"].x, section_info["start"].y, section_info["start"].z,
-                    section_info["end"].x,   section_info["end"].y,   section_info["end"].z,
+                    section_info["start"].x,
+                    section_info["start"].y,
+                    section_info["start"].z,
+                    section_info["end"].x,
+                    section_info["end"].y,
+                    section_info["end"].z,
                 )
             )
 
@@ -1107,11 +1496,11 @@ class ObjectFlute(PathOp.ObjectOp):
             # even though section_info only describes the ramp cylinder face.
             bb_list = [ft[0].BoundBox for ft in group["faces"]]
             group_xy_span = math.sqrt(
-                (max(b.XMax for b in bb_list) - min(b.XMin for b in bb_list)) ** 2 +
-                (max(b.YMax for b in bb_list) - min(b.YMin for b in bb_list)) ** 2
+                (max(b.XMax for b in bb_list) - min(b.XMin for b in bb_list)) ** 2
+                + (max(b.YMax for b in bb_list) - min(b.YMin for b in bb_list)) ** 2
             )
             segments = _detect_floor_segments(
-                section_face, section_base, section_info, group_extent=group_xy_span
+                section_face, section_base, section_info, tol, group_extent=group_xy_span
             )
 
             if not segments:
@@ -1119,95 +1508,78 @@ class ObjectFlute(PathOp.ObjectOp):
                 FreeCAD.Console.PrintMessage("CAM_Flute: falling back to plain Ramp\n")
                 segments = [
                     {
-                        "type":       "ramp",
-                        "start":      FreeCAD.Vector(centerline["start"]),
-                        "end":        FreeCAD.Vector(centerline["end"]),
-                        "radius":     None,
+                        "type": "ramp",
+                        "start": FreeCAD.Vector(section_info["start"]),
+                        "end": FreeCAD.Vector(section_info["end"]),
+                        "radius": None,
                         "arc_points": None,
                     }
                 ]
-
-            # --- remap Z from geometry to operation Depths tab ------------------
-            if abs(geo_top_z - geo_floor_z) > 1e-7:
-                segments = _rescale_segments_z(
-                    segments, geo_top_z, geo_floor_z, op_start_z, op_final_z
-                )
-
-            # --- axial stock to leave -------------------------------------------
-            if axial_leave > 1e-7:
-                segments = _apply_axial_leave(segments, axial_leave, op_start_z)
-
-            # --- blind end compensation -----------------------------------------
-            # When the path terminates at depth (no exit ramp), pull the last
-            # endpoint back by the tool radius so the cutting edge — not the
-            # centre — aligns with the groove end.  No effect when the last
-            # segment exits back to stock surface.
-            if getattr(obj, "BlindEndCompensation", False) and segments:
-                last = segments[-1]
-                floor_z_seg = min(min(s["start"].z, s["end"].z) for s in segments)
-                if abs(last["end"].z - floor_z_seg) < _FLOOR_SNAP_TOL:
-                    try:
-                        tool_radius = obj.ToolController.Tool.Diameter.Value / 2.0
-                    except Exception:
-                        tool_radius = 0.0
-                    if tool_radius > 1e-6:
-                        dx = last["end"].x - last["start"].x
-                        dy = last["end"].y - last["start"].y
-                        seg_len = math.sqrt(dx * dx + dy * dy)
-                        if seg_len > 1e-6:
-                            pd = FreeCAD.Vector(dx / seg_len, dy / seg_len, 0.0)
-                            s = dict(last)
-                            s["end"] = FreeCAD.Vector(
-                                last["end"].x - pd.x * tool_radius,
-                                last["end"].y - pd.y * tool_radius,
-                                last["end"].z,
-                            )
-                            if last.get("arc_points"):
-                                ap = list(last["arc_points"])
-                                ap[-1] = FreeCAD.Vector(
-                                    ap[-1].x - pd.x * tool_radius,
-                                    ap[-1].y - pd.y * tool_radius,
-                                    ap[-1].z,
-                                )
-                                s["arc_points"] = ap
-                            segments = segments[:-1] + [s]
-
-            # --- compute passes -------------------------------------------------
-            passes = FluteGenerator.generate_passes(
-                segments, op_start_z, step_down,
-                finish_depth=finish_d,
-                reverse=obj.ReverseDirection,
-            )
-            if not passes:
-                FreeCAD.Console.PrintWarning(
-                    translate("CAM_Flute", "No passes computed for faces: {}\n").format(sub_names)
-                )
-                continue
-
-            first_cut = passes[0][0]
-            entry_pos = FreeCAD.Vector(first_cut.x, first_cut.y, obj.SafeHeight.Value)
-
-            if tool_pos is not None:
-                linking_kwargs["start_position"] = tool_pos
-                linking_kwargs["target_position"] = entry_pos
-                self.commandlist.extend(linking.get_linking_moves(**linking_kwargs))
-
-            cmds = FluteGenerator.generate(
-                segments, op_start_z, step_down, retract_z,
-                self.horizFeed, self.vertFeed, self.horizRapid, self.vertRapid,
-                finish_depth=finish_d,
-                reverse=obj.ReverseDirection,
-            )
-
-            if cmds:
-                self.commandlist.extend(cmds)
-                any_path = True
-                last_deep = passes[-1][-1]
-                tool_pos  = FreeCAD.Vector(last_deep.x, last_deep.y, retract_z)
             else:
-                FreeCAD.Console.PrintWarning(
-                    translate("CAM_Flute", "No path generated for faces: {}\n").format(sub_names)
+                # Re-derive top/floor Z from the ACTUAL detected segments,
+                # not the upstream centerline estimate. section_info's Z
+                # range (PCA fallback, or a single face's cylinder axis) can
+                # disagree with the real sectioned profile -- e.g. PCA
+                # averages points within an end-zone and can land short of
+                # the true valley depth. Rescaling against a floor_z that
+                # doesn't match the segments' real floor extrapolates the
+                # deepest points past the intended depth.
+                all_z = [v.z for s in segments for v in (s["start"], s["end"])] + [
+                    p.z for s in segments if s.get("arc_points") for p in s["arc_points"]
+                ]
+                geo_top_z = max(all_z)
+                geo_floor_z = min(all_z)
+
+            tool_pos, emitted = self._emitFluteSegments(
+                obj,
+                segments,
+                geo_top_z,
+                geo_floor_z,
+                sub_names,
+                op_start_z,
+                op_final_z,
+                axial_leave,
+                finish_d,
+                step_down,
+                retract_z,
+                linking_kwargs,
+                tool_pos,
+                tol,
+            )
+            any_path = any_path or emitted
+
+        # --- edges selected directly as centerline wires --------------------
+        # Each connected component of selected edges is its own flute; no
+        # face/solid analysis — the wire itself defines the ramp/flat/arc
+        # profile (may include straight, arc, and BSpline segments).
+        if edge_tuples:
+            edge_by_id = {id(e): sub for e, sub, _b in edge_tuples}
+            wires = _split_into_wires([e for e, _sub, _b in edge_tuples], tol)
+            FreeCAD.Console.PrintMessage(
+                "CAM_Flute: {} edge(s) -> {} wire(s)\n".format(len(edge_tuples), len(wires))
+            )
+            for wire_edges in wires:
+                sub_names = [edge_by_id.get(id(e), "?") for e in wire_edges]
+                segments, geo_top_z, geo_floor_z = _segments_from_wire(wire_edges, tol)
+                if not segments:
+                    continue
+                tool_pos, emitted = self._emitFluteSegments(
+                    obj,
+                    segments,
+                    geo_top_z,
+                    geo_floor_z,
+                    sub_names,
+                    op_start_z,
+                    op_final_z,
+                    axial_leave,
+                    finish_d,
+                    step_down,
+                    retract_z,
+                    linking_kwargs,
+                    tool_pos,
+                    tol,
                 )
+                any_path = any_path or emitted
 
         if not any_path:
             self.commandlist.clear()
@@ -1222,6 +1594,7 @@ class ObjectFlute(PathOp.ObjectOp):
 # ---------------------------------------------------------------------------
 # Module-level API expected by PathOpGui.SetupOperation
 # ---------------------------------------------------------------------------
+
 
 def SetupProperties():
     return [tup[1] for tup in ObjectFlute._propertyDefinitions()]
