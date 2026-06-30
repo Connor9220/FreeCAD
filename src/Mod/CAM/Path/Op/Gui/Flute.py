@@ -67,6 +67,9 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
         self.form.reverseDirection.setCheckState(
             QtCore.Qt.Checked if obj.ReverseDirection else QtCore.Qt.Unchecked
         )
+        self.form.blindEndCompensation.setCheckState(
+            QtCore.Qt.Checked if obj.BlindEndCompensation else QtCore.Qt.Unchecked
+        )
 
         self.axialStockToLeaveSpinBox.updateWidget()
 
@@ -75,6 +78,7 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
         self.updateCoolant(obj, self.form.coolantController)
 
         obj.ReverseDirection = self.form.reverseDirection.isChecked()
+        obj.BlindEndCompensation = self.form.blindEndCompensation.isChecked()
         self.axialStockToLeaveSpinBox.updateProperty()
 
     def getSignalsForUpdate(self, obj):
@@ -82,10 +86,11 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
         signals.append(self.form.toolController.currentIndexChanged)
         signals.append(self.form.coolantController.currentIndexChanged)
 
-        if hasattr(self.form.reverseDirection, "checkStateChanged"):
-            signals.append(self.form.reverseDirection.checkStateChanged)
-        else:
-            signals.append(self.form.reverseDirection.stateChanged)
+        for checkbox in (self.form.reverseDirection, self.form.blindEndCompensation):
+            if hasattr(checkbox, "checkStateChanged"):
+                signals.append(checkbox.checkStateChanged)
+            else:
+                signals.append(checkbox.stateChanged)
 
         signals.append(self.form.axialStockToLeave.editingFinished)
 
