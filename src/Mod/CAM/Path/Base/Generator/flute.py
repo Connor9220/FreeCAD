@@ -240,8 +240,6 @@ def generate(
     retract_z,
     horiz_feed,
     vert_feed,
-    horiz_rapid,
-    vert_rapid,
     finish_depth=0.0,
     reverse=False,
 ):
@@ -254,11 +252,8 @@ def generate(
         retract_z    - float, Z for rapid retract between passes
         horiz_feed   - float, horizontal feed rate
         vert_feed    - float, vertical (plunge) feed rate
-        horiz_rapid  - float, horizontal rapid rate
-        vert_rapid   - float, vertical rapid rate
         finish_depth - float, depth reserved for finish pass (0 = none)
         reverse      - bool, reverse cut direction
-        arc_segments - int, segments per arc (unused here; arcs already discretised)
 
     Returns a list of Path.Command objects.
     """
@@ -278,12 +273,12 @@ def generate(
             continue
 
         first = waypoints[0]
-        commands.append(Path.Command("G0", {"X": first.x, "Y": first.y, "F": horiz_rapid}))
+        commands.append(Path.Command("G0", {"X": first.x, "Y": first.y}))
         commands.append(Path.Command("G1", {"Z": first.z, "F": vert_feed}))
 
         for wp in waypoints[1:]:
             commands.append(Path.Command("G1", {"X": wp.x, "Y": wp.y, "Z": wp.z, "F": horiz_feed}))
 
-        commands.append(Path.Command("G0", {"Z": retract_z, "F": vert_rapid}))
+        commands.append(Path.Command("G0", {"Z": retract_z}))
 
     return commands
