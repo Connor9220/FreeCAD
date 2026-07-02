@@ -457,7 +457,7 @@ SET(PathPythonBaseGenerator_SRCS
     Path/Base/Generator/tapping.py
     Path/Base/Generator/threadmilling.py
     Path/Base/Generator/toolchange.py
-    Path/Base/Generator/flute.py
+    Path/Base/Generator/follow_wire.py
 )
 
 SET(PathPythonGui_SRCS

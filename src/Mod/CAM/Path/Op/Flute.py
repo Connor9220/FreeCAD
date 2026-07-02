@@ -30,8 +30,9 @@ import math
 import FreeCAD
 from PySide import QtCore
 import Path
+import Path.Geom as PathGeom
 import Path.Op.Base as PathOp
-import Path.Base.Generator.flute as FluteGenerator
+import Path.Base.Generator.follow_wire as WireFollowGenerator
 import Path.Base.Generator.linking as linking
 import PathScripts.PathUtils as PathUtils
 
@@ -49,7 +50,6 @@ else:
 
 _PREC = FreeCAD.Base.Precision.confusion()  # standard FreeCAD coincidence epsilon (1e-7)
 
-_FLAT_SLOPE = 0.001  # dZ/ds below this → "flat" segment
 _SECTION_Z_TOL_FRAC = 0.05  # z_tol = max(1mm, depth * this fraction)
 _CHAIN_MAX_EDGES = 200  # guard against infinite loop (not a tolerance)
 _WALL_SLOPE_MAX = 5.0  # dz/ds above this → discard as a side wall
@@ -647,56 +647,113 @@ def _dist2(a, b):
     return (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2
 
 
-def _classify_chain_segments(chain, path_proj, tol):
-    """Classify an ordered chain of (seg_start, seg_end, edge) triples into
-    the generic segment-dict format used by the path generator.
+def _chain_to_waypoints(chain, tol):
+    """Convert an ordered chain of (seg_start, seg_end, edge) triples to a
+    deduplicated list of FreeCAD.Vector waypoints.
 
-    - Part.Circle edges  -> "arc": exact radius, discretized arc_points.
-    - Straight-line edges -> "ramp"/"flat" by overall slope, exact endpoints.
-    - Anything else (BSpline, Bezier, ...) -> "ramp"/"flat" by overall slope,
-      discretized into arc_points to preserve the actual curve shape.
+    Straight Line edges contribute only their two endpoints.  Arcs, splines,
+    and other curves are discretized at tol.arc_chord spacing so their shape
+    is preserved.
     """
-    segments = []
+    pts = []
     for seg_start, seg_end, edge in chain:
-        dp = path_proj(seg_end) - path_proj(seg_start)
-        dz = seg_end.z - seg_start.z
-        slope = (dz / dp) if abs(dp) > _PREC * 10 else 0.0
-
-        try:
-            curve = edge.Curve
-        except Exception:
-            curve = None
-
-        if isinstance(curve, Part.Circle):
-            seg_type = "arc"
-            radius = curve.Radius
-            raw_pts = edge.discretize(Distance=tol.arc_chord)
-            if _dist2(raw_pts[0], seg_start) > _dist2(raw_pts[-1], seg_start):
-                raw_pts = list(reversed(raw_pts))
-            arc_pts = raw_pts
-        elif curve is None or isinstance(curve, (Part.Line, Part.LineSegment)):
-            seg_type = "flat" if abs(slope) < _FLAT_SLOPE else "ramp"
-            radius = None
-            arc_pts = None
+        if edge.Curve.__class__.__name__ == "Line":
+            raw = [edge.valueAt(edge.FirstParameter), edge.valueAt(edge.LastParameter)]
         else:
-            # BSpline / Bezier / other curve types: discretize to preserve shape.
-            seg_type = "flat" if abs(slope) < _FLAT_SLOPE else "ramp"
-            radius = None
-            raw_pts = edge.discretize(Distance=tol.arc_chord)
-            if _dist2(raw_pts[0], seg_start) > _dist2(raw_pts[-1], seg_start):
-                raw_pts = list(reversed(raw_pts))
-            arc_pts = raw_pts
+            raw = edge.discretize(Distance=tol.arc_chord)
+        # Orient to match chain direction
+        if raw and _dist2(raw[0], seg_start) > _dist2(raw[-1], seg_start):
+            raw = list(reversed(raw))
+        for p in raw:
+            pv = FreeCAD.Vector(p)
+            if not pts or _dist2(pts[-1], pv) > (tol.arc_chord * 0.01) ** 2:
+                pts.append(pv)
+    return pts
 
-        segments.append(
-            {
-                "type": seg_type,
-                "start": FreeCAD.Vector(seg_start),
-                "end": FreeCAD.Vector(seg_end),
-                "radius": radius,
-                "arc_points": arc_pts,
-            }
-        )
-    return segments
+
+def _clip_and_scale(pts, f, stock_top_z):
+    """Scale a full-depth point list to depth fraction f.
+
+    pts: ordered list of FreeCAD.Vector, shallow end first, deep end last.
+
+    At fraction f (0 < f <= 1):
+      - Include only the f * total_XY_length of path closest to the deep end.
+      - The new chain-start is forced to stock_top_z.
+      - pts[-1] is forced to pass_floor_z = stock_top_z - f*(stock_top_z - floor_z).
+      - Intermediate Z values scale: Z_i = stock_top_z - f*(stock_top_z - Z_i_full).
+    """
+    if not pts or f < _PREC:
+        return []
+
+    n = len(pts)
+    floor_z = min(p.z for p in pts)   # use actual deepest point, not pts[-1]
+    pass_floor_z = stock_top_z - f * (stock_top_z - floor_z)
+
+    if n == 1:
+        return [FreeCAD.Vector(pts[0].x, pts[0].y, pass_floor_z)]
+
+    # Cumulative XY arc lengths from the deep end toward pts[0].
+    rev = [0.0] * n
+    for i in range(n - 2, -1, -1):
+        dx = pts[i].x - pts[i + 1].x
+        dy = pts[i].y - pts[i + 1].y
+        rev[i] = rev[i + 1] + math.sqrt(dx * dx + dy * dy)
+
+    L_total = rev[0]
+    if L_total < _PREC:
+        return [FreeCAD.Vector(pts[-1].x, pts[-1].y, pass_floor_z)]
+
+    target = f * L_total
+
+    result_rev = []
+    for i in range(n - 1, -1, -1):
+        if rev[i] <= target + _PREC:
+            z_f = stock_top_z - f * (stock_top_z - pts[i].z)
+            result_rev.append(FreeCAD.Vector(pts[i].x, pts[i].y, z_f))
+        else:
+            if result_rev:
+                j = i + 1
+                seg_len = rev[i] - rev[j]
+                if seg_len > _PREC:
+                    t = (target - rev[j]) / seg_len
+                    px = pts[j].x + t * (pts[i].x - pts[j].x)
+                    py = pts[j].y + t * (pts[i].y - pts[j].y)
+                else:
+                    px, py = pts[j].x, pts[j].y
+            else:
+                px, py = pts[-1].x, pts[-1].y
+            result_rev.append(FreeCAD.Vector(px, py, stock_top_z))
+            break
+
+    if not result_rev:
+        return [FreeCAD.Vector(pts[-1].x, pts[-1].y, pass_floor_z)]
+
+    result_rev.reverse()
+    result_rev[0] = FreeCAD.Vector(result_rev[0].x, result_rev[0].y, stock_top_z)
+    # Snap the exit to pass_floor_z only when pts[-1] is at (or near) the floor.
+    # For Ramp Start End the path returns to stock_top_z at the exit — don't
+    # force that back down to pass_floor_z or the exit ramp is destroyed.
+    depth_range = stock_top_z - floor_z
+    if depth_range > _PREC and (pts[-1].z - floor_z) < 0.25 * depth_range:
+        result_rev[-1] = FreeCAD.Vector(result_rev[-1].x, result_rev[-1].y, pass_floor_z)
+    return result_rev
+
+
+def _pts_to_wire(pts):
+    """Build a polyline Part.Wire from an ordered list of FreeCAD.Vector.
+    Returns None if fewer than 2 distinct points.
+    """
+    edges = [
+        Part.makeLine(pts[i], pts[i + 1])
+        for i in range(len(pts) - 1)
+        if _dist2(pts[i], pts[i + 1]) > _PREC ** 2
+    ]
+    if not edges:
+        return None
+    try:
+        return Part.Wire(edges)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -776,12 +833,13 @@ def _chain_wire_edges(edges, tol):
     return chain
 
 
-def _segments_from_wire(edges, tol):
-    """Convert a connected wire (chain of edges) directly into the generic
-    segment-chain format used by the path generator. The wire IS the
-    centerline - no face or solid-section analysis is performed.
+def _wire_from_edges(edges, tol):
+    """Convert a connected set of selected edges directly into a Part.Wire.
+    The edges ARE the centerline — no face/solid analysis.
 
-    Returns (segments, top_z, floor_z), or (None, None, None) on failure.
+    Orients so the shallower (higher Z) end is first.
+
+    Returns (Part.Wire, top_z, floor_z), or (None, None, None) on failure.
     """
     chain = _chain_wire_edges(edges, tol)
     if not chain:
@@ -794,19 +852,16 @@ def _segments_from_wire(edges, tol):
     if chain[0][0].z < chain[-1][1].z:
         chain = [(e, s, edge) for s, e, edge in reversed(chain)]
 
-    start = chain[0][0]
-    end = chain[-1][1]
-    dx, dy = end.x - start.x, end.y - start.y
-    L = math.sqrt(dx * dx + dy * dy)
-    path_dir = FreeCAD.Vector(dx / L, dy / L, 0.0) if L > _PREC else FreeCAD.Vector(0.0, 0.0, 0.0)
+    pts = _chain_to_waypoints(chain, tol)
+    if not pts:
+        return None, None, None
 
-    def path_proj(v):
-        return (v.x - start.x) * path_dir.x + (v.y - start.y) * path_dir.y
+    wire = _pts_to_wire(pts)
+    if wire is None:
+        return None, None, None
 
-    segments = _classify_chain_segments(chain, path_proj, tol)
-
-    all_z = [v.z for s, e, _ in chain for v in (s, e)]
-    return segments, max(all_z), min(all_z)
+    all_z = [p.z for p in pts]
+    return wire, max(all_z), min(all_z)
 
 
 # ---------------------------------------------------------------------------
@@ -814,14 +869,12 @@ def _segments_from_wire(edges, tol):
 # ---------------------------------------------------------------------------
 
 
-def _detect_floor_segments(face, base_obj, info, tol, group_extent=None):
+def _detect_floor_wire(face, base_obj, info, tol, group_extent=None):
     """Section base_obj.Shape with a vertical plane through the groove
-    centreline and return an ordered list of typed segment dicts.
+    centreline and return a Part.Wire representing the floor profile.
 
-    Each dict has keys: "type" ("ramp"|"flat"|"arc"), "start" (Vector),
-    "end" (Vector), "radius" (float or None), "arc_points" (list or None).
-
-    Returns [] on any failure; the caller falls back to a plain Ramp.
+    Returns (Part.Wire, floor_z, top_z), or (None, None, None) on any failure.
+    The caller falls back to a plain ramp line using the centerline endpoints.
     """
     try:
         start = info["start"]
@@ -833,7 +886,7 @@ def _detect_floor_segments(face, base_obj, info, tol, group_extent=None):
         dy = end_info.y - start.y
         L = math.sqrt(dx * dx + dy * dy)
         if L < _PREC:
-            return []
+            return None, None, None
 
         path_dir = FreeCAD.Vector(dx / L, dy / L, 0.0)
 
@@ -862,7 +915,7 @@ def _detect_floor_segments(face, base_obj, info, tol, group_extent=None):
         all_edges = section.Edges
         if not all_edges:
             Path.Log.debug("CAM_Flute: section returned no edges\n")
-            return []
+            return None, None, None
 
         Path.Log.debug(
             "CAM_Flute: section returned {} edge(s)\n".format(len(all_edges))
@@ -897,7 +950,7 @@ def _detect_floor_segments(face, base_obj, info, tol, group_extent=None):
 
         if not candidates:
             Path.Log.debug("CAM_Flute: no floor edge candidates\n")
-            return []
+            return None, None, None
 
         Path.Log.debug(
             "CAM_Flute: {} candidate floor edge(s)\n".format(len(candidates))
@@ -919,7 +972,7 @@ def _detect_floor_segments(face, base_obj, info, tol, group_extent=None):
                 best_d, best_e = d, e
 
         if best_e is None:
-            return []
+            return None, None, None
 
         remaining.remove(best_e)
         cur_s, cur_e = _orient(best_e, start)
@@ -952,122 +1005,248 @@ def _detect_floor_segments(face, base_obj, info, tol, group_extent=None):
 
         Path.Log.debug("CAM_Flute: chained {} edge(s)\n".format(len(chain)))
 
-        # --- classify each edge -------------------------------------------------
-        segments = _classify_chain_segments(chain, path_proj, tol)
+        # --- convert chain to wire ----------------------------------------------
+        pts = _chain_to_waypoints(chain, tol)
+        if not pts:
+            return None, None, None
 
-        # Snap all floor-level endpoints to the minimum Z found.
-        # Two adjacent faces can produce slightly different Z values at their
-        # shared edge when sectioned (modeling seam); snapping to the deeper
-        # value removes any tiny unwanted Z step in the toolpath.
-        if segments:
-            floor_z = min(min(s["start"].z, s["end"].z) for s in segments)
+        # Snap floor-level points to the exact minimum Z found.  Two adjacent
+        # faces can produce slightly different Z values at their shared edge when
+        # sectioned (modeling seam); snapping removes any tiny Z step.
+        floor_z = min(p.z for p in pts)
+        pts = [
+            FreeCAD.Vector(p.x, p.y, floor_z) if abs(p.z - floor_z) < tol.floor_snap
+            else FreeCAD.Vector(p)
+            for p in pts
+        ]
+        top_z = max(p.z for p in pts)
 
-            def _snap_z(v):
-                return (
-                    FreeCAD.Vector(v.x, v.y, floor_z)
-                    if abs(v.z - floor_z) < tol.floor_snap
-                    else FreeCAD.Vector(v)
-                )
-
-            snapped = []
-            for seg in segments:
-                s = dict(seg)
-                s["start"] = _snap_z(seg["start"])
-                s["end"] = _snap_z(seg["end"])
-                if seg.get("arc_points"):
-                    s["arc_points"] = [_snap_z(p) for p in seg["arc_points"]]
-                snapped.append(s)
-            segments = snapped
+        wire = _pts_to_wire(pts)
+        if wire is None:
+            return None, None, None
 
         Path.Log.debug(
-            "CAM_Flute: segments → {}\n".format(
-                [(s["type"], round(s["start"].z, 3), round(s["end"].z, 3)) for s in segments]
+            "CAM_Flute: floor wire {} pts, floor_z={:.3f}, top_z={:.3f}\n".format(
+                len(pts), floor_z, top_z
             )
         )
-        return segments
+        return wire, floor_z, top_z
 
     except Exception as exc:
         import traceback
 
         Path.Log.debug(
-            "CAM_Flute: _detect_floor_segments error: {}\n{}\n".format(exc, traceback.format_exc())
+            "CAM_Flute: _detect_floor_waypoints error: {}\n{}\n".format(exc, traceback.format_exc())
         )
-        return []
+        return None, None, None
 
 
-def _apply_axial_leave(segments, axial_leave, stock_top_z, tol):
-    """Raise the floor Z of all segments by axial_leave and trim the first/last
-    ramp/arc entry/exit ends inward proportionally (same angle, less depth)."""
-    if not segments or axial_leave <= _PREC:
-        return segments
+def _rescale_pts_z(pts, geo_top_z, geo_floor_z, op_start_z, op_final_z):
+    """Linearly remap waypoint Z values from [geo_floor_z, geo_top_z] to
+    [op_final_z, op_start_z].  Preserves profile shape while honouring the
+    Depths tab settings."""
+    if abs(geo_top_z - geo_floor_z) < _PREC:
+        return pts
+    z_range_src = geo_top_z - geo_floor_z
+    z_range_dst = op_start_z - op_final_z
+    result = []
+    for p in pts:
+        t = (p.z - geo_floor_z) / z_range_src  # 0 = floor, 1 = top
+        result.append(FreeCAD.Vector(p.x, p.y, op_final_z + t * z_range_dst))
+    return result
 
-    all_z = [s["start"].z for s in segments] + [s["end"].z for s in segments]
-    floor_z = min(all_z)
+
+def _apply_axial_leave_pts(pts, axial_leave, stock_top_z, tol):
+    """Raise the floor Z of all waypoints by axial_leave and trim the entry/exit
+    ends inward proportionally (same path angle, shallower depth)."""
+    if not pts or axial_leave <= _PREC:
+        return pts
+
+    floor_z = min(p.z for p in pts)
     total_d = stock_top_z - floor_z
     if total_d <= axial_leave + _PREC:
-        return segments
+        return pts
 
     new_floor_z = floor_z + axial_leave
     frac = axial_leave / total_d
 
-    def _raise(v, ref_z, new_z):
-        if abs(v.z - ref_z) < tol.axial_floor:
-            return FreeCAD.Vector(v.x, v.y, new_z)
-        return FreeCAD.Vector(v)
+    # Raise all floor-level points
+    result = [
+        FreeCAD.Vector(p.x, p.y, new_floor_z) if abs(p.z - floor_z) < tol.axial_floor
+        else FreeCAD.Vector(p)
+        for p in pts
+    ]
 
-    result = []
-    for seg in segments:
-        s = dict(seg)
-        s["start"] = _raise(seg["start"], floor_z, new_floor_z)
-        s["end"] = _raise(seg["end"], floor_z, new_floor_z)
-        if seg.get("arc_points"):
-            s["arc_points"] = [_raise(p, floor_z, new_floor_z) for p in seg["arc_points"]]
-        result.append(s)
+    # Trim entry: move first point inward if it starts at stock_top_z
+    if len(result) >= 2 and abs(result[0].z - stock_top_z) < tol.axial_floor:
+        sx = result[0].x + frac * (result[1].x - result[0].x)
+        sy = result[0].y + frac * (result[1].y - result[0].y)
+        result[0] = FreeCAD.Vector(sx, sy, stock_top_z)
 
-    # Trim entry: move the first segment's far start XY inward by frac.
-    first = result[0]
-    if abs(first["start"].z - stock_top_z) < tol.axial_floor and first["type"] in ("ramp", "arc"):
-        sx = first["start"].x + frac * (first["end"].x - first["start"].x)
-        sy = first["start"].y + frac * (first["end"].y - first["start"].y)
-        first["start"] = FreeCAD.Vector(sx, sy, stock_top_z)
-        if first.get("arc_points"):
-            first["arc_points"][0] = FreeCAD.Vector(sx, sy, stock_top_z)
-
-    # Trim exit: move the last segment's far end XY inward by frac.
-    last = result[-1]
-    if abs(last["end"].z - stock_top_z) < tol.axial_floor and last["type"] in ("ramp", "arc"):
-        ex = last["end"].x + frac * (last["start"].x - last["end"].x)
-        ey = last["end"].y + frac * (last["start"].y - last["end"].y)
-        last["end"] = FreeCAD.Vector(ex, ey, stock_top_z)
-        if last.get("arc_points"):
-            last["arc_points"][-1] = FreeCAD.Vector(ex, ey, stock_top_z)
+    # Trim exit: move last point inward if it ends at stock_top_z
+    if len(result) >= 2 and abs(result[-1].z - stock_top_z) < tol.axial_floor:
+        ex = result[-1].x + frac * (result[-2].x - result[-1].x)
+        ey = result[-1].y + frac * (result[-2].y - result[-1].y)
+        result[-1] = FreeCAD.Vector(ex, ey, stock_top_z)
 
     return result
 
 
-def _rescale_segments_z(segments, stock_top_z, floor_z, op_start_z, op_final_z):
-    """Linearly remap segment Z values from [stock_top_z, floor_z] to
-    [op_start_z, op_final_z].  Preserves profile shape while honouring the
-    Depths tab settings."""
-    if abs(stock_top_z - floor_z) < _PREC:
-        return segments
-    z_range_src = stock_top_z - floor_z
-    z_range_dst = op_start_z - op_final_z
+# ---------------------------------------------------------------------------
+# 2D profile synthesis
+# ---------------------------------------------------------------------------
 
-    def _remap(v):
-        t = (v.z - floor_z) / z_range_src  # 0 = floor, 1 = stock top
-        new_z = op_final_z + t * z_range_dst
-        return FreeCAD.Vector(v.x, v.y, new_z)
 
-    result = []
-    for seg in segments:
-        s = dict(seg)
-        s["start"] = _remap(seg["start"])
-        s["end"] = _remap(seg["end"])
-        if seg.get("arc_points"):
-            s["arc_points"] = [_remap(p) for p in seg["arc_points"]]
-        result.append(s)
+def _simplify_collinear(pts, chord):
+    """Remove points that are collinear with their neighbours in 3D space.
+
+    Keeps only points whose perpendicular distance from the segment formed by
+    their predecessor and successor exceeds chord * 0.01.  Exactly collinear
+    points (e.g. intermediate samples on a straight edge with linear Z) are
+    removed; curved or smooth-Z segments are preserved.
+    """
+    if len(pts) < 3:
+        return list(pts)
+    tol_sq = (chord * 0.01) ** 2
+    result = [pts[0]]
+    for i in range(1, len(pts) - 1):
+        a, c = result[-1], pts[i + 1]
+        b = pts[i]
+        acx, acy, acz = c.x - a.x, c.y - a.y, c.z - a.z
+        ac2 = acx * acx + acy * acy + acz * acz
+        if ac2 < _PREC:
+            result.append(b)
+            continue
+        abx, aby, abz = b.x - a.x, b.y - a.y, b.z - a.z
+        t = (abx * acx + aby * acy + abz * acz) / ac2
+        px = a.x + t * acx
+        py = a.y + t * acy
+        pz = a.z + t * acz
+        dx, dy, dz = b.x - px, b.y - py, b.z - pz
+        if dx * dx + dy * dy + dz * dz < tol_sq:
+            continue
+        result.append(b)
+    result.append(pts[-1])
     return result
+
+
+def _wire_is_flat(edges, tol):
+    """Return True if all edges lie at essentially the same Z (2D wire)."""
+    zs = [v.Point.z for e in edges for v in e.Vertexes]
+    return (max(zs) - min(zs)) < tol.edge if zs else False
+
+
+def _apply_2d_profile(
+    edges, start_z, floor_z, flute_type, ramp_type, ramp_frac, tol, flip=False,
+    path_frac=1.0, path_offset=0.0, ramp_length_mm=0.0,
+):
+    """Synthesize a 3D wire from a flat (constant-Z) edge set by applying a Z ramp profile.
+
+    flute_type:     "Ramp Full" | "Ramp Start" | "Ramp Start End"
+    ramp_type:      "Linear" | "Smooth" | "Arc"
+    ramp_frac:      fraction of total path length occupied by ramp(s) (0–1).
+                    Ignored when ramp_length_mm > 0.
+    ramp_length_mm: if > 0, overrides ramp_frac with length/total_wire_length.
+    flip:           if True, reverse the wire direction before applying the profile.
+    path_frac:      fraction of the (post-flip) wire to use; 1.0 = full length.
+    path_offset:    fractional start position (0–1) within the full wire.
+                    path_offset=1-path_frac → clip from exit end (Ramp Full fan).
+                    path_offset=(1-path_frac)/2 → symmetric centre clip (Ramp Start End fan).
+                    path_offset=0 → clip from entry end (Ramp Start fan).
+
+    Returns a Part.Wire with the profile Z applied, or None on failure.
+    """
+    chain = _chain_wire_edges(edges, tol)
+    if not chain:
+        return None
+
+    # Always discretize all edge types so intermediate arc-length positions
+    # exist for Z-profile sampling.  _simplify_collinear removes redundant
+    # collinear points afterward (e.g. straight edge + linear Z → 2 pts).
+    raw = []
+    for seg_s, seg_e, edge in chain:
+        disc = edge.discretize(Distance=tol.arc_chord)
+        if disc and _dist2(disc[0], seg_s) > _dist2(disc[-1], seg_s):
+            disc = list(reversed(disc))
+        for p in disc:
+            pv = FreeCAD.Vector(p.x, p.y, start_z)
+            if not raw or _dist2(raw[-1], pv) > (tol.arc_chord * 0.01) ** 2:
+                raw.append(pv)
+
+    if not raw:
+        return None
+
+    if flip:
+        raw = list(reversed(raw))
+
+    # Cumulative XY arc lengths
+    n = len(raw)
+    arc_len = [0.0] * n
+    for i in range(1, n):
+        dx = raw[i].x - raw[i - 1].x
+        dy = raw[i].y - raw[i - 1].y
+        arc_len[i] = arc_len[i - 1] + math.sqrt(dx * dx + dy * dy)
+    total_full = arc_len[-1]
+    if total_full < _PREC:
+        return None
+
+    # RampLength in mm overrides ramp_frac when set.
+    if ramp_length_mm > _PREC:
+        ramp_frac = min(1.0, ramp_length_mm / total_full)
+
+    # Sub-path clipping: keeps path_frac of the wire starting at path_offset.
+    # Used for progressive pass shortening — clips the XY path BEFORE applying
+    # the Z profile so ramp angles stay constant across all step-down passes.
+    if path_frac < 1.0 - _PREC or path_offset > _PREC:
+        t0 = path_offset * total_full
+        t1 = min((path_offset + path_frac) * total_full, total_full)
+        kept_raw = []
+        kept_arc = []
+        for i in range(n):
+            if t0 - _PREC <= arc_len[i] <= t1 + _PREC:
+                kept_raw.append(raw[i])
+                kept_arc.append(max(0.0, arc_len[i] - t0))
+        if not kept_raw:
+            return None
+        raw = kept_raw
+        arc_len = kept_arc
+        total = arc_len[-1]
+        if total < _PREC:
+            return None
+    else:
+        total = total_full
+
+    depth = start_z - floor_z
+
+    def _z_at(t):
+        """Return Z for parametric position t ∈ [0, 1] along the wire."""
+        if flute_type == "Ramp Full":
+            f = t
+        elif flute_type == "Ramp Start":
+            f = min(t / ramp_frac, 1.0) if ramp_frac > _PREC else 1.0
+        elif flute_type == "Ramp Start End":
+            half = ramp_frac / 2.0
+            if half < _PREC:
+                f = 1.0
+            elif t <= half:
+                f = t / half
+            elif t >= 1.0 - half:
+                f = (1.0 - t) / half
+            else:
+                f = 1.0
+        else:
+            f = t
+
+        if ramp_type == "Smooth":
+            f = f * f * (3.0 - 2.0 * f)  # smoothstep S-curve, zero slope at both ends
+        elif ramp_type == "Arc":
+            f = math.sin(f * math.pi / 2)  # quarter-circle arc, zero slope at floor end
+
+        return start_z - f * depth
+
+    pts = [FreeCAD.Vector(p.x, p.y, _z_at(arc_len[i] / total)) for i, p in enumerate(raw)]
+    pts = _simplify_collinear(pts, tol.arc_chord)
+    return _pts_to_wire(pts)
 
 
 # ---------------------------------------------------------------------------
@@ -1136,11 +1315,86 @@ class ObjectFlute(PathOp.ObjectOp):
                 "path ramps back up to stock surface.",
             ),
         )
+        obj.addProperty(
+            "App::PropertyEnumeration",
+            "FlutingType",
+            "Flute2D",
+            QtCore.QT_TRANSLATE_NOOP(
+                "App::Property",
+                "Z profile applied when a flat (2D) wire is selected: "
+                "RampFull ramps the full length; RampStart ramps only the "
+                "entry; RampStartEnd ramps both entry and exit.",
+            ),
+        )
+        obj.FlutingType = ["Ramp Full", "Ramp Start", "Ramp Start End"]
+        obj.addProperty(
+            "App::PropertyEnumeration",
+            "RampType",
+            "Flute2D",
+            QtCore.QT_TRANSLATE_NOOP(
+                "App::Property",
+                "Shape of the Z ramp on 2D wires: Linear is a straight "
+                "plunge; Smooth uses a smoothstep curve.",
+            ),
+        )
+        obj.RampType = ["Linear", "Smooth", "Arc"]
+        obj.addProperty(
+            "App::PropertyPercent",
+            "RampPercent",
+            "Flute2D",
+            QtCore.QT_TRANSLATE_NOOP(
+                "App::Property",
+                "Percentage of the total path length occupied by each ramp "
+                "segment (2D wires only).",
+            ),
+        )
+        obj.addProperty(
+            "App::PropertyBool",
+            "FlipStart2D",
+            "Flute2D",
+            QtCore.QT_TRANSLATE_NOOP(
+                "App::Property",
+                "Reverse which end of the flat wire is treated as the entry "
+                "point for the 2D ramp profile.",
+            ),
+        )
+        obj.addProperty(
+            "App::PropertyDistance",
+            "RampLength",
+            "Flute2D",
+            QtCore.QT_TRANSLATE_NOOP(
+                "App::Property",
+                "Length of each ramp segment in mm (2D wires only). "
+                "When greater than zero, overrides Ramp %. "
+                "The fraction is derived at compute time from this length "
+                "divided by the actual wire length.",
+            ),
+        )
+        obj.addProperty(
+            "App::PropertyEnumeration",
+            "MultiPassStrategy",
+            "Depth",
+            QtCore.QT_TRANSLATE_NOOP(
+                "App::Property",
+                "How roughing passes are distributed across step-down depths. "
+                "Constant Angle: same ramp slope every pass — entry point walks, "
+                "path shortens (lower peak chip load). "
+                "Variable Angle: full path length every pass — angle steepens "
+                "each depth (uniform XY engagement, longer cycle time).",
+            ),
+        )
+        obj.MultiPassStrategy = ["Constant Angle", "Variable Angle"]
 
     def opSetDefaultValues(self, obj, job):
         obj.ReverseDirection = False
         obj.AxialStockToLeave = 0.0
         obj.BlindEndCompensation = False
+        obj.FlutingType = "Ramp Full"
+        obj.RampType = "Linear"
+        obj.RampPercent = 100
+        obj.FlipStart2D = False
+        obj.RampLength = 0.0
+        obj.MultiPassStrategy = "Constant Angle"
 
         d = None
         if job and job.Stock:
@@ -1197,11 +1451,87 @@ class ObjectFlute(PathOp.ObjectOp):
                 ),
             )
             obj.BlindEndCompensation = False
+        if not hasattr(obj, "FlutingType"):
+            obj.addProperty(
+                "App::PropertyEnumeration",
+                "FlutingType",
+                "Flute2D",
+                QtCore.QT_TRANSLATE_NOOP(
+                    "App::Property",
+                    "Z profile applied when a flat (2D) wire is selected.",
+                ),
+            )
+            obj.FlutingType = ["Ramp Full", "Ramp Start", "Ramp Start End"]
+            obj.FlutingType = "Ramp Full"
+        else:
+            # Migrate old enum values saved without spaces
+            _migrate = {"RampFull": "Ramp Full", "RampStart": "Ramp Start", "RampStartEnd": "Ramp Start End"}
+            old_val = str(obj.FlutingType)
+            if old_val in _migrate:
+                obj.FlutingType = ["Ramp Full", "Ramp Start", "Ramp Start End"]
+                obj.FlutingType = _migrate[old_val]
+        if not hasattr(obj, "RampType"):
+            obj.addProperty(
+                "App::PropertyEnumeration",
+                "RampType",
+                "Flute2D",
+                QtCore.QT_TRANSLATE_NOOP(
+                    "App::Property",
+                    "Shape of the Z ramp on 2D wires.",
+                ),
+            )
+            obj.RampType = ["Linear", "Smooth", "Arc"]
+            obj.RampType = "Linear"
+        if not hasattr(obj, "RampPercent"):
+            obj.addProperty(
+                "App::PropertyPercent",
+                "RampPercent",
+                "Flute2D",
+                QtCore.QT_TRANSLATE_NOOP(
+                    "App::Property",
+                    "Percentage of path length occupied by each ramp (2D wires only).",
+                ),
+            )
+            obj.RampPercent = 100
+        if not hasattr(obj, "FlipStart2D"):
+            obj.addProperty(
+                "App::PropertyBool",
+                "FlipStart2D",
+                "Flute2D",
+                QtCore.QT_TRANSLATE_NOOP(
+                    "App::Property",
+                    "Reverse which end of the flat wire is the ramp entry point.",
+                ),
+            )
+            obj.FlipStart2D = False
+        if not hasattr(obj, "RampLength"):
+            obj.addProperty(
+                "App::PropertyDistance",
+                "RampLength",
+                "Flute2D",
+                QtCore.QT_TRANSLATE_NOOP(
+                    "App::Property",
+                    "Length of each ramp segment in mm. When > 0, overrides Ramp %.",
+                ),
+            )
+            obj.RampLength = 0.0
+        if not hasattr(obj, "MultiPassStrategy"):
+            obj.addProperty(
+                "App::PropertyEnumeration",
+                "MultiPassStrategy",
+                "Flute",
+                QtCore.QT_TRANSLATE_NOOP(
+                    "App::Property",
+                    "How roughing passes are distributed across step-down depths.",
+                ),
+            )
+            obj.MultiPassStrategy = ["Constant Angle", "Variable Angle"]
+            obj.MultiPassStrategy = "Constant Angle"
 
-    def _emitFluteSegments(
+    def _emitFlutePath(
         self,
         obj,
-        segments,
+        wire,
         geo_top_z,
         geo_floor_z,
         sub_names,
@@ -1215,71 +1545,103 @@ class ObjectFlute(PathOp.ObjectOp):
         tool_pos,
         tol,
     ):
-        """Take a segment chain (from face/solid analysis OR a directly
-        selected centerline wire) through Z remap, axial-leave, blind-end
-        compensation, pass generation, linking, and G-code emission.
+        """Take a Part.Wire (from face analysis, edge selection, or 2D profile
+        synthesis) through Z remap, axial-leave, blind-end compensation, pass
+        generation, linking, and G-code emission.
 
         Returns (new_tool_pos, emitted) where emitted is True if any G-code
         was appended to self.commandlist.
         """
         # --- remap Z from geometry to operation Depths tab -------------------
+        pts = PathGeom.wireToPoints(wire, tol.arc_chord)
+        if not pts:
+            return tool_pos, False
+
         if abs(geo_top_z - geo_floor_z) > _PREC:
-            segments = _rescale_segments_z(segments, geo_top_z, geo_floor_z, op_start_z, op_final_z)
+            pts = _rescale_pts_z(pts, geo_top_z, geo_floor_z, op_start_z, op_final_z)
 
-        # --- axial stock to leave ---------------------------------------------
+        # --- axial stock to leave -------------------------------------------
         if axial_leave > _PREC:
-            segments = _apply_axial_leave(segments, axial_leave, op_start_z, tol)
+            pts = _apply_axial_leave_pts(pts, axial_leave, op_start_z, tol)
 
-        # --- blind end compensation ---------------------------------------------
+        # --- blind end compensation -----------------------------------------
         # When the path terminates at depth (no exit ramp), pull the last
-        # endpoint back by the tool radius so the cutting edge - not the
-        # centre - aligns with the groove end.  No effect when the last
-        # segment exits back to stock surface.
-        if getattr(obj, "BlindEndCompensation", False) and segments:
-            last = segments[-1]
-            floor_z_seg = min(min(s["start"].z, s["end"].z) for s in segments)
-            if abs(last["end"].z - floor_z_seg) < tol.floor_snap:
+        # point back by the tool radius so the cutting edge — not the centre —
+        # aligns with the groove end.  No effect when the path ramps back up.
+        if getattr(obj, "BlindEndCompensation", False) and len(pts) >= 2:
+            floor_z_pts = min(p.z for p in pts)
+            if abs(pts[-1].z - floor_z_pts) < tol.floor_snap:
                 try:
                     tool_radius = obj.ToolController.Tool.Diameter.Value / 2.0
                 except Exception:
                     tool_radius = 0.0
                 if tool_radius > _PREC * 10:
-                    dx = last["end"].x - last["start"].x
-                    dy = last["end"].y - last["start"].y
-                    seg_len = math.sqrt(dx * dx + dy * dy)
-                    if seg_len > _PREC * 10:
-                        pd = FreeCAD.Vector(dx / seg_len, dy / seg_len, 0.0)
-                        s = dict(last)
-                        s["end"] = FreeCAD.Vector(
-                            last["end"].x - pd.x * tool_radius,
-                            last["end"].y - pd.y * tool_radius,
-                            last["end"].z,
-                        )
-                        if last.get("arc_points"):
-                            ap = list(last["arc_points"])
-                            ap[-1] = FreeCAD.Vector(
-                                ap[-1].x - pd.x * tool_radius,
-                                ap[-1].y - pd.y * tool_radius,
-                                ap[-1].z,
-                            )
-                            s["arc_points"] = ap
-                        segments = segments[:-1] + [s]
+                    blind_end = pts[-1]
+                    tr2 = tool_radius * tool_radius
+                    # Trim all points within tool_radius XY of the blind end.
+                    # Without this, the compensated endpoint would be appended
+                    # *after* points that are already past it, causing the path
+                    # to overshoot then reverse.
+                    while len(pts) > 1:
+                        dx = pts[-1].x - blind_end.x
+                        dy = pts[-1].y - blind_end.y
+                        if dx * dx + dy * dy >= tr2:
+                            break
+                        pts.pop()
+                    # Append the compensated endpoint: tool_radius back from
+                    # blind_end along the approach direction.
+                    if len(pts) >= 1:
+                        dx = blind_end.x - pts[-1].x
+                        dy = blind_end.y - pts[-1].y
+                        seg_len = math.sqrt(dx * dx + dy * dy)
+                        if seg_len > _PREC:
+                            pts.append(FreeCAD.Vector(
+                                blind_end.x - (dx / seg_len) * tool_radius,
+                                blind_end.y - (dy / seg_len) * tool_radius,
+                                blind_end.z,
+                            ))
 
-        # --- compute passes -------------------------------------------------
-        passes = FluteGenerator.generate_passes(
-            segments,
-            op_start_z,
-            step_down,
-            finish_depth=finish_d,
-            reverse=obj.ReverseDirection,
-        )
-        if not passes:
+        # --- step-down pass loop --------------------------------------------
+        floor_z = min(p.z for p in pts)
+        total_depth = op_start_z - floor_z
+        if total_depth <= _PREC:
+            FreeCAD.Console.PrintWarning(
+                translate("CAM_Flute", "No depth to cut for: {}\n").format(sub_names)
+            )
+            return tool_pos, False
+
+        multi_pass_strategy = getattr(obj, "MultiPassStrategy", "Constant Angle")
+        rough_stop = max(0.0, total_depth - max(0.0, finish_d))
+        pass_pts_list = []
+        depth = 0.0
+        while depth < rough_stop - _PREC:
+            depth = min(depth + step_down, rough_stop)
+            f = depth / total_depth
+            if multi_pass_strategy == "Variable Angle":
+                wps = [FreeCAD.Vector(p.x, p.y, op_start_z + (p.z - op_start_z) * f)
+                       for p in pts]
+            else:
+                wps = _clip_and_scale(pts, f, op_start_z)
+            if obj.ReverseDirection:
+                wps = list(reversed(wps))
+            pass_pts_list.append(wps)
+
+        if finish_d > _PREC and total_depth > rough_stop + _PREC:
+            if multi_pass_strategy == "Variable Angle":
+                wps = list(pts)  # f=1.0: original Z values unchanged
+            else:
+                wps = _clip_and_scale(pts, 1.0, op_start_z)
+            if obj.ReverseDirection:
+                wps = list(reversed(wps))
+            pass_pts_list.append(wps)
+
+        if not pass_pts_list:
             FreeCAD.Console.PrintWarning(
                 translate("CAM_Flute", "No passes computed for: {}\n").format(sub_names)
             )
             return tool_pos, False
 
-        first_cut = passes[0][0]
+        first_cut = pass_pts_list[0][0]
         entry_pos = FreeCAD.Vector(first_cut.x, first_cut.y, obj.SafeHeight.Value)
 
         if tool_pos is not None:
@@ -1287,26 +1649,177 @@ class ObjectFlute(PathOp.ObjectOp):
             linking_kwargs["target_position"] = entry_pos
             self.commandlist.extend(linking.get_linking_moves(**linking_kwargs))
 
-        cmds = FluteGenerator.generate(
-            segments,
-            op_start_z,
-            step_down,
-            retract_z,
-            self.horizFeed,
-            self.vertFeed,
-            finish_depth=finish_d,
-            reverse=obj.ReverseDirection,
-        )
+        for wps in pass_pts_list:
+            pass_wire = _pts_to_wire(wps)
+            if pass_wire is None:
+                continue
+            cmds = WireFollowGenerator.generate(
+                pass_wire,
+                retract_z,
+                self.horizFeed,
+                self.vertFeed,
+                arc_chord=tol.arc_chord,
+            )
+            self.commandlist.extend(cmds)
 
-        if not cmds:
+        last_pt = pass_pts_list[-1][-1]
+        return FreeCAD.Vector(last_pt.x, last_pt.y, retract_z), True
+
+    def _emit2dPasses(
+        self,
+        obj,
+        wire_edges,
+        flute_type,
+        ramp_type,
+        ramp_frac,
+        flip,
+        op_start_z,
+        op_final_z,
+        axial_leave,
+        finish_d,
+        step_down,
+        retract_z,
+        linking_kwargs,
+        tool_pos,
+        tol,
+        sub_names,
+    ):
+        """Emit multi-pass G-code for Ramp Start / Ramp Start End 2D profiles.
+
+        Re-synthesises the Z profile at each step-down depth so every pass has
+        the correct geometric shape.  _clip_and_scale clips from pts[-1], which
+        gives wrong results for profiles where the floor is not at the exit:
+          - Ramp Start End: floor is in the middle; clipping from exit gives
+            only the exit-ramp half in early passes.
+          - Ramp Start:     floor IS at pts[-1] but clipping from there gives
+            flat-only passes until the very last pass adds the ramp.
+
+        Returns (new_tool_pos, emitted).
+        """
+        effective_final_z = op_final_z + max(0.0, axial_leave)
+        total_depth = op_start_z - effective_final_z
+        if total_depth <= _PREC:
             FreeCAD.Console.PrintWarning(
-                translate("CAM_Flute", "No path generated for: {}\n").format(sub_names)
+                translate("CAM_Flute", "No depth to cut for: {}\n").format(sub_names)
             )
             return tool_pos, False
 
-        self.commandlist.extend(cmds)
-        last_deep = passes[-1][-1]
-        return FreeCAD.Vector(last_deep.x, last_deep.y, retract_z), True
+        rough_stop = max(0.0, total_depth - max(0.0, finish_d))
+        # Each pass stores (pass_floor_z, depth_fraction f).
+        # f drives path_frac / path_offset so all passes keep the same ramp angle:
+        #   Ramp Full:       path_offset = 1-f  (fan grows from exit toward entry)
+        #   Ramp Start:      path_offset = 0    (fan grows from entry toward exit)
+        #   Ramp Start End:  path_offset = (1-f)/2  (symmetric fan from centre)
+        passes = []
+        d = 0.0
+        while d < rough_stop - _PREC:
+            d = min(d + step_down, rough_stop)
+            passes.append((op_start_z - d, d / total_depth))
+        if finish_d > _PREC and total_depth > rough_stop + _PREC:
+            passes.append((effective_final_z, 1.0))
+
+        if not passes:
+            return tool_pos, False
+
+        multi_pass_strategy = getattr(obj, "MultiPassStrategy", "Constant Angle")
+        ramp_len_prop = getattr(obj, "RampLength", None)
+        ramp_length_mm = ramp_len_prop.Value if ramp_len_prop is not None else 0.0
+
+        pass_wires = []
+        for pf, f in passes:
+            if multi_pass_strategy == "Variable Angle":
+                # Full XY path every pass — angle steepens with each depth step.
+                w = _apply_2d_profile(
+                    wire_edges, op_start_z, pf, flute_type, ramp_type, ramp_frac, tol, flip,
+                    ramp_length_mm=ramp_length_mm,
+                )
+            else:
+                # Constant Angle: fan from start — same slope every pass, path shortens.
+                if flute_type == "Ramp Start End":
+                    p_offset = (1.0 - f) / 2.0   # symmetric fan from centre
+                else:
+                    p_offset = 1.0 - f            # fan from start (entry walks)
+                w = _apply_2d_profile(
+                    wire_edges, op_start_z, pf, flute_type, ramp_type, ramp_frac, tol, flip,
+                    path_frac=f, path_offset=p_offset, ramp_length_mm=ramp_length_mm,
+                )
+            if w is not None:
+                pass_wires.append(w)
+
+        if not pass_wires:
+            return tool_pos, False
+
+        fp = PathGeom.wireToPoints(pass_wires[0], tol.arc_chord)
+        if not fp:
+            return tool_pos, False
+
+        entry_pos = FreeCAD.Vector(fp[0].x, fp[0].y, obj.SafeHeight.Value)
+        if tool_pos is not None:
+            linking_kwargs["start_position"] = tool_pos
+            linking_kwargs["target_position"] = entry_pos
+            self.commandlist.extend(linking.get_linking_moves(**linking_kwargs))
+
+        try:
+            tool_radius = obj.ToolController.Tool.Diameter.Value / 2.0
+        except Exception:
+            tool_radius = 0.0
+
+        # Blind-end compensation only applies when the path ends at floor depth.
+        # Ramp Start End always exits back to surface — no blind end.
+        do_blind = (
+            getattr(obj, "BlindEndCompensation", False)
+            and tool_radius > _PREC * 10
+            and flute_type != "Ramp Start End"
+        )
+
+        emitted = False
+        last_pts = fp
+        for w in pass_wires:
+            pts = PathGeom.wireToPoints(w, tol.arc_chord)
+            if not pts:
+                continue
+
+            if do_blind:
+                floor_z_pass = min(p.z for p in pts)
+                if abs(pts[-1].z - floor_z_pass) < tol.floor_snap:
+                    blind_end = pts[-1]
+                    tr2 = tool_radius * tool_radius
+                    while len(pts) > 1:
+                        dx = pts[-1].x - blind_end.x
+                        dy = pts[-1].y - blind_end.y
+                        if dx * dx + dy * dy >= tr2:
+                            break
+                        pts.pop()
+                    if pts:
+                        dx = blind_end.x - pts[-1].x
+                        dy = blind_end.y - pts[-1].y
+                        seg = math.sqrt(dx * dx + dy * dy)
+                        if seg > _PREC:
+                            pts.append(FreeCAD.Vector(
+                                blind_end.x - (dx / seg) * tool_radius,
+                                blind_end.y - (dy / seg) * tool_radius,
+                                blind_end.z,
+                            ))
+
+            if obj.ReverseDirection:
+                pts = list(reversed(pts))
+
+            pass_wire = _pts_to_wire(pts)
+            if pass_wire is None:
+                continue
+
+            cmds = WireFollowGenerator.generate(
+                pass_wire, retract_z, self.horizFeed, self.vertFeed,
+                arc_chord=tol.arc_chord,
+            )
+            if cmds:
+                self.commandlist.extend(cmds)
+                emitted = True
+                last_pts = pts
+
+        if emitted and last_pts:
+            return FreeCAD.Vector(last_pts[-1].x, last_pts[-1].y, retract_z), True
+        return tool_pos, False
 
     def opExecute(self, obj):
         """Build the path for all selected flute faces and/or edges."""
@@ -1466,47 +1979,35 @@ class ObjectFlute(PathOp.ObjectOp):
 
             # --- profile detection via solid section ---
             # Compute the XY span of ALL faces in the group so the section
-            # plane and candidate filter cover ramp + flat + any exit ramp,
-            # even though section_info only describes the ramp cylinder face.
+            # plane covers ramp + flat + any exit ramp.
             bb_list = [ft[0].BoundBox for ft in group["faces"]]
             group_xy_span = math.sqrt(
                 (max(b.XMax for b in bb_list) - min(b.XMin for b in bb_list)) ** 2
                 + (max(b.YMax for b in bb_list) - min(b.YMin for b in bb_list)) ** 2
             )
-            segments = _detect_floor_segments(
+            wire, detected_floor_z, detected_top_z = _detect_floor_wire(
                 section_face, section_base, section_info, tol, group_extent=group_xy_span
             )
 
-            if not segments:
-                # Fall back to a plain Ramp using the centerline endpoints.
-                Path.Log.debug("CAM_Flute: falling back to plain Ramp\n")
-                segments = [
-                    {
-                        "type": "ramp",
-                        "start": FreeCAD.Vector(section_info["start"]),
-                        "end": FreeCAD.Vector(section_info["end"]),
-                        "radius": None,
-                        "arc_points": None,
-                    }
-                ]
+            if wire is None:
+                # Fall back to a plain ramp wire using the centerline endpoints.
+                Path.Log.debug("CAM_Flute: falling back to plain ramp wire\n")
+                wire = _pts_to_wire([
+                    FreeCAD.Vector(section_info["start"]),
+                    FreeCAD.Vector(section_info["end"]),
+                ])
+                if wire is None:
+                    continue
             else:
-                # Re-derive top/floor Z from the ACTUAL detected segments,
-                # not the upstream centerline estimate. section_info's Z
-                # range (PCA fallback, or a single face's cylinder axis) can
-                # disagree with the real sectioned profile -- e.g. PCA
-                # averages points within an end-zone and can land short of
-                # the true valley depth. Rescaling against a floor_z that
-                # doesn't match the segments' real floor extrapolates the
-                # deepest points past the intended depth.
-                all_z = [v.z for s in segments for v in (s["start"], s["end"])] + [
-                    p.z for s in segments if s.get("arc_points") for p in s["arc_points"]
-                ]
-                geo_top_z = max(all_z)
-                geo_floor_z = min(all_z)
+                # Re-derive Z range from the detected wire, not the centerline
+                # estimate.  PCA / cylinder analysis can disagree with the real
+                # sectioned floor depth.
+                geo_top_z = detected_top_z
+                geo_floor_z = detected_floor_z
 
-            tool_pos, emitted = self._emitFluteSegments(
+            tool_pos, emitted = self._emitFlutePath(
                 obj,
-                segments,
+                wire,
                 geo_top_z,
                 geo_floor_z,
                 sub_names,
@@ -1522,38 +2023,66 @@ class ObjectFlute(PathOp.ObjectOp):
             )
             any_path = any_path or emitted
 
-        # --- edges selected directly as centerline wires --------------------
-        # Each connected component of selected edges is its own flute; no
-        # face/solid analysis - the wire itself defines the ramp/flat/arc
-        # profile (may include straight, arc, and BSpline segments).
+        # --- edges selected directly as the flute path ----------------------
+        # Each connected component of selected edges is one flute.
+        # Mixed selections (some flat, some carrying Z) are rejected — the
+        # user must create separate operations for 2D and 3D wires.
         if edge_tuples:
             edge_by_id = {id(e): sub for e, sub, _b in edge_tuples}
-            wires = _split_into_wires([e for e, _sub, _b in edge_tuples], tol)
+            wire_groups = _split_into_wires([e for e, _sub, _b in edge_tuples], tol)
             Path.Log.debug(
-                "CAM_Flute: {} edge(s) -> {} wire(s)\n".format(len(edge_tuples), len(wires))
-            )
-            for wire_edges in wires:
-                sub_names = [edge_by_id.get(id(e), "?") for e in wire_edges]
-                segments, geo_top_z, geo_floor_z = _segments_from_wire(wire_edges, tol)
-                if not segments:
-                    continue
-                tool_pos, emitted = self._emitFluteSegments(
-                    obj,
-                    segments,
-                    geo_top_z,
-                    geo_floor_z,
-                    sub_names,
-                    op_start_z,
-                    op_final_z,
-                    axial_leave,
-                    finish_d,
-                    step_down,
-                    retract_z,
-                    linking_kwargs,
-                    tool_pos,
-                    tol,
+                "CAM_Flute: {} edge(s) -> {} wire(s)\n".format(
+                    len(edge_tuples), len(wire_groups)
                 )
-                any_path = any_path or emitted
+            )
+
+            flat_groups = [wg for wg in wire_groups if _wire_is_flat(wg, tol)]
+            solid_groups = [wg for wg in wire_groups if not _wire_is_flat(wg, tol)]
+
+            if flat_groups and solid_groups:
+                Path.Log.warning(
+                    "Flute: mixed 2D (flat) and 3D wires in the same selection "
+                    "are not supported. Use separate operations for each type.\n"
+                )
+            else:
+                for wire_edges in wire_groups:
+                    sub_names = [edge_by_id.get(id(e), "?") for e in wire_edges]
+
+                    if flat_groups:
+                        flute_type = getattr(obj, "FlutingType", "Ramp Full")
+                        ramp_type = getattr(obj, "RampType", "Linear")
+                        ramp_pct = getattr(obj, "RampPercent", 100.0)
+                        ramp_frac = max(0.0, min(1.0, ramp_pct / 100.0))
+                        flip = getattr(obj, "FlipStart2D", False)
+                        tool_pos, emitted = self._emit2dPasses(
+                            obj, wire_edges, flute_type, ramp_type, ramp_frac, flip,
+                            op_start_z, op_final_z, axial_leave, finish_d, step_down,
+                            retract_z, linking_kwargs, tool_pos, tol, sub_names,
+                        )
+                        any_path = any_path or emitted
+                    else:
+                        # 3D wire: edges carry Z information directly.
+                        wire, geo_top_z, geo_floor_z = _wire_from_edges(wire_edges, tol)
+                        if wire is None:
+                            continue
+
+                        tool_pos, emitted = self._emitFlutePath(
+                            obj,
+                            wire,
+                            geo_top_z,
+                            geo_floor_z,
+                            sub_names,
+                            op_start_z,
+                            op_final_z,
+                            axial_leave,
+                            finish_d,
+                            step_down,
+                            retract_z,
+                            linking_kwargs,
+                            tool_pos,
+                            tol,
+                        )
+                        any_path = any_path or emitted
 
         if not any_path:
             self.commandlist.clear()
@@ -1571,7 +2100,17 @@ class ObjectFlute(PathOp.ObjectOp):
 
 
 def SetupProperties():
-    return [tup[1] for tup in ObjectFlute._propertyDefinitions()]
+    return [
+        "ReverseDirection",
+        "AxialStockToLeave",
+        "BlindEndCompensation",
+        "MultiPassStrategy",
+        "FlutingType",
+        "RampType",
+        "RampLength",
+        "RampPercent",
+        "FlipStart2D",
+    ]
 
 
 def Create(name, obj=None, parentJob=None):
