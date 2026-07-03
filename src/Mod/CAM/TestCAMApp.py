@@ -44,6 +44,7 @@ from CAMTests.TestPathDrillGenerator import TestPathDrillGenerator
 from CAMTests.TestPathDressupHoldingTags import TestHoldingTags
 from CAMTests.TestDrillCycleExpander import TestDrillCycleExpander
 from CAMTests.TestPathFacingGenerator import TestPathFacingGenerator
+from CAMTests.TestPathFlute import TestPathFlute
 from CAMTests.TestPathGeneratorDogboneII import TestGeneratorDogboneII
 from CAMTests.TestPathGeom import TestPathGeom
 from CAMTests.TestPathLanguage import TestPathLanguage

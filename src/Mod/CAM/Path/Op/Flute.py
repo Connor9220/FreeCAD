@@ -868,7 +868,9 @@ def _split_at_corners(edges, tol, combine=True):
                 other1 = b1 if a1 == node else a1
                 a2, b2 = edge_nodes[i2]
                 other2 = b2 if a2 == node else a2
-                if _tangent_continuous(edges[i1], edges[i2], junction, nodes[other1], nodes[other2]):
+                if _tangent_continuous(
+                    edges[i1], edges[i2], junction, nodes[other1], nodes[other2]
+                ):
                     _union(i1, i2)
 
     groups = {}
@@ -914,38 +916,22 @@ def _chain_wire_edges(edges, tol):
 
     Assumes edges form a single simple open path (no branching).  Returns
     None if they don't all connect into one chain.
+
+    Connectivity/ordering is delegated to OCC's Part.sortEdges, which anchors
+    on edges[0]'s own drawn direction (never reversing it) and grows the
+    chain in either direction from there, reversing only the edges that
+    follow to keep it connected -- the same contract this function had when
+    hand-rolled, and the same pattern used ~25+ places elsewhere in the Path
+    codebase (Part.Wire(Part.__sortEdges__(edges))).
     """
     if not edges:
         return None
 
-    remaining = list(edges[1:])
-    e0 = edges[0]
-    chain = [(e0.Vertexes[0].Point, e0.Vertexes[-1].Point, e0)]
+    chains = Part.sortEdges(list(edges), math.sqrt(tol.chain2))
+    if len(chains) != 1 or len(chains[0]) != len(edges):
+        return None  # branching, a gap, or edges outside chaining tolerance
 
-    changed = True
-    while remaining and changed:
-        changed = False
-        cur_s, cur_e = chain[0][0], chain[-1][1]
-        for e in list(remaining):
-            v0, v1 = e.Vertexes[0].Point, e.Vertexes[-1].Point
-            if _dist2(cur_e, v0) < tol.chain2:
-                chain.append((v0, v1, e))
-            elif _dist2(cur_e, v1) < tol.chain2:
-                chain.append((v1, v0, e))
-            elif _dist2(cur_s, v0) < tol.chain2:
-                chain.insert(0, (v1, v0, e))
-            elif _dist2(cur_s, v1) < tol.chain2:
-                chain.insert(0, (v0, v1, e))
-            else:
-                continue
-            remaining.remove(e)
-            changed = True
-            break
-
-    if remaining:
-        return None  # could not connect all edges into a single chain
-
-    return chain
+    return [(e.Vertexes[0].Point, e.Vertexes[-1].Point, e) for e in chains[0]]
 
 
 def _wire_from_edges(edges, tol):
@@ -963,25 +949,20 @@ def _wire_from_edges(edges, tol):
         )
         return None, None, None
 
-    # Orient so the shallower (higher Z) free end is the start.
+    wire = Part.Wire([edge for _, _, edge in chain])
+
+    # Orient so the shallower (higher Z) free end is the start. Every
+    # consumer of this wire (WireFollowGenerator.generate, _emitFlutePath)
+    # discretizes it themselves via PathGeom.edgesToPoints, so there is no
+    # need to sample points here just to rebuild a polyline wire from them.
     if chain[0][0].z < chain[-1][1].z:
-        chain = [(e, s, edge) for s, e, edge in reversed(chain)]
+        wire = PathGeom.flipWire(wire)
 
-    pts = PathGeom.edgesToPoints(
-        [edge for _, _, edge in chain],
-        tol.arc_chord,
-        startPoint=chain[0][0],
-        error=tol.arc_chord * 0.01,
-    )
-    if not pts:
-        return None, None, None
-
-    wire = _pts_to_wire(pts)
-    if wire is None:
-        return None, None, None
-
-    all_z = [p.z for p in pts]
-    return wire, max(all_z), min(all_z)
+    # BoundBox covers the true extent of curved edges too, not just their
+    # endpoints -- at least as accurate as sampling at the chord tolerance.
+    top_z = max(e.BoundBox.ZMax for e in wire.Edges)
+    floor_z = min(e.BoundBox.ZMin for e in wire.Edges)
+    return wire, top_z, floor_z
 
 
 # ---------------------------------------------------------------------------
@@ -2230,7 +2211,9 @@ class ObjectFlute(PathOp.ObjectOp):
                 # Length mode: ramp_frac defaults to full wire; _emit2dPasses
                 # overrides it per-wire from RampLength (see ramp_length_mm below).
                 ramp_length_type = getattr(obj, "RampLengthType", "Length")
-                ramp_frac = (obj.RampLengthPercent / 100.0) if ramp_length_type == "Percent" else 1.0
+                ramp_frac = (
+                    (obj.RampLengthPercent / 100.0) if ramp_length_type == "Percent" else 1.0
+                )
                 flip = getattr(obj, "FlipStart2D", False)
                 combine_tangent = getattr(obj, "CombineTangentSegments", True)
                 processed_groups = []
