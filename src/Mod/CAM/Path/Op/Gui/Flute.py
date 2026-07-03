@@ -107,13 +107,14 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
             lambda: self._update_ramp_length_type(obj)
         )
 
-        # Ramp Start End ramps EACH side independently, so anything above 50%
-        # would just overlap and clamp anyway -- capping the spinbox directly
-        # avoids the false impression of a bug.  The model applies the same
-        # cap to the stored property (Properties panel + any other source);
-        # this only keeps the task-panel widget's own range in sync.
+        # FlutingType drives three task-panel-only side effects: the Ramp %
+        # spinbox's own max (mirrors the model's Properties-panel cap), and
+        # graying out controls that have no effect for the current profile
+        # (Ramp Length Type/Length/% under Ramp Full; Blind End Compensation
+        # under Ramp Start End).  The model applies the equivalent
+        # Properties-panel editor modes independently via onChanged.
         self.form.flutingType.currentIndexChanged.connect(
-            lambda: self._update_ramp_length_percent_max(obj)
+            lambda: self._update_fluting_type_dependent_controls()
         )
 
     def setFields(self, obj):
@@ -138,7 +139,7 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
         idx = self.form.flutingType.findText(flute_type)
         if idx >= 0:
             self.form.flutingType.setCurrentIndex(idx)
-        self._update_ramp_length_percent_max(obj)
+        self._update_fluting_type_dependent_controls()
 
         ramp_type = getattr(obj, "RampType", "Linear")
         idx = self.form.rampType.findText(ramp_type)
@@ -214,16 +215,40 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
         this property change directly via onChanged, from any source)."""
         self._apply_ramp_length_type_row_visibility(_classify_wire_selection(obj) == "flat")
 
-    def _update_ramp_length_percent_max(self, obj):
-        """Keep the task-panel Ramp % spinbox's own range in sync with the
-        50% cap the model applies to the stored property for Ramp Start End
-        (each side ramps that fraction independently; beyond 50% the two
-        ramps would just overlap and clamp anyway, so clamping the input
-        directly avoids the false impression of a bug)."""
-        max_pct = 50 if self.form.flutingType.currentText() == "Ramp Start End" else 100
+    def _update_fluting_type_dependent_controls(self):
+        """Grey out task-panel controls that have no effect for the current
+        FlutingType, and keep the Ramp % spinbox's own range in sync with the
+        model's Properties-panel cap.  Mirrors the model's editor-mode logic
+        (Path.Op.Flute.applyRampLengthTypeEditorMode /
+        applyBlindEndCompensationEditorMode) so the task panel and Properties
+        panel never disagree about what's currently usable.
+        """
+        flute_type = self.form.flutingType.currentText()
+
+        # Ramp Start End ramps EACH side independently, so anything above 50%
+        # would just overlap and clamp anyway -- capping the spinbox directly
+        # avoids the false impression of a bug.
+        max_pct = 50 if flute_type == "Ramp Start End" else 100
         self.form.rampLengthPercent.setMaximum(max_pct)
         if self.form.rampLengthPercent.value() > max_pct:
             self.form.rampLengthPercent.setValue(max_pct)
+
+        # Ramp Length Type / Length / % have no effect at all under Ramp Full
+        # (ramp_frac is never read in that profile).
+        ramp_full = flute_type == "Ramp Full"
+        for widget in (
+            self.form.rampLengthType_label,
+            self.form.rampLengthType,
+            self.form.rampLength_label,
+            self.form.rampLength,
+            self.form.rampLengthPercent_label,
+            self.form.rampLengthPercent,
+        ):
+            widget.setEnabled(not ramp_full)
+
+        # Blind End Compensation has no effect under Ramp Start End, which
+        # always ramps back to the surface (no blind end to compensate).
+        self.form.blindEndCompensation.setEnabled(flute_type != "Ramp Start End")
 
     def _apply_ramp_length_type_row_visibility(self, show_2d):
         """Show only the task-panel row matching the current RampLengthType.

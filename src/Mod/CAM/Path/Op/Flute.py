@@ -1561,7 +1561,7 @@ class ObjectFlute(PathOp.ObjectOp):
         obj.addProperty(
             "App::PropertyEnumeration",
             "MultiPassStrategy",
-            "Depth",
+            "Flute",
             QtCore.QT_TRANSLATE_NOOP(
                 "App::Property",
                 "How roughing passes are distributed across step-down depths. "
@@ -1575,6 +1575,7 @@ class ObjectFlute(PathOp.ObjectOp):
 
         self.applyRampLengthTypeEditorMode(obj)
         self.applyRampLengthPercentConstraint(obj)
+        self.applyBlindEndCompensationEditorMode(obj)
 
     def opSetDefaultValues(self, obj, job):
         obj.ReverseDirection = False
@@ -1633,6 +1634,23 @@ class ObjectFlute(PathOp.ObjectOp):
             self.applyRampLengthTypeEditorMode(obj)
         if prop == "FlutingType":
             self.applyRampLengthPercentConstraint(obj)
+            self.applyRampLengthTypeEditorMode(obj)
+            self.applyBlindEndCompensationEditorMode(obj)
+
+    def applyBlindEndCompensationEditorMode(self, obj):
+        """Grey out (not hide) BlindEndCompensation when FlutingType is Ramp
+        Start End, since that profile always ramps back to the surface --
+        matching the same flute_type != "Ramp Start End" gate opExecute
+        already applies when computing whether to actually run the blind-end
+        logic.  Left fully editable (and thus usable) for a 3D wire
+        selection, where FlutingType has no bearing at all.
+
+        Runs from onChanged (works from any source) and once at creation.
+        """
+        if not hasattr(obj, "BlindEndCompensation"):
+            return
+        is_ramp_start_end = getattr(obj, "FlutingType", "Ramp Full") == "Ramp Start End"
+        obj.setEditorMode("BlindEndCompensation", 1 if is_ramp_start_end else 0)
 
     def applyRampLengthPercentConstraint(self, obj):
         """Cap Ramp % at 50 for Ramp Start End (each side already ramps that
@@ -1653,21 +1671,28 @@ class ObjectFlute(PathOp.ObjectOp):
 
     def applyRampLengthTypeEditorMode(self, obj):
         """Show only the Ramp Length or Ramp % property matching RampLengthType
-        in the Properties panel.  Runs from onChanged (so it stays correct
-        regardless of source: task panel, Properties panel, or scripting) and
-        is also called once at operation creation for the initial state.
+        in the Properties panel, and grey out (not hide) the whole trio when
+        FlutingType is Ramp Full, since ramp_frac has no effect at all in that
+        mode.  Runs from onChanged on either RampLengthType or FlutingType (so
+        it stays correct regardless of source) and once at operation creation.
 
-        This only decides Length-vs-Percent; whether the pair should be
+        This method only ever chooses between mode 0 (editable) and mode 1
+        (read-only/greyed) -- never mode 2 (hidden).  Whether the trio is
         visible at all (2D wire selected) is decided by the Gui task panel,
-        which knows the current wire-selection classification.
+        which knows the current wire-selection classification; layering a
+        hide/show decision in here too would risk the two fighting over the
+        same editor mode.
         """
         if not hasattr(obj, "RampLengthType"):
             return
         is_percent = obj.RampLengthType == "Percent"
+        ramp_full = getattr(obj, "FlutingType", "Ramp Full") == "Ramp Full"
+        greyed = 1 if ramp_full else 0
+        obj.setEditorMode("RampLengthType", greyed)
         if hasattr(obj, "RampLength"):
-            obj.setEditorMode("RampLength", 2 if is_percent else 0)
+            obj.setEditorMode("RampLength", 2 if is_percent else greyed)
         if hasattr(obj, "RampLengthPercent"):
-            obj.setEditorMode("RampLengthPercent", 0 if is_percent else 2)
+            obj.setEditorMode("RampLengthPercent", greyed if is_percent else 2)
 
     def _emitFlutePath(
         self,
