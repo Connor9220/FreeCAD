@@ -1487,6 +1487,19 @@ class ObjectFlute(PathOp.ObjectOp):
             ),
         )
         obj.addProperty(
+            "App::PropertyStringList",
+            "FlippedSegments",
+            "Flute",
+            QtCore.QT_TRANSLATE_NOOP(
+                "App::Property",
+                "Base geometry entries (stored as 'ObjectName.SubName') whose "
+                "individual edge direction is force-reversed before path "
+                "generation, regardless of how it was drawn. Set from the "
+                "checkboxes on the Base Geometry list. Independent of "
+                "FlipStart2D, which reverses the whole result at the end.",
+            ),
+        )
+        obj.addProperty(
             "App::PropertyEnumeration",
             "FlutingType",
             "Flute2D",
@@ -1622,9 +1635,25 @@ class ObjectFlute(PathOp.ObjectOp):
                 except Part.OCCError as err:
                     Path.Log.error(err)
 
-        if z_max is not None:
-            obj.OpStartDepth = z_max
-        if z_min is not None:
+        if z_max is None or z_min is None:
+            return
+
+        # The wire's own Z is the ramp's starting surface, so it's always a
+        # valid StartDepth regardless of whether the selection is flat or 3D.
+        obj.OpStartDepth = z_max
+
+        if PathGeom.isRoughly(z_max, z_min):
+            # A flat (2D) wire has no Z range of its own -- z_min here just
+            # repeats the same single Z as z_max, which is NOT a meaningful
+            # final (deep) depth: it's the ramp's starting surface, not the
+            # cut's bottom. The base class's generic faceZmin heuristic
+            # (Path/Op/Base.py updateDepths) mistakes a flat wire for a top
+            # face and already set OpFinalDepth to that same Z before this
+            # override runs -- correct it back to the stock floor instead of
+            # collapsing FinalDepth to match StartDepth.
+            if hasattr(obj, "OpStockZMin"):
+                obj.OpFinalDepth = obj.OpStockZMin
+        else:
             obj.OpFinalDepth = z_min
 
     def onChanged(self, obj, prop):
@@ -1990,6 +2019,7 @@ class ObjectFlute(PathOp.ObjectOp):
 
         # Selected subelements can be faces (analysed via solid section) or
         # edges (used directly as the centerline wire, no analysis needed).
+        flipped_keys = set(getattr(obj, "FlippedSegments", None) or [])
         face_tuples = []
         edge_tuples = []
         for base, sub_list in obj.Base:
@@ -2002,6 +2032,10 @@ class ObjectFlute(PathOp.ObjectOp):
                 if elem.ShapeType == "Face":
                     face_tuples.append((elem, sub, base))
                 elif elem.ShapeType == "Edge":
+                    if "{}.{}".format(base.Name, sub) in flipped_keys:
+                        flipped = PathGeom.flipEdge(elem)
+                        if flipped is not None:
+                            elem = flipped
                     edge_tuples.append((elem, sub, base))
 
         if not face_tuples and not edge_tuples:
@@ -2280,6 +2314,7 @@ def SetupProperties():
         "AxialStockToLeave",
         "BlindEndCompensation",
         "CombineTangentSegments",
+        "FlippedSegments",
         "MultiPassStrategy",
         "FlutingType",
         "RampType",

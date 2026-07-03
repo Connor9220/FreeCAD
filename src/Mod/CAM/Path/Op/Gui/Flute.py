@@ -31,7 +31,7 @@ import Path.Base.Gui.Util as PathGuiUtil
 import Path.Op.Flute as PathFlute
 import Path.Op.Gui.Base as PathOpGui
 
-from PySide import QtCore
+from PySide import QtCore, QtGui
 
 translate = FreeCAD.Qt.translate
 
@@ -75,8 +75,69 @@ def _classify_wire_selection(obj):
     return "none"
 
 
+class TaskPanelBaseGeometryPage(PathOpGui.TaskPanelBaseGeometryPage):
+    """Base Geometry page with an added per-edge "flip direction" checkbox.
+
+    Flipping is independent of FlipStart2D (which reverses the whole result
+    at the end) -- this overrides how one individual edge was drawn, before
+    the tangent-continuity chaining logic decides overall path direction.
+    """
+
+    def setFields(self, obj):
+        super(TaskPanelBaseGeometryPage, self).setFields(obj)
+        flipped_keys = set(getattr(obj, "FlippedSegments", None) or [])
+        show_flip = _classify_wire_selection(obj) == "flat"
+        self.form.baseList.blockSignals(True)
+        for i in range(self.form.baseList.count()):
+            item = self.form.baseList.item(i)
+            base = item.data(self.DataObject)
+            sub = item.data(self.DataObjectSub)
+            if show_flip and sub and str(sub).startswith("Edge"):
+                item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+                item.setToolTip(
+                    translate(
+                        "CAM_Flute",
+                        "Force-reverse this segment's direction (2D wires only).",
+                    )
+                )
+                key = "{}.{}".format(base.Name, sub)
+                item.setCheckState(
+                    QtCore.Qt.Checked if key in flipped_keys else QtCore.Qt.Unchecked
+                )
+            else:
+                item.setFlags(item.flags() & ~QtCore.Qt.ItemIsUserCheckable)
+        self.form.baseList.blockSignals(False)
+
+    def registerSignalHandlers(self, obj):
+        super(TaskPanelBaseGeometryPage, self).registerSignalHandlers(obj)
+        self.form.baseList.itemChanged.connect(self.updateFlippedSegments)
+
+    def updateFlippedSegments(self, item=None):
+        flipped = []
+        for i in range(self.form.baseList.count()):
+            it = self.form.baseList.item(i)
+            if it.checkState() == QtCore.Qt.Checked:
+                base = it.data(self.DataObject)
+                sub = it.data(self.DataObjectSub)
+                if base and sub:
+                    flipped.append("{}.{}".format(base.Name, sub))
+        self.obj.FlippedSegments = flipped
+        self.setDirty()
+
+    def deleteBase(self):
+        super(TaskPanelBaseGeometryPage, self).deleteBase()
+        self.updateFlippedSegments()
+
+    def clearBase(self):
+        super(TaskPanelBaseGeometryPage, self).clearBase()
+        self.obj.FlippedSegments = []
+
+
 class TaskPanelOpPage(PathOpGui.TaskPanelPage):
     """Task panel page for the Flute operation."""
+
+    def taskPanelBaseGeometryPage(self, obj, features):
+        return TaskPanelBaseGeometryPage(obj, features)
 
     def getForm(self):
         return FreeCADGui.PySideUic.loadUi(":/panels/PageOpFluteEdit.ui")
@@ -91,8 +152,32 @@ class TaskPanelOpPage(PathOpGui.TaskPanelPage):
             self.form.rampLength, obj, "RampLength"
         )
 
-        self.form.flutingType.addItems(["Ramp Full", "Ramp Start", "Ramp Start End"])
-        self.form.rampType.addItems(["Linear", "S-Curve", "Smooth", "Fillet"])
+        # Icon shows WHERE along the path the ramp happens (flat vs ramping
+        # sections), distinct from RampType's icons which show the Z-profile
+        # curve SHAPE.
+        for text, icon_res in (
+            ("Ramp Full", ":/icons/flute-fluting-ramp-full.svg"),
+            ("Ramp Start", ":/icons/flute-fluting-ramp-start.svg"),
+            ("Ramp Start End", ":/icons/flute-fluting-ramp-start-end.svg"),
+        ):
+            self.form.flutingType.addItem(QtGui.QIcon(icon_res), text)
+        # QComboBox scales each item icon to fit within a single iconSize box
+        # shared by every item, preserving aspect ratio -- without an explicit
+        # wide iconSize here, these triple-width icons get squeezed down to
+        # whatever narrow default box the style uses, same as rampType's.
+        self.form.flutingType.setIconSize(QtCore.QSize(54, 16))
+
+        # Each dropdown item gets a small curve-shape icon (no text baked in --
+        # the item's own label already names it, and a bare colored line reads
+        # fine in both light and dark themes, unlike small embedded text).
+        for text, icon_res in (
+            ("Linear", ":/icons/flute-ramp-linear.svg"),
+            ("S-Curve", ":/icons/flute-ramp-s-curve.svg"),
+            ("Smooth", ":/icons/flute-ramp-smooth.svg"),
+            ("Fillet", ":/icons/flute-ramp-fillet.svg"),
+        ):
+            self.form.rampType.addItem(QtGui.QIcon(icon_res), text)
+        self.form.rampType.setIconSize(QtCore.QSize(24, 16))
         self.form.rampLengthType.addItems(["Length", "Percent"])
 
         # Ramp Length and Ramp % are independent stored values (RampLength mm /
