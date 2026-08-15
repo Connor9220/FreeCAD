@@ -560,6 +560,7 @@ SET(Tests_SRCS
     CAMTests/test_geomop.fcstd
     CAMTests/test_holes00.fcstd
     CAMTests/TestAreaOperations.py
+    CAMTests/TestSlicer.py
     CAMTests/TestCAMSanity.py
     CAMTests/TestCentroidLegacyPost.py
     CAMTests/TestCentroidPost.py
@@ -691,6 +692,8 @@ file(GENERATE
 
 SET(Tests_Fixtures
     CAMTests/Fixtures/OpHelix_v0-21.FCStd
+    CAMTests/Fixtures/test_17748_cam_profile.FCStd
+    CAMTests/Fixtures/test_28534_truncated_pocket.FCStd
 )
 
 SET(PathImages_Ops

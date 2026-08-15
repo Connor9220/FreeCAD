@@ -44,6 +44,7 @@
 
 
 #include "FeatureProjectOnSurface.h"
+#include "ShapeAnalysis_FreeBoundsFix.h"
 #include <Base/Exception.h>
 
 
@@ -397,8 +398,8 @@ TopoDS_Wire ProjectOnSurface::fixWire(
     }
 
     const double tolerance = 0.0001;
-    ShapeAnalysis_FreeBounds::ConnectEdgesToWires(shapeList, tolerance, false, aWireHandle);
-    ShapeAnalysis_FreeBounds::ConnectWiresToWires(aWireHandle, tolerance, false, aWireWireHandle);
+    Part::Fix_ShapeAnalysis_FreeBounds_ConnectEdgesToWires(shapeList, tolerance, false, aWireHandle);
+    Part::Fix_ShapeAnalysis_FreeBounds_ConnectWiresToWires(aWireHandle, tolerance, false, aWireWireHandle);
     if (!aWireWireHandle) {
         return {};
     }
