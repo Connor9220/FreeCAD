@@ -851,13 +851,9 @@ void ViewProviderPath::recomputeBoundingBox()
 
 long ViewProviderPath::findFirstFeedMoveIndex(const Path::Toolpath& path) const
 {
-    const std::vector<Path::Command*>& commands = path.getCommands();
+    const std::vector<Path::Command>& commands = path.getCommands();
     for (size_t i = 0; i < commands.size(); ++i) {
-        const Path::Command* cmd = commands[i];
-        if (!cmd) {
-            continue;
-        }
-        std::string name = cmd->Name;
+        std::string name = commands[i].Name;
 
         // Skip comments and empty commands
         if (name.empty() || name[0] == '(' || name[0] == ';' || name[0] == '%') {

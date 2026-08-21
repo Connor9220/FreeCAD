@@ -72,13 +72,17 @@ public:
     {
         return vpcCommands.size();
     }
-    const std::vector<Command*>& getCommands() const
+    const std::vector<Command>& getCommands() const
     {
         return vpcCommands;
     }
+    Command& getCommand(unsigned int pos)
+    {
+        return vpcCommands[pos];
+    }
     const Command& getCommand(unsigned int pos) const
     {
-        return *vpcCommands[pos];
+        return vpcCommands[pos];
     }
 
     // support for rotation
@@ -91,7 +95,7 @@ public:
     static const int SchemaVersion = 2;
 
 protected:
-    std::vector<Command*> vpcCommands;
+    std::vector<Command> vpcCommands;
     Base::Vector3d center;
     // KDL::Path_Composite *pcPath;
 
