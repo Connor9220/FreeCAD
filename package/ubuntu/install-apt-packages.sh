@@ -32,6 +32,7 @@ packages=(
   libocct-data-exchange-dev
   libocct-ocaf-dev
   libocct-visualization-dev
+  libopencamlib-dev
   libopencv-dev
   libproj-dev
   libpcl-dev
@@ -57,6 +58,7 @@ packages=(
   python3-git
   python3-markdown
   python3-matplotlib
+  python3-opencamlib
   python3-packaging
   python3-pivy
   python3-ply
