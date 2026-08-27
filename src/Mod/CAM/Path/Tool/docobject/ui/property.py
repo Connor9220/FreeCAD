@@ -99,6 +99,10 @@ class BasePropertyEditorWidget(QtGui.QWidget):
             return BoolPropertyEditorWidget(obj, prop_name, parent)
         elif isinstance(prop_value, int):
             return IntPropertyEditorWidget(obj, prop_name, parent)
+        elif isinstance(prop_value, float):
+            # Without this, any App::PropertyFloat silently falls through to the
+            # read-only label below and cannot be edited at all.
+            return FloatPropertyEditorWidget(obj, prop_name, parent)
         elif prop_type == "App::PropertyEnumeration":
             return EnumPropertyEditorWidget(obj, prop_name, parent)
         else:
@@ -190,6 +194,34 @@ class IntPropertyEditorWidget(BasePropertyEditorWidget):
     def updateProperty(self):
         current_value: int = self._obj.getPropertyByName(self._prop_name)
         new_value: int = self._editor_widget.value()
+        if new_value != current_value:
+            self._obj.setPropertyByName(self._prop_name, new_value)
+            self.propertyChanged.emit()
+
+
+class FloatPropertyEditorWidget(BasePropertyEditorWidget):
+    """Editor widget for unitless Float properties."""
+
+    def __init__(self, obj: FreeCAD.DocumentObject, prop_name: str, parent: QtGui.QWidget = None):
+        super().__init__(obj, prop_name, parent)
+        self._editor_widget: QtGui.QDoubleSpinBox = QtGui.QDoubleSpinBox()
+        self._editor_widget.setDecimals(4)
+        self._editor_widget.setMinimum(-1.0e12)
+        self._editor_widget.setMaximum(1.0e12)
+        self._layout.addWidget(self._editor_widget)
+        self.updateWidget()
+        self._editor_widget.editingFinished.connect(self.updateProperty)
+
+    def updateWidget(self):
+        value = self._obj.getPropertyByName(self._prop_name)
+        self._editor_widget.blockSignals(True)
+        self._editor_widget.setValue(value or 0.0)
+        self._editor_widget.blockSignals(False)
+        self._editor_widget.setEnabled(not self._is_read_only)
+
+    def updateProperty(self):
+        current_value: float = self._obj.getPropertyByName(self._prop_name)
+        new_value: float = self._editor_widget.value()
         if new_value != current_value:
             self._obj.setPropertyByName(self._prop_name, new_value)
             self.propertyChanged.emit()

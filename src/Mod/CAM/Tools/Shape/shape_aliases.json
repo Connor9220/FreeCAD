@@ -48,6 +48,30 @@
         ],
         "subtypes": []
     },
+    "Laser": {
+        "aliases": [
+            "laser",
+            "lasercutter",
+            "laser-cutter"
+        ],
+        "subtypes": [
+            "co2",
+            "diode",
+            "fiber"
+        ]
+    },
+    "Plasma": {
+        "aliases": [
+            "plasma",
+            "torch",
+            "plasmacutter",
+            "plasma-cutter"
+        ],
+        "subtypes": [
+            "fine_cut",
+            "gouging"
+        ]
+    },
     "Probe": {
         "aliases": [
             "probe"
@@ -103,5 +127,16 @@
             "v_bit"
         ],
         "subtypes": []
+    },
+    "Waterjet": {
+        "aliases": [
+            "waterjet",
+            "water-jet",
+            "waterjetcutter"
+        ],
+        "subtypes": [
+            "abrasive",
+            "pure_water"
+        ]
     }
 }

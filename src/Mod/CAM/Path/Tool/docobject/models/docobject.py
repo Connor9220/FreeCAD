@@ -22,6 +22,78 @@ import FreeCAD
 import Path
 from typing import Any, Dict, List, Optional
 
+# Every App::Property* that derives from App::PropertyQuantity, i.e. every
+# property whose value is a FreeCAD.Units.Quantity. Generated from
+# src/App/PropertyUnits.cpp. A type missing from this set round-trips through
+# the tool library as a bare string instead of a Quantity, which silently
+# breaks unit handling and makes the property uneditable in the property
+# editor (it dispatches on the value's Python type).
+_QUANTITY_PROPERTY_TYPES = frozenset(
+    (
+        "App::PropertyQuantity",
+        "App::PropertyAcceleration",
+        "App::PropertyAmountOfSubstance",
+        "App::PropertyAngle",
+        "App::PropertyArea",
+        "App::PropertyCompressiveStrength",
+        "App::PropertyCurrentDensity",
+        "App::PropertyDensity",
+        "App::PropertyDissipationRate",
+        "App::PropertyDistance",
+        "App::PropertyDynamicViscosity",
+        "App::PropertyElectricCharge",
+        "App::PropertyElectricCurrent",
+        "App::PropertyElectricPotential",
+        "App::PropertyElectricalCapacitance",
+        "App::PropertyElectricalConductance",
+        "App::PropertyElectricalConductivity",
+        "App::PropertyElectricalInductance",
+        "App::PropertyElectricalResistance",
+        "App::PropertyElectromagneticPotential",
+        "App::PropertyForce",
+        "App::PropertyFrequency",
+        "App::PropertyHeatFlux",
+        "App::PropertyInverseArea",
+        "App::PropertyInverseLength",
+        "App::PropertyInverseVolume",
+        "App::PropertyKinematicViscosity",
+        "App::PropertyLength",
+        "App::PropertyLuminousIntensity",
+        "App::PropertyMagneticFieldStrength",
+        "App::PropertyMagneticFlux",
+        "App::PropertyMagneticFluxDensity",
+        "App::PropertyMagnetization",
+        "App::PropertyMass",
+        "App::PropertyMoment",
+        "App::PropertyPower",
+        "App::PropertyPressure",
+        "App::PropertyQuantityConstraint",
+        "App::PropertyShearModulus",
+        "App::PropertySpecificEnergy",
+        "App::PropertySpecificHeat",
+        "App::PropertySpeed",
+        "App::PropertyStiffness",
+        "App::PropertyStiffnessDensity",
+        "App::PropertyStress",
+        "App::PropertySurfaceChargeDensity",
+        "App::PropertyTemperature",
+        "App::PropertyThermalConductivity",
+        "App::PropertyThermalExpansionCoefficient",
+        "App::PropertyThermalTransferCoefficient",
+        "App::PropertyTime",
+        "App::PropertyUltimateTensileStrength",
+        "App::PropertyVacuumPermittivity",
+        "App::PropertyVelocity",
+        "App::PropertyVolume",
+        "App::PropertyVolumeChargeDensity",
+        "App::PropertyVolumeFlowRate",
+        "App::PropertyVolumetricThermalExpansionCoefficient",
+        "App::PropertyWork",
+        "App::PropertyYieldStrength",
+        "App::PropertyYoungsModulus",
+    )
+)
+
 
 class DetachedDocumentObject:
     """
@@ -112,15 +184,16 @@ class DetachedDocumentObject:
             return
 
         # Attempt to convert string values to Quantity if the property type is Quantity
-        elif prop_type in [
-            "App::PropertyQuantity",
-            "App::PropertyLength",
-            "App::PropertyDistance",
-            "App::PropertyArea",
-            "App::PropertyVolume",
-            "App::PropertyAngle",
-        ]:
-            value = FreeCAD.Units.Quantity(value)
+        elif prop_type in _QUANTITY_PROPERTY_TYPES and not isinstance(
+            value, FreeCAD.Units.Quantity
+        ):
+            try:
+                value = FreeCAD.Units.Quantity(value)
+            except (ValueError, TypeError):
+                Path.Log.warning(
+                    f"DetachedDocumentObject: could not read '{name}' ({prop_type})"
+                    f" value {value!r} as a Quantity; storing as-is"
+                )
 
         # Store the (potentially converted) value
         self._properties[name] = value

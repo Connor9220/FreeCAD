@@ -597,8 +597,8 @@ class ToolBitShape(Asset):
         return cls.schema()[param_name][1]
 
     def get_parameter_property_type(
-        self, param_name: str, default: str = "App::PropertyString"
-    ) -> str:
+        self, param_name: str, default: Optional[str] = "App::PropertyString"
+    ) -> Optional[str]:
         """
         Get the FreeCAD property type string for a given parameter name.
         """
@@ -622,7 +622,9 @@ class ToolBitShape(Asset):
         Returns:
             The normalized value, potentially converted to a FreeCAD.Units.Quantity.
         """
-        prop_type = self.get_parameter_property_type(name)
+        # default=None so an unknown parameter is distinguishable from one that
+        # is genuinely declared as a string.
+        prop_type = self.get_parameter_property_type(name, default=None)
         if prop_type in ("App::PropertyDistance", "App::PropertyLength", "App::PropertyAngle"):
             return FreeCAD.Units.Quantity(value)
         elif prop_type == "App::PropertyInteger":
@@ -635,7 +637,14 @@ class ToolBitShape(Asset):
             elif value in ("False", "false", "0"):
                 return False
             return bool(value)
-        return str(value)
+        elif prop_type == "App::PropertyString":
+            return str(value)
+        # Unknown parameter: preserve the value as given. Shallow loading builds
+        # the shape from every key in the .fctb, including Attributes-group ones
+        # such as Amperage that are not in the schema and have no recorded type.
+        # Stringifying those turned numbers into strings and propagated the str
+        # back onto the ToolBit, breaking any consumer that expected a number.
+        return value
 
     def get_parameters(self) -> Dict[str, Any]:
         """

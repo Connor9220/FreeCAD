@@ -16,6 +16,8 @@ from .models.custom import ToolBitShapeCustom
 from .models.dovetail import ToolBitShapeDovetail
 from .models.drill import ToolBitShapeDrill
 from .models.endmill import ToolBitShapeEndmill
+from .models.laser import ToolBitShapeLaser
+from .models.plasma import ToolBitShapePlasma
 from .models.radius import ToolBitShapeRadius
 from .models.probe import ToolBitShapeProbe
 from .models.reamer import ToolBitShapeReamer
@@ -24,6 +26,7 @@ from .models.tap import ToolBitShapeTap
 from .models.taperedballnose import ToolBitShapeTaperedBallNose
 from .models.threadmill import ToolBitShapeThreadMill
 from .models.vbit import ToolBitShapeVBit
+from .models.waterjet import ToolBitShapeWaterjet
 from .models.icon import (
     ToolBitShapeIcon,
     ToolBitShapePngIcon,
@@ -136,6 +139,8 @@ __all__ = [
     "ToolBitShapeDovetail",
     "ToolBitShapeDrill",
     "ToolBitShapeEndmill",
+    "ToolBitShapeLaser",
+    "ToolBitShapePlasma",
     "ToolBitShapeRadius",
     "ToolBitShapeProbe",
     "ToolBitShapeReamer",
@@ -144,6 +149,7 @@ __all__ = [
     "ToolBitShapeTaperedBallNose",
     "ToolBitShapeThreadMill",
     "ToolBitShapeVBit",
+    "ToolBitShapeWaterjet",
     "TOOL_BIT_SHAPE_NAMES",
     "ToolBitShapeIcon",
     "ToolBitShapeSvgIcon",

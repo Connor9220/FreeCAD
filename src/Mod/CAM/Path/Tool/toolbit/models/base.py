@@ -1088,6 +1088,20 @@ class ToolBit(Asset, ABC):
         """
         return True
 
+    def get_toolhead_type(self) -> str:
+        """
+        The kind of machine toolhead this ToolBit mounts in.
+
+        Returns one of the values of Machine.models.machine.ToolheadType, as a
+        plain string so that Path.Tool does not have to import the Machine
+        package. Used to resolve a ToolController to a toolhead on the Job's
+        machine at post time; jobs with no machine configured ignore it.
+
+        Defaults to "rotary", which is correct for every tool that mounts in a
+        spindle, probes included.
+        """
+        return "rotary"
+
     def get_subtype(self) -> Optional[str]:
         """Returns the alias/subtype used to instantiate this toolbit, if any."""
         # Only return the subtype if it differs from the class name

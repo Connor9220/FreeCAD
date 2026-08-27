@@ -11,6 +11,8 @@ from .models.custom import ToolBitCustom
 from .models.dovetail import ToolBitDovetail
 from .models.drill import ToolBitDrill
 from .models.endmill import ToolBitEndmill
+from .models.laser import ToolBitLaser
+from .models.plasma import ToolBitPlasma
 from .models.radius import ToolBitRadius
 from .models.probe import ToolBitProbe
 from .models.reamer import ToolBitReamer
@@ -19,6 +21,7 @@ from .models.taperedballnose import ToolBitTaperedBallNose
 from .models.tap import ToolBitTap
 from .models.threadmill import ToolBitThreadMill
 from .models.vbit import ToolBitVBit
+from .models.waterjet import ToolBitWaterjet
 
 # Define __all__ for explicit public interface
 __all__ = [
@@ -30,6 +33,8 @@ __all__ = [
     "ToolBitDovetail",
     "ToolBitDrill",
     "ToolBitEndmill",
+    "ToolBitLaser",
+    "ToolBitPlasma",
     "ToolBitRadius",
     "ToolBitProbe",
     "ToolBitReamer",
@@ -38,4 +43,5 @@ __all__ = [
     "ToolBitTap",
     "ToolBitThreadMill",
     "ToolBitVBit",
+    "ToolBitWaterjet",
 ]

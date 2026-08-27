@@ -209,6 +209,7 @@ SET(PathPythonToolsToolBitMixins_SRCS
     Path/Tool/toolbit/mixins/__init__.py
     Path/Tool/toolbit/mixins/rotary.py
     Path/Tool/toolbit/mixins/cutting.py
+    Path/Tool/toolbit/mixins/jet.py
 )
 
 SET(PathPythonToolsToolBitModels_SRCS
@@ -221,6 +222,8 @@ SET(PathPythonToolsToolBitModels_SRCS
     Path/Tool/toolbit/models/dovetail.py
     Path/Tool/toolbit/models/drill.py
     Path/Tool/toolbit/models/endmill.py
+    Path/Tool/toolbit/models/laser.py
+    Path/Tool/toolbit/models/plasma.py
     Path/Tool/toolbit/models/radius.py
     Path/Tool/toolbit/models/probe.py
     Path/Tool/toolbit/models/reamer.py
@@ -229,6 +232,7 @@ SET(PathPythonToolsToolBitModels_SRCS
     Path/Tool/toolbit/models/taperedballnose.py
     Path/Tool/toolbit/models/threadmill.py
     Path/Tool/toolbit/models/vbit.py
+    Path/Tool/toolbit/models/waterjet.py
 )
 
 SET(PathPythonToolsToolBitSerializers_SRCS
@@ -296,6 +300,8 @@ SET(PathPythonToolsShapeModels_SRCS
     Path/Tool/shape/models/dovetail.py
     Path/Tool/shape/models/drill.py
     Path/Tool/shape/models/endmill.py
+    Path/Tool/shape/models/laser.py
+    Path/Tool/shape/models/plasma.py
     Path/Tool/shape/models/radius.py
     Path/Tool/shape/models/icon.py
     Path/Tool/shape/models/probe.py
@@ -305,6 +311,7 @@ SET(PathPythonToolsShapeModels_SRCS
     Path/Tool/shape/models/taperedballnose.py
     Path/Tool/shape/models/threadmill.py
     Path/Tool/shape/models/vbit.py
+    Path/Tool/shape/models/waterjet.py
 )
 
 SET(PathPythonToolsShapeUi_SRCS
@@ -528,6 +535,10 @@ SET(Tools_Shape_SRCS
     Tools/Shape/drill.svg
     Tools/Shape/endmill.fcstd
     Tools/Shape/endmill.svg
+    Tools/Shape/laser.fcstd
+    Tools/Shape/laser.svg
+    Tools/Shape/plasma.fcstd
+    Tools/Shape/plasma.svg
     Tools/Shape/radius.fcstd
     Tools/Shape/radius.svg
     Tools/Shape/probe.fcstd
@@ -544,6 +555,8 @@ SET(Tools_Shape_SRCS
     Tools/Shape/thread-mill.svg
     Tools/Shape/v-bit.fcstd
     Tools/Shape/v-bit.svg
+    Tools/Shape/waterjet.fcstd
+    Tools/Shape/waterjet.svg
     Tools/Shape/shape_aliases.json
 )
 
@@ -632,6 +645,7 @@ SET(Tests_SRCS
     CAMTests/TestPathToolAssetStore.py
     CAMTests/TestPathToolAssetManager.py
     CAMTests/TestPathToolBit.py
+    CAMTests/TestPathToolBitJet.py
     CAMTests/TestPathToolBitSerializer.py
     CAMTests/TestPathToolBitBrowserWidget.py
     CAMTests/TestPathToolBitEditorWidget.py
