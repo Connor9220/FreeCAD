@@ -502,7 +502,7 @@ def parse(pathobj):
                         "Tool Controller Vertical Rapid Values are unset" + "\n"
                     )
 
-        commands = PathUtils.getPathWithPlacementAndTerminator(pathobj).Commands
+        commands = PostUtils.cannedCycleTerminator(PathUtils.getPathWithPlacement(pathobj)).Commands
         for index, c in enumerate(commands):
 
             outstring = []

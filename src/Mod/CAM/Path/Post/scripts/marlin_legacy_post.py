@@ -33,10 +33,9 @@ import argparse
 import shlex
 import FreeCAD
 from FreeCAD import Units
-import Path
 import Path.Base.Util as PathUtil
 import Path.Post.Utils as PostUtils
-import PathScripts.PathUtils as PathUtils
+from PathScripts import PathUtils
 from builtins import open as pyopen
 
 Revised = "2020-11-03"  # Revision date for this file.
@@ -532,8 +531,7 @@ def parse(pathobj):
         if OUTPUT_COMMENTS and OUTPUT_PATH:
             out += linenumber() + "(Path: " + pathobj.Label + ")\n"
 
-        path_to_process = PathUtils.getPathWithPlacementAndTerminator(pathobj)
-        for c in path_to_process.Commands:
+        for c in PostUtils.cannedCycleTerminator(PathUtils.getPathWithPlacement(pathobj)).Commands:
             outlist = []
             command = c.Name
             outlist.append(command)

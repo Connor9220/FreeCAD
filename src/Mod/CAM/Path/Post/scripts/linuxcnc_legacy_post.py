@@ -31,7 +31,7 @@ import datetime
 import shlex
 import Path.Base.Util as PathUtil
 import Path.Post.Utils as PostUtils
-import PathScripts.PathUtils as PathUtils
+from PathScripts import PathUtils
 from builtins import open as pyopen
 
 TOOLTIP = """
@@ -347,8 +347,7 @@ def parse(pathobj):
         #
         # for c in PathUtils.getPathWithPlacement(pathobj).Commands:
         # No placement here (see above); still need G98/G99 made literal.
-        path_to_process = PostUtils.cannedCycleTerminator(pathobj.Path)
-        for c in path_to_process.Commands:
+        for c in PostUtils.cannedCycleTerminator(PathUtils.getPathWithPlacement(pathobj)).Commands:
             outstring = []
             command = c.Name
             outstring.append(command)
