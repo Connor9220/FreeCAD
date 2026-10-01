@@ -202,6 +202,7 @@ def generate(
     max_feed=None,
     cutter_z_floor=None,
     feed_mode="AxialOnly",
+    start=None,
 ):
     """Build a Spiral rotary-surface toolpath.
 
@@ -251,6 +252,11 @@ def generate(
         `max(surface_r + radial_stock_to_leave, cutter_z_floor)`, so the
         cutter never dives below `cutter_z_floor` even where the surface is
         deeper. None disables the clamp (single-pass / surface-follow).
+
+    start : dict or None
+        Where the machine is when the path begins, as X, Y, Z and the
+        rotary letter: the moves begin from there. Without it they begin
+        from the path's own start, as for the first pass of an operation.
 
     Returns
     -------
@@ -304,6 +310,14 @@ def generate(
     x0, y0, _ = _world_xyz(rotary_axis, x_min, max_r + radial_stock_to_leave + 5.0)
     a_start_deg = math.degrees(theta_start)
     cur_x, cur_y, cur_z, cur_a = float(x0), float(y0), float(clearance_height), float(a_start_deg)
+
+    if start is not None:
+        # the next pass begins where the last ended: a move fully qualified from the path's
+        # own start would carry the way back in the first retract, at the vertical rapid
+        cur_x = float(start.get("X", cur_x))
+        cur_y = float(start.get("Y", cur_y))
+        cur_z = float(start.get("Z", cur_z))
+        cur_a = float(start.get(rotary_letter, cur_a))
 
     def _emit(name, *, x=None, y=None, z=None, a=None, feed):
         nonlocal cur_x, cur_y, cur_z, cur_a

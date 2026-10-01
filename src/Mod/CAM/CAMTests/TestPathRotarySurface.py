@@ -491,3 +491,34 @@ class TestPathRotarySurface(PathTestBase):
         # produce F values spanning at least a 1.2x ratio between
         # smallest-radius and largest-radius cuts.
         self.assertGreater(max(feeds) / max(min(feeds), 1e-6), 1.2)
+
+    def test15_passes_retract_from_where_the_last_ended(self):
+        """Each radial pass begins where the one before ended: its retract moves Z alone."""
+        job, _ = self._build_job(axis="X", radius=14.0)
+        op = self._build_op(job, axis="X")
+        op.setExpression("StepDown", None)
+        op.StepDown = 1.5
+        tc = op.ToolController
+        for prop in ("VertRapid", "HorizRapid"):
+            tc.setExpression(prop, None)
+        tc.VertRapid = 100.0
+        tc.HorizRapid = 500.0
+        self.doc.recompute()
+        cmds = op.Path.Commands
+        vert = tc.VertRapid.Value
+        passes = 0
+        for prev, cmd in zip(cmds, cmds[1:]):
+            p = cmd.Parameters
+            if cmd.Name != "G0" or abs(p.get("F", -1) - vert) > 1e-6:
+                continue
+            passes += 1
+            q = prev.Parameters
+            for k in ("X", "Y", "A"):
+                if k in p and k in q:
+                    self.assertAlmostEqual(
+                        p[k],
+                        q[k],
+                        places=6,
+                        msg="a vertical rapid moved {} from {} to {}".format(k, q[k], p[k]),
+                    )
+        self.assertGreater(passes, 2, "expected the retracts of several passes")

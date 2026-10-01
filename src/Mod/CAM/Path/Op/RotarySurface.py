@@ -655,6 +655,8 @@ class ObjectRotarySurface(PathOp.ObjectOp):
         else:
             n_layers = 1
 
+        # each pass begins where the one before ended
+        start = None
         for layer_index in range(n_layers):
             # Layer 0 is outermost (closest to stock OD). Final layer's floor
             # is at or below min_surface_r + stock_to_leave, so the surface
@@ -688,6 +690,7 @@ class ObjectRotarySurface(PathOp.ObjectOp):
                 max_feed=max_feed,
                 cutter_z_floor=cutter_z_floor,
                 feed_mode=str(obj.FeedMode),
+                start=start,
             )
             if pattern == "Rings":
                 raw_commands = rotary_rings.generate(**generator_kwargs)
@@ -695,6 +698,10 @@ class ObjectRotarySurface(PathOp.ObjectOp):
                 raw_commands = rotary_parallel.generate(**generator_kwargs)
             else:
                 raw_commands = rotary_spiral.generate(**generator_kwargs)
+
+            if raw_commands:
+                last = raw_commands[-1].Parameters
+                start = {k: last[k] for k in ("X", "Y", "Z", rotary_letter) if k in last}
 
             commands = rotary_wrap.apply_wrap_strategy(raw_commands, rotary_letter, wrap_strategy)
 
