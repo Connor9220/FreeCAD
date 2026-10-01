@@ -122,7 +122,13 @@ public:
 
     void addGcodeCommand(const char* cmd);
     void beginOperation(const std::string& name);
-    void setFrame(const Base::Placement& placement, const Base::Rotation& pose, float indexRate);
+    void setFrame(
+        const Base::Placement& placement,
+        const Base::Rotation& pose,
+        float indexRate,
+        const std::vector<float>& angles
+    );
+    void setRotaryAxes(const std::vector<SimRotaryAxis>& axes);
     void addTool(
         const std::vector<float>& toolProfilePoints,
         int toolNumber,
@@ -169,6 +175,7 @@ private:
     std::size_t mLastGCode = 0;
 
     std::vector<SimTool> mTools;
+    std::vector<SimRotaryAxis> mRotaryAxes;
 
     const SoCamera* mCamera = nullptr;
     SimShape mStock;

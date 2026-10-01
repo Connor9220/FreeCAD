@@ -73,6 +73,16 @@ struct MillFrame
     quat rot;
     quat pose;
     float indexRate = 0;  // degrees per second the rotaries turn into this frame; 0 when not known
+    std::vector<float> angles;  // the table's rotary positions, degrees, as SimRotaryAxis lists them
+};
+
+// A rotary axis of the machine's table. The simulation's list of them is in the order their
+// rotations apply to the part, the first applied first.
+struct SimRotaryAxis
+{
+    vec3 axis = {0, 0, 1};
+    float rate = 0;    // degrees per second
+    int sequence = 0;  // the order the axes move in; axes with one value move together
 };
 
 static inline void MotionPosToVec(vec3 vec, const MillMotion& motion)

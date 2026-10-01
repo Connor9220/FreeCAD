@@ -254,6 +254,17 @@
        </property>
       </widget>
      </item>
+     <item>
+      <widget class="QToolButton" name="indexModeButton">
+       <property name="icon">
+        <iconset resource="../../Gui/Resources/Path.qrc">
+         <normaloff>:/gl_simulator/RotarySequence.png</normaloff>:/gl_simulator/RotarySequence.png</iconset>
+       </property>
+       <property name="autoRaise">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
     </layout>
    </item>
   </layout>

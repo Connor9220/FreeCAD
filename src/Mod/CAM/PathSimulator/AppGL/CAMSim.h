@@ -69,7 +69,13 @@ public:
     void SetBaseShape(const Part::TopoShape& baseShape, float resolution);
     void AddCommand(Command* cmd);
     void BeginOperation(const std::string& name);
-    void SetFrame(const Base::Placement& placement, const Base::Rotation& pose, float indexRate);
+    void SetFrame(
+        const Base::Placement& placement,
+        const Base::Rotation& pose,
+        float indexRate,
+        const std::vector<float>& angles
+    );
+    void SetRotaryAxes(const std::vector<SimRotaryAxis>& axes);
 };
 
 }  // namespace CAMSimulator

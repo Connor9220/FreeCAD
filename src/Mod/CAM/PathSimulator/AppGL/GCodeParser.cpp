@@ -70,6 +70,11 @@ void GCodeParser::SetFrame(const MillFrame& frame)
         for (int q = 0; q < 4 && same; q++) {
             same = std::fabs(Frames[i].pose[q] - frame.pose[q]) < 1e-5f;
         }
+        // C 0 and C 360 are one pose but not one position
+        same = same && Frames[i].angles.size() == frame.angles.size();
+        for (size_t a = 0; a < frame.angles.size() && same; a++) {
+            same = std::fabs(Frames[i].angles[a] - frame.angles[a]) < 1e-4f;
+        }
         if (same) {
             index = i;
         }

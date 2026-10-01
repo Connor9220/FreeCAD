@@ -78,6 +78,9 @@ public:
     float startTime = 0;  // seconds into the program the segment starts
     int firstStep = 0;    // the simulation step the segment starts at
     int op = -1;          // the operation the segment's move belongs to
+    float turn = 0;       // degrees between the poses the segment indexes between; 0 for a move
+    float axisTurn = 0;  // degrees the rotaries travel over the index, when their positions are known
+    float rotaryTime = 0;  // seconds of the segment's time the rotaries take to turn
     int numSimSteps;
     int indexInArray = -1;
     int segmentIndex = -1;

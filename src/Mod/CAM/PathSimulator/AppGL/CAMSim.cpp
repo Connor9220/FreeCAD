@@ -76,9 +76,19 @@ void CAMSim::BeginOperation(const std::string& name)
     DlgCAMSimulator::instance()->beginOperation(name);
 }
 
-void CAMSim::SetFrame(const Base::Placement& placement, const Base::Rotation& pose, float indexRate)
+void CAMSim::SetRotaryAxes(const std::vector<SimRotaryAxis>& axes)
 {
-    DlgCAMSimulator::instance()->setFrame(placement, pose, indexRate);
+    DlgCAMSimulator::instance()->setRotaryAxes(axes);
+}
+
+void CAMSim::SetFrame(
+    const Base::Placement& placement,
+    const Base::Rotation& pose,
+    float indexRate,
+    const std::vector<float>& angles
+)
+{
+    DlgCAMSimulator::instance()->setFrame(placement, pose, indexRate, angles);
 }
 
 }  // namespace CAMSimulator

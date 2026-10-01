@@ -109,6 +109,23 @@ def TablePose(machine, placement, current=None):
     return Rotation(axis, z), None
 
 
+def TableAxes(machine):
+    """TableAxes(machine) ... the machine's table rotary axes, in the order
+    rotation.compute_rotation_matrix applies them to the part: the azimuth
+    (about Z) first when there are two or more, chain order otherwise. The
+    simulator composes a pose from the axes' positions in this order."""
+    if machine is None or not machine.has_rotary_axes:
+        return []
+    import Path.Base.Generator.rotation as rotation
+    from Machine.models.machine import AxisRole
+
+    chain = rotation.build_kinematic_chain(machine)
+    table = [ax for ax in chain if ax.role == AxisRole.TABLE_ROTARY]
+    if len(table) >= 2:
+        table = sorted(table, key=lambda ax: 0 if abs(ax.rotation_vector.z) > 0.9 else 1)
+    return table
+
+
 def IndexRate(machine):
     """IndexRate(machine) ... how fast, in degrees per second, the machine's
     rotaries turn into a new pose: the slowest axis sets the pace. 0 when
@@ -380,6 +397,12 @@ class CAMSimulation:
         self.millSim.ResetSimulation(FreeCADGui.getDocument(self.job.Document))
         machine = self.job.Proxy.getMachine()
         indexRate = IndexRate(machine)
+        # The table's axes, so an index turns axis by axis at each one's
+        # rate and in the machine's sequence.
+        axes = TableAxes(machine)
+        self.millSim.SetRotaryAxes(
+            [(ax.rotation_vector, ax.max_velocity / 60.0, ax.sequence) for ax in axes]
+        )
         positions = None
         for op in self.activeOps:
             self.millSim.BeginOperation(op.Label)
@@ -406,7 +429,10 @@ class CAMSimulation:
             frame = getattr(op, "Placement", Placement())
             pose, solved = TablePose(machine, frame, positions)
             positions = solved or positions
-            self.millSim.SetFrame(frame, pose, indexRate)
+            angles = []
+            if solved is not None and all(ax.name in solved for ax in axes):
+                angles = [float(solved[ax.name]) for ax in axes]
+            self.millSim.SetFrame(frame, pose, indexRate, angles)
             opCommands = op.Path.Commands
             for cmd in opCommands:
                 self.millSim.AddCommand(cmd)

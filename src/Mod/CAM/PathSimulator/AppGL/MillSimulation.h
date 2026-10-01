@@ -41,6 +41,15 @@
 namespace CAMSimulator
 {
 
+// How the table turns between two poses
+enum IndexMode
+{
+    IndexSequenced = 0,  // axis by axis, one sequence after another, as the machine says
+    IndexTogether,       // all axes at once, finishing together, as one rotary block moves them
+    IndexShortest,       // the shortest rotation between the poses, whatever the axes
+    IndexModeCount
+};
+
 struct MillSimulationState
 {
     int mCurStep = 0;
@@ -57,6 +66,7 @@ struct MillSimulationState
     bool mViewPath = false;
     bool mViewSSAO = false;
     bool mViewTablePose = true;  // the part turns with the rotary table; else the tool tilts
+    int mIndexMode = 0;          // how an index turns the table: an IndexMode
 
     bool mSimPlaying = false;
     bool mSingleStep = false;
@@ -111,6 +121,8 @@ public:
     void SetPathVisible(bool b);
     void EnableSsao(bool b);
     void EnableTablePose(bool b);
+    void SetIndexMode(int mode);
+    void SetRotaryAxes(const std::vector<SimRotaryAxis>& axes);
 
     void UpdateWindowScale(int width, int height);
     void UpdateCamera(const SoCamera& camera);
@@ -131,6 +143,13 @@ protected:
     void renderSegmentReversed(int iSeg);
     void CalcSegmentPositions();
     void StepFromTime();
+    const MillPathSegment* SegmentAtTime(float t) const;
+    void AdvanceTime(float seconds);
+    void ComputeTimes();
+    bool HasAxisAngles(const MillPathSegment* p) const;
+    bool UsesAxisAngles(const MillPathSegment* p) const;
+    float IndexAngles(const MillPathSegment* p, float s, std::vector<float>* angles) const;
+    void PoseFromAngles(quat pose, const std::vector<float>& angles) const;
     float TimeOfStep(int step) const;
     void GetScenePose(quat pose);
     void GetFramePose(quat pose, const MillFrame& frame) const;
@@ -149,6 +168,7 @@ public:
     MillPathLine millPathLine;
     std::vector<MillPathSegment*> MillPathSegments;
     std::vector<float> mOpStarts;  // when each operation starts, as a share of the program's time
+    std::vector<SimRotaryAxis> mRotaryAxes;
 
     int mWidth = -1;
     int mHeight = -1;

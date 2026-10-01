@@ -69,14 +69,30 @@ class CAMSim(BaseClass):
         """
         ...
 
+    def SetRotaryAxes(self, axes: list, /) -> None:
+        """
+        Set the rotary axes of the machine's table, as (direction: Vector, rate: float, sequence:
+        int) in the order their rotations apply to the part, the first applied first. rate is in
+        degrees per second; sequence is the order the axes move in, axes with one value moving
+        together. SetFrame's angles give each axis's position, in this order.
+        """
+        ...
+
     def SetFrame(
-        self, placement: Placement, pose: Rotation = ..., indexRate: float = ..., /
+        self,
+        placement: Placement,
+        pose: Rotation = ...,
+        indexRate: float = ...,
+        angles: list = ...,
+        /,
     ) -> None:
         """
         Set the work plane frame the commands added after it are given in: the tool stands along
         the frame's Z and the placement moves the cuts into the world. The optional pose is the
         rotation the machine's rotary table gives the part while it cuts in the frame; the
         simulation turns the part by it. The optional indexRate is how fast, in degrees per
-        second, the rotaries turn into the frame, for the time an index takes.
+        second, the rotaries turn into the frame, for the time an index takes. The optional
+        angles are the table's rotary positions for the pose, in degrees, in SetRotaryAxes'
+        order: with them an index turns axis by axis.
         """
         ...

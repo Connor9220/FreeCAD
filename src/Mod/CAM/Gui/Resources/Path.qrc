@@ -190,6 +190,9 @@
         <file>gl_simulator/Home.png</file>
         <file>gl_simulator/TablePose.png</file>
         <file>gl_simulator/NextOperation.png</file>
+        <file>gl_simulator/RotarySequence.png</file>
+        <file>gl_simulator/RotaryTogether.png</file>
+        <file>gl_simulator/RotaryShortest.png</file>
         <file>preferences/Advanced.ui</file>
         <file>preferences/PathDressupHoldingTags.ui</file>
         <file>preferences/PathJob.ui</file>

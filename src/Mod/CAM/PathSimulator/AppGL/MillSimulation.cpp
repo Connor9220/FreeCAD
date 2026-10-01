@@ -129,27 +129,29 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
             segment->isCutting = isCutting;
             segment->frameFrom = prevMotion.frame;
             segment->frameTo = curMotion.frame;
-            // give the table time to turn: a step for every 1.5 degrees
-            const float turn = QuatAngle(frames[prevMotion.frame].pose, frames[curMotion.frame].pose)
-                * 180.f / std::numbers::pi_v<float>;
-            segment->SetMinSimSteps((int)(turn / 1.5f));
+            // How far the table turns: the angle between the poses, and each axis's travel when
+            // the positions are known. Give it time to be seen: a step every 1.5 degrees.
+            float turn = 0;
+            float axisTurn = 0;
+            if (prevMotion.frame != curMotion.frame) {
+                turn = QuatAngle(frames[prevMotion.frame].pose, frames[curMotion.frame].pose)
+                    * 180.f / std::numbers::pi_v<float>;
+            }
+            if (HasAxisAngles(segment)) {
+                const MillFrame& a = frames[prevMotion.frame];
+                const MillFrame& b = frames[curMotion.frame];
+                for (size_t k = 0; k < a.angles.size(); k++) {
+                    axisTurn += std::fabs(b.angles[k] - a.angles[k]);
+                }
+            }
+            segment->SetMinSimSteps((int)(std::max(turn, axisTurn) / 1.5f));
 
-            // The machine's time over the segment: its length at its feed, as the cycle time
-            // estimate counts it. A move with no feed known keeps the old pace, 60 steps a
-            // second. An index takes at least as long as the rotaries take to turn.
             segment->op = curMotion.op;
+            segment->turn = turn;
+            segment->axisTurn = axisTurn;
             segment->feed = curMotion.feed;
             segment->isRapid = curMotion.rapid;
-            float duration = curMotion.feed > 0 ? segment->Length() / curMotion.feed
-                                                : (float)segment->numSimSteps / 60.f;
-            const float indexRate = frames[curMotion.frame].indexRate;
-            if (turn > 0 && indexRate > 0) {
-                duration = std::max(duration, turn / indexRate);
-            }
-            segment->duration = duration;
-            segment->startTime = mTotalTime;
             segment->firstStep = mNTotalSteps;
-            mTotalTime += duration;
             segment->indexInArray = i;
             segment->segmentIndex = segId++;
             mNTotalSteps += segment->numSimSteps;
@@ -162,15 +164,7 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
 
     assert(mNTotalSteps >= 0);
 
-    // the time each operation's first move starts
-    mOpStarts.clear();
-    int op = -1;
-    for (const MillPathSegment* p : MillPathSegments) {
-        if (p->op != op) {
-            op = p->op;
-            mOpStarts.push_back(mTotalTime > 0 ? p->startTime / mTotalTime : 0.f);
-        }
-    }
+    ComputeTimes();
 
     mNPathSteps = (int)MillPathSegments.size();
     millPathLine.GenerateModel();
@@ -317,6 +311,169 @@ void MillSimulation::renderSegmentReversed(int iSeg)
     }
 }
 
+void MillSimulation::ComputeTimes()
+{
+    // The machine's time over each segment: its length at its feed, as the cycle time estimate
+    // counts it. A move with no feed known keeps the old pace, 60 steps a second. An index takes
+    // at least as long as the rotaries take to turn.
+    const std::vector<MillFrame>& frames = mCodeParser.Frames;
+    mTotalTime = 0;
+    for (MillPathSegment* p : MillPathSegments) {
+        float duration = p->feed > 0 ? p->Length() / p->feed : (float)p->numSimSteps / 60.f;
+        p->rotaryTime = 0;
+        if (UsesAxisAngles(p)) {
+            p->rotaryTime = IndexAngles(p, 0, nullptr);
+        }
+        else if (p->turn > 0 && frames[p->frameTo].indexRate > 0) {
+            p->rotaryTime = p->turn / frames[p->frameTo].indexRate;
+        }
+        p->duration = std::max(duration, p->rotaryTime);
+        p->startTime = mTotalTime;
+        mTotalTime += p->duration;
+    }
+
+    // the time each operation's first move starts
+    mOpStarts.clear();
+    int op = -1;
+    for (const MillPathSegment* p : MillPathSegments) {
+        if (p->op != op) {
+            op = p->op;
+            mOpStarts.push_back(mTotalTime > 0 ? p->startTime / mTotalTime : 0.f);
+        }
+    }
+}
+
+bool MillSimulation::UsesAxisAngles(const MillPathSegment* p) const
+{
+    // the turn goes axis by axis, unless the shortest rotation is asked for
+    return mIndexMode != IndexShortest && HasAxisAngles(p);
+}
+
+bool MillSimulation::HasAxisAngles(const MillPathSegment* p) const
+{
+    // a move between frames whose rotary positions are both known
+    const std::vector<MillFrame>& frames = mCodeParser.Frames;
+    return p->frameFrom != p->frameTo && !mRotaryAxes.empty()
+        && frames[p->frameFrom].angles.size() == mRotaryAxes.size()
+        && frames[p->frameTo].angles.size() == mRotaryAxes.size();
+}
+
+float MillSimulation::IndexAngles(const MillPathSegment* p, float s, std::vector<float>* angles) const
+{
+    // The rotaries turn from one frame's positions to the next. Axes of one sequence move
+    // together and finish together, at the pace of the slowest; the sequences follow one
+    // another, lowest first, or all axes move at once when the index mode says together.
+    // Returns the time the turn takes; angles, when given, gets the positions s seconds into it.
+    const std::vector<float>& a = mCodeParser.Frames[p->frameFrom].angles;
+    const std::vector<float>& b = mCodeParser.Frames[p->frameTo].angles;
+    std::vector<int> sequences;
+    for (const SimRotaryAxis& axis : mRotaryAxes) {
+        sequences.push_back(mIndexMode == IndexSequenced ? axis.sequence : 0);
+    }
+    std::vector<int> order = sequences;
+    std::sort(order.begin(), order.end());
+    order.erase(std::unique(order.begin(), order.end()), order.end());
+
+    if (angles) {
+        *angles = a;
+    }
+    float start = 0;
+    for (int seq : order) {
+        float span = 0;
+        for (size_t k = 0; k < mRotaryAxes.size(); k++) {
+            if (sequences[k] == seq && mRotaryAxes[k].rate > 0) {
+                span = std::max(span, std::fabs(b[k] - a[k]) / mRotaryAxes[k].rate);
+            }
+        }
+        if (angles) {
+            const float frac = span > 0 ? std::clamp((s - start) / span, 0.f, 1.f)
+                                        : (s >= start ? 1.f : 0.f);
+            for (size_t k = 0; k < mRotaryAxes.size(); k++) {
+                if (sequences[k] == seq) {
+                    (*angles)[k] = a[k] + (b[k] - a[k]) * frac;
+                }
+            }
+        }
+        start += span;
+    }
+    return start;
+}
+
+void MillSimulation::PoseFromAngles(quat pose, const std::vector<float>& angles) const
+{
+    // the table's rotations, the first axis's applied first, as the post composes them
+    quat_identity(pose);
+    for (size_t k = 0; k < mRotaryAxes.size() && k < angles.size(); k++) {
+        quat r, total;
+        quat_rotate(r, angles[k] * std::numbers::pi_v<float> / 180.f, mRotaryAxes[k].axis);
+        quat_mul(total, r, pose);
+        vec4_dup(pose, total);
+    }
+}
+
+void MillSimulation::SetRotaryAxes(const std::vector<SimRotaryAxis>& axes)
+{
+    mRotaryAxes = axes;
+}
+
+void MillSimulation::SetIndexMode(int mode)
+{
+    if (mode == mIndexMode || mode < 0 || mode >= IndexModeCount) {
+        return;
+    }
+    mIndexMode = mode;
+    // the turns take another time: keep the step and find its time again
+    ComputeTimes();
+    mSimTime = TimeOfStep(mCurStep);
+    simDisplay.updateDisplay = true;
+}
+
+const MillPathSegment* MillSimulation::SegmentAtTime(float t) const
+{
+    // the segment running at time t: the last one to start by then
+    auto it = std::upper_bound(
+        MillPathSegments.begin(),
+        MillPathSegments.end(),
+        t,
+        [](float time, const MillPathSegment* p) { return time < p->startTime; }
+    );
+    return *(it == MillPathSegments.begin() ? it : it - 1);
+}
+
+// The fastest a table turn plays, in degrees per second of real time. The machine's own turn is
+// often over in a fraction of a second, which no simulation speed would let anyone see.
+constexpr float MaxShownTurnRate = 90.f;
+
+void MillSimulation::AdvanceTime(float seconds)
+{
+    // The program runs on the machine's clock, sped up by the simulation speed, except that a
+    // table turn slows down to be seen. The machine's time stays what it is.
+    for (int guard = 0; seconds > 0 && mSimTime < mTotalTime && guard < 100000; guard++) {
+        const MillPathSegment* p = SegmentAtTime(mSimTime);
+        float rate = (float)mSimSpeed;
+        const float shown = UsesAxisAngles(p) ? p->axisTurn : p->turn;
+        if (shown > 0 && p->duration > 0) {
+            rate = std::min(rate, p->duration * MaxShownTurnRate / shown);
+        }
+        const float end = p->startTime + p->duration;
+        const float needed = (end - mSimTime) / rate;  // real seconds to finish the segment
+        if (needed > seconds) {
+            mSimTime += seconds * rate;
+            return;
+        }
+        mSimTime = end;
+        seconds -= needed;
+        if (p == MillPathSegments.back()) {
+            break;
+        }
+        if (p->duration <= 0) {
+            // step over a segment that takes no time, which the lookup would find again
+            mSimTime = std::nextafter(mSimTime, mTotalTime);
+        }
+    }
+    mSimTime = std::min(mSimTime, mTotalTime);
+}
+
 void MillSimulation::StepFromTime()
 {
     // the step drawn at the current time: the segment running then, and how far along it is
@@ -324,13 +481,7 @@ void MillSimulation::StepFromTime()
         mCurStep = mNTotalSteps;
         return;
     }
-    auto it = std::upper_bound(
-        MillPathSegments.begin(),
-        MillPathSegments.end(),
-        mSimTime,
-        [](float t, const MillPathSegment* p) { return t < p->startTime; }
-    );
-    const MillPathSegment* p = *(it == MillPathSegments.begin() ? it : it - 1);
+    const MillPathSegment* p = SegmentAtTime(mSimTime);
     const float frac = p->duration > 0 ? (mSimTime - p->startTime) / p->duration : 1.f;
     const int sub = std::clamp((int)(frac * (float)p->numSimSteps), 0, p->numSimSteps - 1);
     mCurStep = p->firstStep + sub;
@@ -399,6 +550,13 @@ void MillSimulation::GetScenePose(quat pose)
     // the table turns over a move between frames, and holds its pose otherwise
     const MillPathSegment* p = MillPathSegments.at(mPathStep);
     const float t = std::clamp((float)mSubStep / (float)p->numSimSteps, 0.f, 1.f);
+    if (mViewTablePose && UsesAxisAngles(p)) {
+        // axis by axis, as the machine turns
+        std::vector<float> angles;
+        IndexAngles(p, t * p->duration, &angles);
+        PoseFromAngles(pose, angles);
+        return;
+    }
     quat from, to;
     GetFramePose(from, frames[p->frameFrom]);
     GetFramePose(to, frames[p->frameTo]);
@@ -590,9 +748,10 @@ void MillSimulation::SimNext(const clock::duration& elapsed)
     const int oldStep = mCurStep;
 
     if (mSimPlaying) {
-        // the program runs on the machine's clock, sped up by the simulation speed
         const float seconds = std::chrono::duration_cast<std::chrono::duration<float>>(elapsed).count();
-        mSimTime = std::min(mSimTime + seconds * (float)mSimSpeed, mTotalTime);
+        if (!MillPathSegments.empty()) {
+            AdvanceTime(seconds);
+        }
         StepFromTime();
     }
     else if (mSingleStep) {
@@ -847,6 +1006,7 @@ void MillSimulation::SetState(const MillSimulationState& state)
     mViewPath = state.mViewPath;
     mViewSSAO = state.mViewSSAO;
     mViewTablePose = state.mViewTablePose;
+    SetIndexMode(state.mIndexMode);
 }
 
 const MillSimulationState& MillSimulation::GetState() const

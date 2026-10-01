@@ -54,6 +54,7 @@ public:
     void setPathVisible(bool b);
     void setSsaoEnabled(bool b);
     void setTablePoseEnabled(bool b);
+    void setIndexMode(int mode);
 
 Q_SIGNALS:
     void play(bool b);
@@ -69,6 +70,7 @@ Q_SIGNALS:
     void pathVisibleChanged(bool b);
     void ssaoEnableChanged(bool b);
     void tablePoseEnableChanged(bool b);
+    void indexModeChanged(int mode);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
@@ -78,6 +80,7 @@ private Q_SLOTS:
     void on_playButton_clicked();
     void on_singleStepButton_clicked();
     void on_nextOpButton_clicked();
+    void on_indexModeButton_clicked();
 
     void onSlowerFasterButtonClicked();
     void on_stageSlider_sliderMoved(int value);
@@ -89,6 +92,7 @@ private:
     OperationMarkers* opMarkers;
 
     bool playing = true;
+    int indexMode = -1;
     int speed = 1;
 
     bool stockVisible = true;

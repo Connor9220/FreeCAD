@@ -25,6 +25,7 @@
 
 #include <Base/PlacementPy.h>
 #include <Base/RotationPy.h>
+#include <Base/VectorPy.h>
 #include <Base/PyWrapParseTupleAndKeywords.h>
 
 #include <Gui/Document.h>
@@ -190,14 +191,16 @@ PyObject* CAMSimPy::SetFrame(PyObject* args)
     PyObject* pObjPlacement;
     PyObject* pObjPose = nullptr;
     float indexRate = 0;
+    PyObject* pObjAngles = nullptr;
     if (!PyArg_ParseTuple(
             args,
-            "O!|O!f",
+            "O!|O!fO",
             &(Base::PlacementPy::Type),
             &pObjPlacement,
             &(Base::RotationPy::Type),
             &pObjPose,
-            &indexRate
+            &indexRate,
+            &pObjAngles
         )) {
         return nullptr;
     }
@@ -205,8 +208,63 @@ PyObject* CAMSimPy::SetFrame(PyObject* args)
     if (pObjPose) {
         pose = *static_cast<Base::RotationPy*>(pObjPose)->getRotationPtr();
     }
+    std::vector<float> angles;
+    if (pObjAngles && pObjAngles != Py_None) {
+        PyObject* seq = PySequence_Fast(pObjAngles, "angles must be a sequence of numbers");
+        if (!seq) {
+            return nullptr;
+        }
+        for (Py_ssize_t i = 0; i < PySequence_Fast_GET_SIZE(seq); i++) {
+            angles.push_back((float)PyFloat_AsDouble(PySequence_Fast_GET_ITEM(seq, i)));
+        }
+        Py_DECREF(seq);
+        if (PyErr_Occurred()) {
+            return nullptr;
+        }
+    }
     CAMSim* sim = getCAMSimPtr();
-    sim->SetFrame(*static_cast<Base::PlacementPy*>(pObjPlacement)->getPlacementPtr(), pose, indexRate);
+    sim->SetFrame(
+        *static_cast<Base::PlacementPy*>(pObjPlacement)->getPlacementPtr(),
+        pose,
+        indexRate,
+        angles
+    );
+
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+PyObject* CAMSimPy::SetRotaryAxes(PyObject* args)
+{
+    PyObject* pObjAxes;
+    if (!PyArg_ParseTuple(args, "O", &pObjAxes)) {
+        return nullptr;
+    }
+    PyObject* seq = PySequence_Fast(pObjAxes, "axes must be a sequence of (direction, rate, sequence)");
+    if (!seq) {
+        return nullptr;
+    }
+    std::vector<SimRotaryAxis> axes;
+    for (Py_ssize_t i = 0; i < PySequence_Fast_GET_SIZE(seq); i++) {
+        PyObject* pObjDir;
+        SimRotaryAxis axis;
+        if (!PyArg_ParseTuple(
+                PySequence_Fast_GET_ITEM(seq, i),
+                "O!fi",
+                &(Base::VectorPy::Type),
+                &pObjDir,
+                &axis.rate,
+                &axis.sequence
+            )) {
+            Py_DECREF(seq);
+            return nullptr;
+        }
+        const Base::Vector3d dir = *static_cast<Base::VectorPy*>(pObjDir)->getVectorPtr();
+        vec3_set(axis.axis, (float)dir.x, (float)dir.y, (float)dir.z);
+        axes.push_back(axis);
+    }
+    Py_DECREF(seq);
+    getCAMSimPtr()->SetRotaryAxes(axes);
 
     Py_INCREF(Py_None);
     return Py_None;

@@ -348,6 +348,37 @@ void GuiDisplay::setSsaoEnabled(bool b)
     ui->ssaoButton->setChecked(b);
 }
 
+void GuiDisplay::setIndexMode(int mode)
+{
+    if (mode == indexMode) {
+        return;
+    }
+    indexMode = mode;
+
+    // as MillSimulation's IndexMode: sequenced, together, shortest
+    static const char* const icons[] = {
+        ":/gl_simulator/RotarySequence.png",
+        ":/gl_simulator/RotaryTogether.png",
+        ":/gl_simulator/RotaryShortest.png",
+    };
+    const QString tips[] = {
+        tr("Rotary axes turn one after another, in the machine's sequence. Click to cycle."),
+        tr("Rotary axes turn together and finish together. Click to cycle."),
+        tr("The part takes the shortest turn between poses, whatever the axes. Click to cycle."),
+    };
+    if (mode >= 0 && mode < 3) {
+        ui->indexModeButton->setIcon(QIcon(QString::fromUtf8(icons[mode])));
+        ui->indexModeButton->setToolTip(tips[mode]);
+    }
+}
+
+void GuiDisplay::on_indexModeButton_clicked()
+{
+    const int mode = (indexMode + 1) % 3;
+    setIndexMode(mode);
+    Q_EMIT indexModeChanged(mode);
+}
+
 void GuiDisplay::setTablePoseEnabled(bool b)
 {
     QSignalBlocker blocker(ui->tablePoseButton);

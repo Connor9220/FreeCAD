@@ -128,6 +128,10 @@ void DlgCAMSimulator::connectTo(GuiDisplay& gui, Dummy3DViewer& dv)
         mMillSimulator->EnableTablePose(b);
     });
 
+    connect(&gui, &GuiDisplay::indexModeChanged, this, [this](int mode) {
+        mMillSimulator->SetIndexMode(mode);
+    });
+
     connect(&gui, &GuiDisplay::stockVisibleChanged, this, &DlgCAMSimulator::setStockVisible);
     connect(&gui, &GuiDisplay::baseVisibleChanged, this, &DlgCAMSimulator::setBaseVisible);
 
@@ -172,6 +176,7 @@ void DlgCAMSimulator::updateGui()
     mGui->setPathVisible(state.mViewPath);
     mGui->setSsaoEnabled(state.mViewSSAO);
     mGui->setTablePoseEnabled(state.mViewTablePose);
+    mGui->setIndexMode(state.mIndexMode);
 
     if (mDummyViewer && !mDummyViewer->isAnimating()) {
         mGui->setRotateEnabled(false);
@@ -188,6 +193,7 @@ void DlgCAMSimulator::cloneFrom(const DlgCAMSimulator& from)
 
     mGCode = from.mGCode;
     mTools = from.mTools;
+    mRotaryAxes = from.mRotaryAxes;
 
     mStock = from.mStock;
     mStock.needsUpdate = true;
@@ -238,6 +244,7 @@ void DlgCAMSimulator::resetSimulation()
 
     mGCode.clear();
     mTools.clear();
+    mRotaryAxes.clear();
     mStock = {};
     mBase = {};
 }
@@ -257,7 +264,17 @@ void DlgCAMSimulator::beginOperation(const std::string& name)
     mGCode.push_back(gcode);
 }
 
-void DlgCAMSimulator::setFrame(const Base::Placement& placement, const Base::Rotation& pose, float indexRate)
+void DlgCAMSimulator::setRotaryAxes(const std::vector<SimRotaryAxis>& axes)
+{
+    mRotaryAxes = axes;
+}
+
+void DlgCAMSimulator::setFrame(
+    const Base::Placement& placement,
+    const Base::Rotation& pose,
+    float indexRate,
+    const std::vector<float>& angles
+)
 {
     // Matrix4D is row-major, linmath column-major
     const Base::Matrix4D mat = placement.toMatrix();
@@ -279,6 +296,7 @@ void DlgCAMSimulator::setFrame(const Base::Placement& placement, const Base::Rot
         gcode.frame.pose[i] = (float)q[i];
     }
     gcode.frame.indexRate = indexRate;
+    gcode.frame.angles = angles;
     mGCode.push_back(gcode);
 }
 
@@ -494,6 +512,7 @@ void DlgCAMSimulator::updateResources()
         // TODO: mStock is set when we arrive here, still this could be handled nicer
         const float maxStockDimension = mStock.maxDimension();
 
+        mMillSimulator->SetRotaryAxes(mRotaryAxes);
         mMillSimulator->InitSimulation(mQuality, maxStockDimension);
         mNeedsInitialize = false;
 
