@@ -63,6 +63,10 @@ protected:
     const char* ParseFloat(const char* ptr, float* retFloat);
     bool ParseLine(const char* ptr);
     int lastTool = -1;
+    // F is modal, and separately so for rapids and feed moves: a G0 carries the tool's rapid
+    // rate, a G1 its feed
+    float rapidFeed = 0;
+    float cutFeed = 0;
 };
 
 }  // namespace CAMSimulator

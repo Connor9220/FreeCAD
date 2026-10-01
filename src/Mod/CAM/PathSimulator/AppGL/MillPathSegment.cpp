@@ -265,6 +265,16 @@ void MillPathSegment::GetToolRotation(mat4x4 rot) const
     mat4x4_dup(rot, mFrameRot);
 }
 
+float MillPathSegment::Length() const
+{
+    if (mMotionType == MTCurved) {
+        // a helix: the arc unrolled against its rise
+        const float arc = mRadius * mSweepAng;
+        return sqrtf(arc * arc + mDiff[PZ] * mDiff[PZ]);
+    }
+    return mXYZDistance;
+}
+
 void MillPathSegment::SetMinSimSteps(int steps)
 {
     if (mMotionType == MTCurved || numSimSteps >= steps) {

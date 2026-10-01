@@ -120,7 +120,7 @@ public:
     void resetSimulation();
 
     void addGcodeCommand(const char* cmd);
-    void setFrame(const Base::Placement& placement, const Base::Rotation& pose);
+    void setFrame(const Base::Placement& placement, const Base::Rotation& pose, float indexRate);
     void addTool(
         const std::vector<float>& toolProfilePoints,
         int toolNumber,

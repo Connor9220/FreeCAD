@@ -68,7 +68,7 @@ public:
     );
     void SetBaseShape(const Part::TopoShape& baseShape, float resolution);
     void AddCommand(Command* cmd);
-    void SetFrame(const Base::Placement& placement, const Base::Rotation& pose);
+    void SetFrame(const Base::Placement& placement, const Base::Rotation& pose, float indexRate);
 };
 
 }  // namespace CAMSimulator

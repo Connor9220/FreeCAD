@@ -27,6 +27,7 @@ Command and task window handler for the OpenGL based CAM simulator
 import math
 import os
 import FreeCAD
+import Path
 import Path.Base.Util as PathUtil
 import Path.Dressup.Utils as PathDressup
 from PathScripts import PathUtils
@@ -106,6 +107,15 @@ def TablePose(machine, placement, current=None):
             table = [ax for ax in chain if ax.role == AxisRole.TABLE_ROTARY]
             return rotation.compute_rotation_matrix(table, result.angles), result.angles
     return Rotation(axis, z), None
+
+
+def IndexRate(machine):
+    """IndexRate(machine) ... how fast, in degrees per second, the machine's
+    rotaries turn into a new pose: the slowest axis sets the pace. 0 when
+    there is no rotary machine to say."""
+    if machine is None or not machine.has_rotary_axes:
+        return 0.0
+    return min(axis.max_velocity for axis in machine.rotary_axes.values()) / 60.0
 
 
 def TSError(msg):
@@ -369,12 +379,24 @@ class CAMSimulation:
         self.SetupSimulation()
         self.millSim.ResetSimulation(FreeCADGui.getDocument(self.job.Document))
         machine = self.job.Proxy.getMachine()
+        indexRate = IndexRate(machine)
         positions = None
         for op in self.activeOps:
-            tool = PathDressup.toolController(op).Tool
-            toolNumber = PathDressup.toolController(op).ToolNumber
+            tc = PathDressup.toolController(op)
+            tool = tc.Tool
+            toolNumber = tc.ToolNumber
             toolProfile = self.GetToolProfile(tool, 0.5)
             self.millSim.AddTool(toolProfile, toolNumber, tool.Diameter, 1)
+            # The simulation runs at the programmed feeds. As the cycle time
+            # estimate does, a G0 without F moves at the tool controller's
+            # rapid rate (its feed when none is set) and a feed move without
+            # F at its horizontal feed: a G0 or G1 with only an F sets them.
+            hFeed = tc.HorizFeed.Value
+            rapid = tc.HorizRapid.Value or hFeed
+            if rapid > 0:
+                self.millSim.AddCommand(Path.Command("G0", {"F": rapid}))
+            if hFeed > 0:
+                self.millSim.AddCommand(Path.Command("G1", {"F": hFeed}))
             # An operation's path is stored in its work plane's frame, with the
             # tool along the frame's Z, and its Placement positions it. The
             # simulator takes the path and the frame as they are, so a tilted
@@ -383,7 +405,7 @@ class CAMSimulation:
             frame = getattr(op, "Placement", Placement())
             pose, solved = TablePose(machine, frame, positions)
             positions = solved or positions
-            self.millSim.SetFrame(frame, pose)
+            self.millSim.SetFrame(frame, pose, indexRate)
             opCommands = op.Path.Commands
             for cmd in opCommands:
                 self.millSim.AddCommand(cmd)

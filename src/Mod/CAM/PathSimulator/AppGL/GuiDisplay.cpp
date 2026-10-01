@@ -25,6 +25,8 @@
 #include "GuiDisplay.h"
 
 #include "ui_GuiDisplay.h"
+#include <Base/Quantity.h>
+#include <Base/Unit.h>
 #include <cmath>
 #include <limits>
 
@@ -100,7 +102,8 @@ void GuiDisplay::setSpeed(int s)
     ui->speedLabel->setText(tr("x%1").arg(speed));
 }
 
-static const std::vector<int> speeds = {1, 2, 5, 10, 25, 50};
+// multiples of real time
+static const std::vector<int> speeds = {1, 2, 5, 10, 25, 50, 100, 250, 500, 1000};
 
 std::vector<int>::const_iterator findNearestSpeed(int speed)
 {
@@ -140,6 +143,45 @@ void GuiDisplay::setStage(float f, int total)
 {
     ui->stageSlider->setMaximum(total);
     ui->stageSlider->setValue(f * total);
+}
+
+static QString formatTime(float seconds)
+{
+    const int s = (int)std::lround(seconds);
+    if (s >= 3600) {
+        return QStringLiteral("%1:%2:%3")
+            .arg(s / 3600)
+            .arg((s / 60) % 60, 2, 10, QLatin1Char('0'))
+            .arg(s % 60, 2, 10, QLatin1Char('0'));
+    }
+    return QStringLiteral("%1:%2").arg(s / 60).arg(s % 60, 2, 10, QLatin1Char('0'));
+}
+
+void GuiDisplay::setTime(float seconds, float totalSeconds)
+{
+    ui->timeLabel->setText(
+        QStringLiteral("%1 / %2").arg(formatTime(seconds), formatTime(totalSeconds))
+    );
+}
+
+void GuiDisplay::setFeed(float feed, bool rapid)
+{
+    if (feed <= 0) {
+        ui->feedLabel->setText(rapid ? tr("Rapid") : QString());
+        return;
+    }
+    // Feeds are mm/s; the user's unit schema picks the unit, and one decimal is plenty for a feed
+    // to be read off
+    double factor = 1;
+    std::string unit;
+    Base::Quantity(feed, Base::Unit::Velocity).getUserString(factor, unit);
+    const QString rate = QStringLiteral("%1 %2")
+                             .arg(feed / (factor != 0 ? factor : 1.0), 0, 'f', 1)
+                             .arg(QString::fromStdString(unit));
+    const QString text = rapid ? tr("Rapid %1").arg(rate) : tr("F %1").arg(rate);
+    if (ui->feedLabel->text() != text) {
+        ui->feedLabel->setText(text);
+    }
 }
 
 void GuiDisplay::on_stageSlider_sliderMoved(int value)

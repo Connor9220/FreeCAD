@@ -62,11 +62,14 @@ class CAMSim(BaseClass):
         """
         ...
 
-    def SetFrame(self, placement: Placement, pose: Rotation = ..., /) -> None:
+    def SetFrame(
+        self, placement: Placement, pose: Rotation = ..., indexRate: float = ..., /
+    ) -> None:
         """
         Set the work plane frame the commands added after it are given in: the tool stands along
         the frame's Z and the placement moves the cuts into the world. The optional pose is the
         rotation the machine's rotary table gives the part while it cuts in the frame; the
-        simulation turns the part by it.
+        simulation turns the part by it. The optional indexRate is how fast, in degrees per
+        second, the rotaries turn into the frame, for the time an index takes.
         """
         ...

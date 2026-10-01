@@ -157,8 +157,10 @@ void DlgCAMSimulator::updateGui()
     mGui->setPlaying(state.mSimPlaying);
     mGui->setSpeed(state.mSimSpeed);
 
-    const float stage = (float)state.mCurStep / state.mNTotalSteps;
+    const float stage = state.mTotalTime > 0 ? state.mSimTime / state.mTotalTime : 0.f;
     mGui->setStage(stage, state.mNTotalSteps);
+    mGui->setTime(state.mSimTime, state.mTotalTime);
+    mGui->setFeed(state.mCurFeed, state.mCurRapid);
 
     mGui->setStockVisible(state.mViewItems & VIEWITEM_SIMULATION);
     mGui->setBaseVisible(state.mViewItems & VIEWITEM_BASE_SHAPE);
@@ -243,7 +245,7 @@ void DlgCAMSimulator::addGcodeCommand(const char* cmd)
     mGCode.push_back(gcode);
 }
 
-void DlgCAMSimulator::setFrame(const Base::Placement& placement, const Base::Rotation& pose)
+void DlgCAMSimulator::setFrame(const Base::Placement& placement, const Base::Rotation& pose, float indexRate)
 {
     // Matrix4D is row-major, linmath column-major
     const Base::Matrix4D mat = placement.toMatrix();
@@ -264,6 +266,7 @@ void DlgCAMSimulator::setFrame(const Base::Placement& placement, const Base::Rot
     for (int i = 0; i < 4; i++) {
         gcode.frame.pose[i] = (float)q[i];
     }
+    gcode.frame.indexRate = indexRate;
     mGCode.push_back(gcode);
 }
 

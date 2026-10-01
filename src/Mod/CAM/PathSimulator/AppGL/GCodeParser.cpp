@@ -35,7 +35,7 @@
 namespace CAMSimulator
 {
 
-static char TokTypes[] = "GTXYZIJKR";
+static char TokTypes[] = "GTXYZIJKRF";
 
 GCodeParser::~GCodeParser()
 {
@@ -51,6 +51,8 @@ void GCodeParser::Clear()
     quat_identity(Frames[0].pose);
     lastState = {};
     lastTool = -1;
+    rapidFeed = 0;
+    cutFeed = 0;
 }
 
 void GCodeParser::SetFrame(const MillFrame& frame)
@@ -191,6 +193,7 @@ bool GCodeParser::ParseLine(const char* ptr)
     bool validMotion = false;
     bool exitLoop = false;
     int cmd = 0;
+    float feed = -1;
 
     // By default GCode words are not sticky, except for some exceptions. We copy the needed
     // parameters explicitly (instead of assigning the full lastState).
@@ -274,8 +277,19 @@ bool GCodeParser::ParseLine(const char* ptr)
             case 'R':
                 newState.r = token.fval;
                 break;
+
+            case 'F':
+                feed = token.fval;
+                break;
         }
     }
+
+    // A G0 or G1 with only an F sets the rate for the moves after it
+    newState.rapid = newState.cmd == eMoveLiner && cmd == 0;
+    if (feed >= 0) {
+        (newState.rapid ? rapidFeed : cutFeed) = feed;
+    }
+    newState.feed = newState.rapid ? rapidFeed : cutFeed;
 
     lastState = newState;
     return validMotion;
@@ -296,10 +310,17 @@ bool GCodeParser::AddLine(const char* ptr)
                 rPlane = lastState.retract_z;
             }
             float finalDepth = lastState.z;
+            // to the hole at the R plane and back out are rapids, the plunge is fed
+            lastState.rapid = true;
+            lastState.feed = rapidFeed;
             lastState.z = rPlane;
             Operations.push_back(lastState);
+            lastState.rapid = false;
+            lastState.feed = cutFeed;
             lastState.z = finalDepth;
             Operations.push_back(lastState);
+            lastState.rapid = true;
+            lastState.feed = rapidFeed;
             lastState.z = rPlane;
             Operations.push_back(lastState);
             lastState.cmd = eDril;

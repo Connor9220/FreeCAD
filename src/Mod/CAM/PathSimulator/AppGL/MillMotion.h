@@ -58,7 +58,9 @@ struct MillMotion
     float r = 0.0f;
     char retract_mode = '\0';
     float retract_z = 0;
-    int frame = 0;  // index into the parser's frame table, 0 is the world
+    int frame = 0;       // index into the parser's frame table, 0 is the world
+    float feed = 0;      // feed rate the motion is made at, in mm/s; 0 when not known
+    bool rapid = false;  // a G0, or a canned cycle's rapid part
 };
 
 // A work plane frame: an operation's path is stored in its frame, with the tool along the frame's
@@ -69,6 +71,7 @@ struct MillFrame
     mat4x4 mat;
     quat rot;
     quat pose;
+    float indexRate = 0;  // degrees per second the rotaries turn into this frame; 0 when not known
 };
 
 static inline void MotionPosToVec(vec3 vec, const MillMotion& motion)

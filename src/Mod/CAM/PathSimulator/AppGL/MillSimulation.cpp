@@ -32,8 +32,6 @@
 // include this last as the defines can mess up other includes
 #include "OpenGlWrapper.h"
 
-using namespace std::literals;
-
 #define DRAG_ZOOM_FACTOR 10
 
 namespace CAMSimulator
@@ -87,8 +85,9 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
     mPathStep = -1;
     mNTotalSteps = 0;
     mSimPlaying = false;
-    mSimSpeed = 1;
-    mTotalElapsed = 0s;
+    mSimSpeed = 10;
+    mSimTime = 0;
+    mTotalTime = 0;
 
     MillPathSegment::SetQuality(quality, maxStockDimension);
 
@@ -129,8 +128,25 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
             segment->frameFrom = prevMotion.frame;
             segment->frameTo = curMotion.frame;
             // give the table time to turn: a step for every 1.5 degrees
-            const float turn = QuatAngle(frames[prevMotion.frame].pose, frames[curMotion.frame].pose);
-            segment->SetMinSimSteps((int)(turn * 180.f / std::numbers::pi_v<float> / 1.5f));
+            const float turn = QuatAngle(frames[prevMotion.frame].pose, frames[curMotion.frame].pose)
+                * 180.f / std::numbers::pi_v<float>;
+            segment->SetMinSimSteps((int)(turn / 1.5f));
+
+            // The machine's time over the segment: its length at its feed, as the cycle time
+            // estimate counts it. A move with no feed known keeps the old pace, 60 steps a
+            // second. An index takes at least as long as the rotaries take to turn.
+            segment->feed = curMotion.feed;
+            segment->isRapid = curMotion.rapid;
+            float duration = curMotion.feed > 0 ? segment->Length() / curMotion.feed
+                                                : (float)segment->numSimSteps / 60.f;
+            const float indexRate = frames[curMotion.frame].indexRate;
+            if (turn > 0 && indexRate > 0) {
+                duration = std::max(duration, turn / indexRate);
+            }
+            segment->duration = duration;
+            segment->startTime = mTotalTime;
+            segment->firstStep = mNTotalSteps;
+            mTotalTime += duration;
             segment->indexInArray = i;
             segment->segmentIndex = segId++;
             mNTotalSteps += segment->numSimSteps;
@@ -288,6 +304,40 @@ void MillSimulation::renderSegmentReversed(int iSeg)
     }
 }
 
+void MillSimulation::StepFromTime()
+{
+    // the step drawn at the current time: the segment running then, and how far along it is
+    if (MillPathSegments.empty() || mSimTime >= mTotalTime) {
+        mCurStep = mNTotalSteps;
+        return;
+    }
+    auto it = std::upper_bound(
+        MillPathSegments.begin(),
+        MillPathSegments.end(),
+        mSimTime,
+        [](float t, const MillPathSegment* p) { return t < p->startTime; }
+    );
+    const MillPathSegment* p = *(it == MillPathSegments.begin() ? it : it - 1);
+    const float frac = p->duration > 0 ? (mSimTime - p->startTime) / p->duration : 1.f;
+    const int sub = std::clamp((int)(frac * (float)p->numSimSteps), 0, p->numSimSteps - 1);
+    mCurStep = p->firstStep + sub;
+}
+
+float MillSimulation::TimeOfStep(int step) const
+{
+    if (MillPathSegments.empty() || step >= mNTotalSteps) {
+        return mTotalTime;
+    }
+    auto it = std::upper_bound(
+        MillPathSegments.begin(),
+        MillPathSegments.end(),
+        step,
+        [](int s, const MillPathSegment* p) { return s < p->firstStep; }
+    );
+    const MillPathSegment* p = *(it == MillPathSegments.begin() ? it : it - 1);
+    return p->startTime + p->duration * (float)(step - p->firstStep) / (float)p->numSimSteps;
+}
+
 void MillSimulation::CalcSegmentPositions()
 {
     mSubStep = mCurStep;
@@ -304,6 +354,10 @@ void MillSimulation::CalcSegmentPositions()
     }
     else {
         mSubStep++;
+    }
+    if (mPathStep >= 0) {
+        mCurFeed = MillPathSegments[mPathStep]->feed;
+        mCurRapid = MillPathSegments[mPathStep]->isRapid;
     }
 }
 
@@ -520,36 +574,23 @@ void MillSimulation::SimNext(const clock::duration& elapsed)
 {
     // calculate number of steps based on elapsed time
 
-    int numSteps = 0;
+    const int oldStep = mCurStep;
 
     if (mSimPlaying) {
-        mTotalElapsed += elapsed;
-
-        const float seconds
-            = std::chrono::duration_cast<std::chrono::duration<float>>(mTotalElapsed).count();
-
-        const float secondsToSteps = mSimSpeed * 60;
-        numSteps = seconds * secondsToSteps;
-
-        const std::chrono::duration<float> processed {(float)numSteps / secondsToSteps};
-        mTotalElapsed -= std::chrono::duration_cast<clock::duration>(processed);
+        // the program runs on the machine's clock, sped up by the simulation speed
+        const float seconds = std::chrono::duration_cast<std::chrono::duration<float>>(elapsed).count();
+        mSimTime = std::min(mSimTime + seconds * (float)mSimSpeed, mTotalTime);
+        StepFromTime();
     }
     else if (mSingleStep) {
-        numSteps = 1;
-
-        mTotalElapsed = 0s;
+        mCurStep = std::min(mCurStep + 1, mNTotalSteps);
+        mSimTime = TimeOfStep(mCurStep);
         mSingleStep = false;
     }
     else {
         return;
     }
 
-    // advance simulation
-
-    const int oldStep = mCurStep;
-
-    mCurStep += numSteps;
-    mCurStep = std::clamp(mCurStep, 0, mNTotalSteps);
     if (mCurStep == mNTotalSteps) {
         mSimPlaying = false;
     }
@@ -719,13 +760,14 @@ void MillSimulation::SetSpeed(int s)
 
 void MillSimulation::SetSimulationStage(float stage)
 {
-    const int newStep = (int)((float)mNTotalSteps * stage);
-    if (newStep == mCurStep) {
+    // the stage is a share of the program's time
+    mSimTime = std::clamp(stage, 0.f, 1.f) * mTotalTime;
+    const int oldStep = mCurStep;
+    StepFromTime();
+    if (mCurStep == oldStep) {
         return;
     }
 
-    mCurStep = newStep;
-    mSingleStep = true;
     CalcSegmentPositions();
 
     simDisplay.updateDisplay = true;
@@ -738,7 +780,7 @@ void MillSimulation::SetState(const MillSimulationState& state)
         SingleStep();
     }
 
-    const float stage = (float)state.mCurStep / state.mNTotalSteps;
+    const float stage = state.mTotalTime > 0 ? state.mSimTime / state.mTotalTime : 0.f;
     SetSimulationStage(stage);
 
     SetSpeed(state.mSimSpeed);
@@ -746,6 +788,7 @@ void MillSimulation::SetState(const MillSimulationState& state)
     mViewItems = state.mViewItems;
     mViewPath = state.mViewPath;
     mViewSSAO = state.mViewSSAO;
+    mViewTablePose = state.mViewTablePose;
 }
 
 const MillSimulationState& MillSimulation::GetState() const

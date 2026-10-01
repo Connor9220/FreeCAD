@@ -63,6 +63,7 @@ public:
     virtual void GetHeadPosition(vec3 headPos);
     void GetToolRotation(mat4x4 rot) const;
     void SetMinSimSteps(int steps);
+    float Length() const;
     static float SetQuality(float quality, float maxStockDimension);  // 1 minimum, 10 maximum
 
 public:
@@ -71,6 +72,11 @@ public:
     bool isCutting = true;  // false for a move that changes the tool axis between frames
     int frameFrom = 0;      // frame of the motion the segment starts from
     int frameTo = 0;        // frame the segment is given and drawn in
+    float feed = 0;         // mm/s, 0 when not known
+    bool isRapid = false;
+    float duration = 0;   // seconds the machine takes over the segment
+    float startTime = 0;  // seconds into the program the segment starts
+    int firstStep = 0;    // the simulation step the segment starts at
     int numSimSteps;
     int indexInArray = -1;
     int segmentIndex = -1;

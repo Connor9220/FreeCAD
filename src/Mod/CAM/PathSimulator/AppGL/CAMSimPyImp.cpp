@@ -177,13 +177,15 @@ PyObject* CAMSimPy::SetFrame(PyObject* args)
 {
     PyObject* pObjPlacement;
     PyObject* pObjPose = nullptr;
+    float indexRate = 0;
     if (!PyArg_ParseTuple(
             args,
-            "O!|O!",
+            "O!|O!f",
             &(Base::PlacementPy::Type),
             &pObjPlacement,
             &(Base::RotationPy::Type),
-            &pObjPose
+            &pObjPose,
+            &indexRate
         )) {
         return nullptr;
     }
@@ -192,7 +194,7 @@ PyObject* CAMSimPy::SetFrame(PyObject* args)
         pose = *static_cast<Base::RotationPy*>(pObjPose)->getRotationPtr();
     }
     CAMSim* sim = getCAMSimPtr();
-    sim->SetFrame(*static_cast<Base::PlacementPy*>(pObjPlacement)->getPlacementPtr(), pose);
+    sim->SetFrame(*static_cast<Base::PlacementPy*>(pObjPlacement)->getPlacementPtr(), pose, indexRate);
 
     Py_INCREF(Py_None);
     return Py_None;

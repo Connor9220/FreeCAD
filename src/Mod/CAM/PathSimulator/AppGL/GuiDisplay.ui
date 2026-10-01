@@ -100,6 +100,32 @@
       </widget>
      </item>
      <item>
+      <widget class="QLabel" name="timeLabel">
+       <property name="toolTip">
+        <string>Machine time into the program, and the whole program's time, at the programmed feed rates</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">color:white; padding-left:12px</string>
+       </property>
+       <property name="text">
+        <string notr="true">0:00 / 0:00</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="feedLabel">
+       <property name="toolTip">
+        <string>Feed rate of the current move</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">color:white; padding-left:12px</string>
+       </property>
+       <property name="text">
+        <string notr="true"/>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QToolButton" name="viewAllButton">
        <property name="toolTip">
         <string>Reset camera</string>

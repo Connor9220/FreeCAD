@@ -48,7 +48,11 @@ struct MillSimulationState
     int mPathStep = -1;
     int mSubStep = 0;
     int mNPathSteps = 0;
-    int mSimSpeed = 1;
+    int mSimSpeed = 10;    // multiple of real time
+    float mSimTime = 0;    // seconds into the program, as the machine runs it
+    float mTotalTime = 0;  // seconds the whole program takes
+    float mCurFeed = 0;    // mm/s of the current move, 0 when not known
+    bool mCurRapid = false;
     int mViewItems = VIEWITEM_SIMULATION;
     bool mViewPath = false;
     bool mViewSSAO = false;
@@ -122,6 +126,8 @@ protected:
     void renderSegmentForward(int iSeg);
     void renderSegmentReversed(int iSeg);
     void CalcSegmentPositions();
+    void StepFromTime();
+    float TimeOfStep(int step) const;
     void GetScenePose(quat pose);
     void GetFramePose(quat pose, const MillFrame& frame) const;
     void UpdateScene();
@@ -150,8 +156,6 @@ public:
     vec3 cutColor = {0.5f, 0.84f, 0.73f};
     vec3 toolColor = {0.5f, 0.4f, 0.3f};
     vec3 baseShapeColor = {0.7f, 0.6f, 0.5f};
-
-    clock::duration mTotalElapsed;
 };
 
 }  // namespace CAMSimulator

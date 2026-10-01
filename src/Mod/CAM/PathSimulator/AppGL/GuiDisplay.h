@@ -41,6 +41,8 @@ public:
     void setPlaying(bool b);
     void setSpeed(int s);
     void setStage(float f, int total);
+    void setTime(float seconds, float totalSeconds);
+    void setFeed(float feed, bool rapid);
 
     void setStockVisible(bool b);
     void setBaseVisible(bool b);
