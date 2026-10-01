@@ -268,6 +268,36 @@ class TestPathRotationGenerator(PathTestUtils.PathTestBase):
         self.assertIn("B", result.angles, "Should return B angle (head)")
         self.assertLess(result.error_norm, 1e-6)
 
+    def test41_mixed_machine_head_tilts_the_tool(self):
+        """
+        On a table and a head, the table turns the part's axis to where the head points the tool.
+
+        Expected behavior:
+            The head's angle tilts the tool as a head-head machine's would: for a plane tilted
+            30 degrees toward +X, B is +30 by the right-hand rule about Y, and the table's
+            rotation of the axis equals the head's rotation of Z.
+        """
+        machine = self._create_mixed_machine()
+        desired_axis = FreeCAD.Vector(0.5, 0, 0.8660254037844386)
+
+        result = orientation.solve_orientation(machine, desired_axis)
+
+        self.assertTrue(result.success)
+        self.assertAlmostEqual(result.angles["B"], 30.0, places=6)
+        self.assertAlmostEqual(result.angles["C"], 0.0, places=6)
+
+        for axis in (
+            FreeCAD.Vector(0.3, 0.4, 0.866).normalize(),
+            FreeCAD.Vector(-0.28, 0.549, 0.788).normalize(),
+            FreeCAD.Vector(0, -1, 0),
+        ):
+            result = orientation.solve_orientation(machine, axis)
+            self.assertTrue(result.success)
+            table = FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), result.angles["C"])
+            head = FreeCAD.Rotation(FreeCAD.Vector(0, 1, 0), result.angles["B"])
+            achieved = head.multVec(FreeCAD.Vector(0, 0, 1))
+            self.assertLess((achieved - table.multVec(axis)).Length, 1e-6)
+
     def test50_single_axis_solve(self):
         """
         Test solving with single rotary axis (3+1 indexing).
