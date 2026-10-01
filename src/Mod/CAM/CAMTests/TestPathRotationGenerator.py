@@ -170,6 +170,50 @@ class TestPathRotationGenerator(PathTestUtils.PathTestBase):
         self.assertIn("C", result.angles, "Should return C angle")
         self.assertLess(result.error_norm, 1e-6)
 
+    def test11_tie_does_not_follow_float_noise(self):
+        """
+        Two tool axes of one plane that differ in their last bit get one pose.
+
+        Expected behavior:
+            C -90/A -30 and C +90/A +30 reach the same tilt at the same cost.
+            Float noise in the axis must not pick between them.
+        """
+        machine = self._create_table_table_machine()
+        a = FreeCAD.Vector(0.4999999999999999, 0.0, 0.8660254037844388)
+        b = FreeCAD.Vector(0.4999999999999998, 0.0, 0.8660254037844388)
+
+        ra = orientation.solve_orientation(machine, a)
+        rb = orientation.solve_orientation(machine, b)
+
+        self.assertTrue(ra.success and rb.success)
+        self.assertAlmostEqual(ra.angles["C"], rb.angles["C"], places=6)
+        self.assertAlmostEqual(ra.angles["A"], rb.angles["A"], places=6)
+
+    def test12_tie_stays_at_the_current_pose(self):
+        """
+        Of the poses that tie, the one the axes are already at wins.
+
+        Expected behavior:
+            From C 90/A 30 the same tilt keeps C 90/A 30, not C -90/A -30,
+            and from C 0 an unchanged axis stays at C 0, not C -360.
+        """
+        machine = self._create_table_table_machine()
+        tilt = FreeCAD.Vector(0.4999999999999998, 0.0, 0.8660254037844388)
+
+        result = orientation.solve_orientation(machine, tilt, current_state={"C": 90.0, "A": 30.0})
+
+        self.assertTrue(result.success)
+        self.assertAlmostEqual(result.angles["C"], 90.0, places=6)
+        self.assertAlmostEqual(result.angles["A"], 30.0, places=6)
+
+        first = orientation.solve_orientation(machine, FreeCAD.Vector(0, -1, 1).normalize())
+        again = orientation.solve_orientation(
+            machine, FreeCAD.Vector(0, -1, 1).normalize(), current_state=first.angles
+        )
+
+        self.assertAlmostEqual(again.angles["C"], first.angles["C"], places=6)
+        self.assertAlmostEqual(again.angles["A"], first.angles["A"], places=6)
+
     def test20_axis_limits_active(self):
         """
         Test solving with axis limits that constrain solution.
