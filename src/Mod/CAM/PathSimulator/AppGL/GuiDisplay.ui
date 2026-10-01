@@ -62,9 +62,23 @@
       </widget>
      </item>
      <item>
+      <widget class="QToolButton" name="prevOpButton">
+       <property name="toolTip">
+        <string>Back to the start of the operation or rotary move, or the one before</string>
+       </property>
+       <property name="icon">
+        <iconset resource="../../Gui/Resources/Path.qrc">
+         <normaloff>:/gl_simulator/PreviousOperation.png</normaloff>:/gl_simulator/PreviousOperation.png</iconset>
+       </property>
+       <property name="autoRaise">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QToolButton" name="nextOpButton">
        <property name="toolTip">
-        <string>Skip to the next operation</string>
+        <string>Skip to the next operation or rotary move</string>
        </property>
        <property name="icon">
         <iconset resource="../../Gui/Resources/Path.qrc">

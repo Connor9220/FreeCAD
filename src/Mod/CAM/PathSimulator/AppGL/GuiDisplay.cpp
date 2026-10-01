@@ -38,6 +38,41 @@
 namespace CAMSimulator
 {
 
+// The colour a rotary axis is shown in: its turns under the slider and its name in the label
+static QColor axisColor(int axis)
+{
+    static const QColor colors[] = {
+        QColor(255, 159, 26),   // orange
+        QColor(62, 197, 255),   // cyan
+        QColor(179, 136, 255),  // purple
+        QColor(124, 252, 0),    // green
+    };
+    if (axis < 0) {
+        return QColor(255, 213, 79);  // the table as a whole
+    }
+    return colors[axis % 4];
+}
+
+// x of a share of the slider's range, in the slider's coordinates: where its handle's middle goes
+static void sliderSpan(const QSlider* slider, int& x0, int& span)
+{
+    QStyleOptionSlider opt;
+    opt.initFrom(slider);
+    opt.orientation = slider->orientation();
+    opt.minimum = slider->minimum();
+    opt.maximum = slider->maximum();
+    opt.sliderPosition = slider->sliderPosition();
+    opt.sliderValue = slider->value();
+    opt.subControls = QStyle::SC_SliderGroove | QStyle::SC_SliderHandle;
+    QStyle* style = slider->style();
+    const QRect groove
+        = style->subControlRect(QStyle::CC_Slider, &opt, QStyle::SC_SliderGroove, slider);
+    const QRect handle
+        = style->subControlRect(QStyle::CC_Slider, &opt, QStyle::SC_SliderHandle, slider);
+    span = groove.width() - handle.width();
+    x0 = groove.x() + handle.width() / 2;
+}
+
 // Lines across the stage slider where each operation starts, drawn over it and letting the mouse
 // through to it
 class OperationMarkers: public QWidget
@@ -62,6 +97,20 @@ public:
         update();
     }
 
+    void setSpans(const std::vector<SimTimeSpan>& s)
+    {
+        bool same = s.size() == spans.size();
+        for (size_t i = 0; i < s.size() && same; i++) {
+            same = s[i].start == spans[i].start && s[i].end == spans[i].end
+                && s[i].axis == spans[i].axis;
+        }
+        if (same) {
+            return;
+        }
+        spans = s;
+        update();
+    }
+
 protected:
     void paintEvent(QPaintEvent* /*event*/) override
     {
@@ -69,21 +118,8 @@ protected:
             return;
         }
         // where the slider puts its handle's middle for a value, so the lines meet the handle
-        QStyleOptionSlider opt;
-        opt.initFrom(slider);
-        opt.orientation = slider->orientation();
-        opt.minimum = slider->minimum();
-        opt.maximum = slider->maximum();
-        opt.sliderPosition = slider->sliderPosition();
-        opt.sliderValue = slider->value();
-        opt.subControls = QStyle::SC_SliderGroove | QStyle::SC_SliderHandle;
-        QStyle* style = slider->style();
-        const QRect groove
-            = style->subControlRect(QStyle::CC_Slider, &opt, QStyle::SC_SliderGroove, slider);
-        const QRect handle
-            = style->subControlRect(QStyle::CC_Slider, &opt, QStyle::SC_SliderHandle, slider);
-        const int span = groove.width() - handle.width();
-        const int x0 = groove.x() + handle.width() / 2;
+        int x0, span;
+        sliderSpan(slider, x0, span);
 
         QPainter painter(this);
         painter.setPen(QPen(QColor(255, 255, 255, 200), 2));
@@ -93,11 +129,98 @@ protected:
         }
         // and where the last one stops
         painter.drawLine(x0 + span, 1, x0 + span, height() - 2);
+
+        // and where each rotary axis starts and stops turning; the bars under say which
+        for (const SimTimeSpan& s : spans) {
+            for (float f : {s.start, s.end}) {
+                const int x = x0 + (int)std::lround(f * (float)span);
+                painter.drawLine(x, 1, x, height() - 2);
+            }
+        }
     }
 
 private:
     QSlider* slider;
     std::vector<float> starts;
+    std::vector<SimTimeSpan> spans;
+};
+
+// Bars under the stage slider for when the rotary axes turn, a row and a colour for each axis
+class IndexTimeline: public QWidget
+{
+public:
+    IndexTimeline(QSlider* slider, QWidget* parent)
+        : QWidget(parent)
+        , slider(slider)
+    {
+        setStyleSheet(QStringLiteral("background: transparent;"));
+        setFixedHeight(16);
+    }
+
+    void setSpans(const std::vector<SimTimeSpan>& s, const QStringList& names)
+    {
+        bool same = s.size() == spans.size() && names == axisNames;
+        for (size_t i = 0; i < s.size() && same; i++) {
+            same = s[i].start == spans[i].start && s[i].end == spans[i].end
+                && s[i].axis == spans[i].axis;
+        }
+        if (same) {
+            return;
+        }
+        spans = s;
+        axisNames = names;
+
+        // the legend: each axis's name in its colour
+        QString tip = QObject::tr("When the rotary axes turn:");
+        for (int k = 0; k < names.size(); k++) {
+            tip += QStringLiteral(" <b style='color:%1'>%2</b>").arg(axisColor(k).name(), names[k]);
+        }
+        setToolTip(names.isEmpty() ? QString() : tip);
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent* /*event*/) override
+    {
+        if (axisNames.isEmpty() && spans.empty()) {
+            return;
+        }
+        int x0, span;
+        sliderSpan(slider, x0, span);
+        x0 += slider->x() - x();  // the slider's x in this widget's coordinates
+
+        const int rows = std::max(1, (int)axisNames.size());
+        const int rowHeight = std::max(2, (height() - 1) / rows);
+        QPainter painter(this);
+
+        // each row's axis, named in its colour at the left
+        QFont font = painter.font();
+        font.setBold(true);
+        font.setPixelSize(std::max(6, rowHeight));
+        painter.setFont(font);
+        for (int k = 0; k < axisNames.size(); k++) {
+            painter.setPen(axisColor(k));
+            painter.drawText(
+                QRect(0, k * rowHeight, std::max(1, x0 - 1), rowHeight),
+                Qt::AlignRight | Qt::AlignVCenter,
+                axisNames[k]
+            );
+        }
+
+        for (const SimTimeSpan& s : spans) {
+            const int left = x0 + (int)std::lround(s.start * (float)span);
+            const int right = std::max(left + 2, x0 + (int)std::lround(s.end * (float)span));
+            // the whole table's turn covers every row
+            const int top = s.axis < 0 ? 0 : s.axis * rowHeight;
+            const int h = s.axis < 0 ? rows * rowHeight - 1 : rowHeight - 1;
+            painter.fillRect(left, top, right - left, h, axisColor(s.axis));
+        }
+    }
+
+private:
+    QSlider* slider;
+    std::vector<SimTimeSpan> spans;
+    QStringList axisNames;
 };
 
 GuiDisplay::GuiDisplay(QWidget* parent)
@@ -108,6 +231,9 @@ GuiDisplay::GuiDisplay(QWidget* parent)
 
     opMarkers = new OperationMarkers(ui->stageSlider);
     ui->stageSlider->installEventFilter(this);
+
+    indexTimeline = new IndexTimeline(ui->stageSlider, this);
+    ui->verticalLayout->insertWidget(ui->verticalLayout->indexOf(ui->stageSlider) + 1, indexTimeline);
 
     playing = true;
     setPlaying(false);
@@ -170,7 +296,30 @@ void GuiDisplay::on_singleStepButton_clicked()
 
 void GuiDisplay::on_nextOpButton_clicked()
 {
-    Q_EMIT nextOperation();
+    Q_EMIT nextMark();
+}
+
+void GuiDisplay::on_prevOpButton_clicked()
+{
+    Q_EMIT previousMark();
+}
+
+void GuiDisplay::setIndexSpans(const std::vector<SimTimeSpan>& spans, const QStringList& axisNames)
+{
+    indexTimeline->setSpans(spans, axisNames);
+    opMarkers->setSpans(spans);
+}
+
+void GuiDisplay::setIndexAngles(const QStringList& axisNames, const std::vector<float>& angles)
+{
+    // while the rotaries turn, their positions in place of the feed, each in its axis's colour
+    QString text = tr("Index");
+    for (size_t k = 0; k < angles.size() && (int)k < axisNames.size(); k++) {
+        text += QStringLiteral(" &nbsp;<b style='color:%1'>%2</b> %3°")
+                    .arg(axisColor((int)k).name(), axisNames[(int)k])
+                    .arg(angles[k], 0, 'f', 1);
+    }
+    setFeedLabel(text, false);
 }
 
 void GuiDisplay::setOperationStarts(const std::vector<float>& starts)
@@ -257,10 +406,23 @@ void GuiDisplay::setTime(float seconds, float totalSeconds)
     );
 }
 
+void GuiDisplay::setFeedLabel(const QString& text, bool rapid)
+{
+    if (ui->feedLabel->text() != text) {
+        ui->feedLabel->setText(text);
+    }
+    // rapids in red
+    const QString style = QStringLiteral("color:%1; padding-left:12px")
+                              .arg(rapid ? QStringLiteral("#ff5050") : QStringLiteral("white"));
+    if (ui->feedLabel->styleSheet() != style) {
+        ui->feedLabel->setStyleSheet(style);
+    }
+}
+
 void GuiDisplay::setFeed(float feed, bool rapid)
 {
     if (feed <= 0) {
-        ui->feedLabel->setText(rapid ? tr("Rapid") : QString());
+        setFeedLabel(rapid ? tr("Rapid") : QString(), rapid);
         return;
     }
     // Feeds are mm/s; the user's unit schema picks the unit, and one decimal is plenty for a feed
@@ -271,10 +433,7 @@ void GuiDisplay::setFeed(float feed, bool rapid)
     const QString rate = QStringLiteral("%1 %2")
                              .arg(feed / (factor != 0 ? factor : 1.0), 0, 'f', 1)
                              .arg(QString::fromStdString(unit));
-    const QString text = rapid ? tr("Rapid %1").arg(rate) : tr("F %1").arg(rate);
-    if (ui->feedLabel->text() != text) {
-        ui->feedLabel->setText(text);
-    }
+    setFeedLabel(rapid ? tr("Rapid %1").arg(rate) : tr("F %1").arg(rate), rapid);
 }
 
 void GuiDisplay::on_stageSlider_sliderMoved(int value)

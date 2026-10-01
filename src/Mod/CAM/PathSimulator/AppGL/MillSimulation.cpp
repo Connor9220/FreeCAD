@@ -332,15 +332,70 @@ void MillSimulation::ComputeTimes()
         mTotalTime += p->duration;
     }
 
-    // the time each operation's first move starts
+    // the time each operation's first move starts, and when the rotaries turn: axis by axis,
+    // or the table as a whole. The skip button stops at each.
     mOpStarts.clear();
+    mIndexSpans.clear();
+    mMarks.clear();
+    const float total = mTotalTime > 0 ? mTotalTime : 1.f;
     int op = -1;
     for (const MillPathSegment* p : MillPathSegments) {
         if (p->op != op) {
             op = p->op;
-            mOpStarts.push_back(mTotalTime > 0 ? p->startTime / mTotalTime : 0.f);
+            mOpStarts.push_back(p->startTime / total);
+            mMarks.push_back(p->startTime);
+        }
+        if (p->rotaryTime <= 0) {
+            continue;
+        }
+        if (UsesAxisAngles(p)) {
+            const std::vector<float>& a = frames[p->frameFrom].angles;
+            const std::vector<float>& b = frames[p->frameTo].angles;
+            std::vector<float> begin, span;
+            IndexSchedule(p, begin, span);
+            for (size_t k = 0; k < a.size(); k++) {
+                if (std::fabs(b[k] - a[k]) > 1e-4f && span[k] > 0) {
+                    const float t0 = p->startTime + begin[k];
+                    const float t1 = t0 + span[k];
+                    mIndexSpans.push_back({t0 / total, t1 / total, (int)k});
+                    mMarks.push_back(t0);
+                    mMarks.push_back(t1);
+                }
+            }
+        }
+        else {
+            const float t1 = p->startTime + p->rotaryTime;
+            mIndexSpans.push_back({p->startTime / total, t1 / total, -1});
+            mMarks.push_back(p->startTime);
+            mMarks.push_back(t1);
         }
     }
+    std::sort(mMarks.begin(), mMarks.end());
+}
+
+const std::vector<SimTimeSpan>& MillSimulation::GetIndexSpans() const
+{
+    return mIndexSpans;
+}
+
+const std::vector<SimRotaryAxis>& MillSimulation::GetRotaryAxes() const
+{
+    return mRotaryAxes;
+}
+
+bool MillSimulation::GetIndexAngles(std::vector<float>& angles) const
+{
+    // the rotaries' positions while they turn, axis by axis
+    if (mPathStep < 0 || mPathStep >= (int)MillPathSegments.size()) {
+        return false;
+    }
+    const MillPathSegment* p = MillPathSegments[mPathStep];
+    if (!UsesAxisAngles(p) || p->rotaryTime <= 0) {
+        return false;
+    }
+    const float t = std::clamp((float)mSubStep / (float)p->numSimSteps, 0.f, 1.f);
+    IndexAngles(p, t * p->duration, &angles);
+    return true;
 }
 
 bool MillSimulation::UsesAxisAngles(const MillPathSegment* p) const
@@ -358,14 +413,20 @@ bool MillSimulation::HasAxisAngles(const MillPathSegment* p) const
         && frames[p->frameTo].angles.size() == mRotaryAxes.size();
 }
 
-float MillSimulation::IndexAngles(const MillPathSegment* p, float s, std::vector<float>* angles) const
+float MillSimulation::IndexSchedule(
+    const MillPathSegment* p,
+    std::vector<float>& begin,
+    std::vector<float>& span
+) const
 {
     // The rotaries turn from one frame's positions to the next. Axes of one sequence move
     // together and finish together, at the pace of the slowest; the sequences follow one
     // another, lowest first, or all axes move at once when the index mode says together.
-    // Returns the time the turn takes; angles, when given, gets the positions s seconds into it.
+    // begin and span get each axis's start and length in seconds into the turn; returns the
+    // time the whole turn takes.
     const std::vector<float>& a = mCodeParser.Frames[p->frameFrom].angles;
     const std::vector<float>& b = mCodeParser.Frames[p->frameTo].angles;
+    const size_t n = mRotaryAxes.size();
     std::vector<int> sequences;
     for (const SimRotaryAxis& axis : mRotaryAxes) {
         sequences.push_back(mIndexMode == IndexSequenced ? axis.sequence : 0);
@@ -374,29 +435,43 @@ float MillSimulation::IndexAngles(const MillPathSegment* p, float s, std::vector
     std::sort(order.begin(), order.end());
     order.erase(std::unique(order.begin(), order.end()), order.end());
 
-    if (angles) {
-        *angles = a;
-    }
+    begin.assign(n, 0.f);
+    span.assign(n, 0.f);
     float start = 0;
     for (int seq : order) {
-        float span = 0;
-        for (size_t k = 0; k < mRotaryAxes.size(); k++) {
+        float group = 0;
+        for (size_t k = 0; k < n; k++) {
             if (sequences[k] == seq && mRotaryAxes[k].rate > 0) {
-                span = std::max(span, std::fabs(b[k] - a[k]) / mRotaryAxes[k].rate);
+                group = std::max(group, std::fabs(b[k] - a[k]) / mRotaryAxes[k].rate);
             }
         }
-        if (angles) {
-            const float frac = span > 0 ? std::clamp((s - start) / span, 0.f, 1.f)
-                                        : (s >= start ? 1.f : 0.f);
-            for (size_t k = 0; k < mRotaryAxes.size(); k++) {
-                if (sequences[k] == seq) {
-                    (*angles)[k] = a[k] + (b[k] - a[k]) * frac;
-                }
+        for (size_t k = 0; k < n; k++) {
+            if (sequences[k] == seq) {
+                begin[k] = start;
+                span[k] = group;
             }
         }
-        start += span;
+        start += group;
     }
     return start;
+}
+
+float MillSimulation::IndexAngles(const MillPathSegment* p, float s, std::vector<float>* angles) const
+{
+    // the time the turn takes; angles, when given, gets the positions s seconds into it
+    std::vector<float> begin, span;
+    const float total = IndexSchedule(p, begin, span);
+    if (angles) {
+        const std::vector<float>& a = mCodeParser.Frames[p->frameFrom].angles;
+        const std::vector<float>& b = mCodeParser.Frames[p->frameTo].angles;
+        *angles = a;
+        for (size_t k = 0; k < a.size(); k++) {
+            const float frac = span[k] > 0 ? std::clamp((s - begin[k]) / span[k], 0.f, 1.f)
+                                           : (s >= begin[k] ? 1.f : 0.f);
+            (*angles)[k] = a[k] + (b[k] - a[k]) * frac;
+        }
+    }
+    return total;
 }
 
 void MillSimulation::PoseFromAngles(quat pose, const std::vector<float>& angles) const
@@ -748,6 +823,9 @@ void MillSimulation::SimNext(const clock::duration& elapsed)
     const int oldStep = mCurStep;
 
     if (mSimPlaying) {
+        if (clock::now() < mHoldUntil) {
+            return;  // holding after a back skip
+        }
         const float seconds = std::chrono::duration_cast<std::chrono::duration<float>>(elapsed).count();
         if (!MillPathSegments.empty()) {
             AdvanceTime(seconds);
@@ -926,20 +1004,31 @@ std::string MillSimulation::GetCurrentOperation() const
     return mCodeParser.OpNames[op];
 }
 
-void MillSimulation::SkipToNextOperation()
+void MillSimulation::SkipToPreviousMark()
 {
-    // to the first move of the next operation, or the end of the program after the last
-    float next = mTotalTime;
-    int op = MillPathSegments.empty() ? -1 : MillPathSegments.front()->op;
-    for (const MillPathSegment* p : MillPathSegments) {
-        if (p->op != op) {
-            op = p->op;
-            if (p->startTime > mSimTime + 1e-4f) {
-                next = p->startTime;
-                break;
-            }
-        }
+    // Back to the start of what is running, or, from there, to the mark before. While playing,
+    // playback holds at the mark for a moment, so another press finds it there and goes further
+    // back, and carries on once the presses stop.
+    if (mSimPlaying) {
+        mHoldUntil = clock::now() + std::chrono::milliseconds(750);
     }
+    auto it = std::lower_bound(mMarks.begin(), mMarks.end(), mSimTime - 1e-4f);
+    const float previous = it == mMarks.begin() ? 0.f : *(it - 1);
+    if (previous == mSimTime) {
+        return;
+    }
+    mSimTime = previous;
+    StepFromTime();
+    CalcSegmentPositions();
+    simDisplay.updateDisplay = true;
+}
+
+void MillSimulation::SkipToNextMark()
+{
+    // to the next operation's start, or a rotary axis starting or stopping, whichever comes
+    // first; to the end of the program after the last
+    auto it = std::upper_bound(mMarks.begin(), mMarks.end(), mSimTime + 1e-4f);
+    const float next = it == mMarks.end() ? mTotalTime : *it;
     if (next == mSimTime) {
         return;
     }

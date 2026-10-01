@@ -97,7 +97,11 @@ public:
     bool AddGcodeLine(const char* line);
     void SetFrame(const MillFrame& frame);
     void BeginOperation(const std::string& name);
-    void SkipToNextOperation();
+    void SkipToNextMark();
+    void SkipToPreviousMark();
+    const std::vector<SimTimeSpan>& GetIndexSpans() const;
+    const std::vector<SimRotaryAxis>& GetRotaryAxes() const;
+    bool GetIndexAngles(std::vector<float>& angles) const;
     const std::vector<float>& GetOperationStarts() const;
     std::string GetCurrentOperation() const;
 
@@ -149,6 +153,7 @@ protected:
     bool HasAxisAngles(const MillPathSegment* p) const;
     bool UsesAxisAngles(const MillPathSegment* p) const;
     float IndexAngles(const MillPathSegment* p, float s, std::vector<float>* angles) const;
+    float IndexSchedule(const MillPathSegment* p, std::vector<float>& begin, std::vector<float>& span) const;
     void PoseFromAngles(quat pose, const std::vector<float>& angles) const;
     float TimeOfStep(int step) const;
     void GetScenePose(quat pose);
@@ -169,6 +174,9 @@ public:
     std::vector<MillPathSegment*> MillPathSegments;
     std::vector<float> mOpStarts;  // when each operation starts, as a share of the program's time
     std::vector<SimRotaryAxis> mRotaryAxes;
+    std::vector<SimTimeSpan> mIndexSpans;  // when the rotaries turn
+    std::vector<float> mMarks;             // seconds the skip button stops at, in order
+    clock::time_point mHoldUntil;          // playback waits here after a back skip
 
     int mWidth = -1;
     int mHeight = -1;

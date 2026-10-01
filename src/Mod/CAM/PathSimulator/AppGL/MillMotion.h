@@ -26,6 +26,7 @@
 
 #include "linmath.h"
 #include <cmath>
+#include <string>
 #include <vector>
 
 namespace CAMSimulator
@@ -76,10 +77,20 @@ struct MillFrame
     std::vector<float> angles;  // the table's rotary positions, degrees, as SimRotaryAxis lists them
 };
 
+// A stretch of the program's time, as shares of the whole: when a rotary axis turns, or, with
+// axis -1, when the table turns as a whole
+struct SimTimeSpan
+{
+    float start = 0;
+    float end = 0;
+    int axis = -1;
+};
+
 // A rotary axis of the machine's table. The simulation's list of them is in the order their
 // rotations apply to the part, the first applied first.
 struct SimRotaryAxis
 {
+    std::string name;
     vec3 axis = {0, 0, 1};
     float rate = 0;    // degrees per second
     int sequence = 0;  // the order the axes move in; axes with one value move together

@@ -401,7 +401,7 @@ class CAMSimulation:
         # rate and in the machine's sequence.
         axes = TableAxes(machine)
         self.millSim.SetRotaryAxes(
-            [(ax.rotation_vector, ax.max_velocity / 60.0, ax.sequence) for ax in axes]
+            [(ax.name, ax.rotation_vector, ax.max_velocity / 60.0, ax.sequence) for ax in axes]
         )
         positions = None
         for op in self.activeOps:

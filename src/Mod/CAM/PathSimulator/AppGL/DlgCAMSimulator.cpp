@@ -104,7 +104,8 @@ void DlgCAMSimulator::connectTo(GuiDisplay& gui, Dummy3DViewer& dv)
 
     connect(&gui, &GuiDisplay::singleStep, this, [this] { mMillSimulator->SingleStep(); });
 
-    connect(&gui, &GuiDisplay::nextOperation, this, [this] { mMillSimulator->SkipToNextOperation(); });
+    connect(&gui, &GuiDisplay::nextMark, this, [this] { mMillSimulator->SkipToNextMark(); });
+    connect(&gui, &GuiDisplay::previousMark, this, [this] { mMillSimulator->SkipToPreviousMark(); });
 
     connect(&gui, &GuiDisplay::speedChanged, this, [this](int speed) {
         mMillSimulator->SetSpeed(speed);
@@ -166,9 +167,22 @@ void DlgCAMSimulator::updateGui()
     const float stage = state.mTotalTime > 0 ? state.mSimTime / state.mTotalTime : 0.f;
     mGui->setStage(stage, state.mNTotalSteps);
     mGui->setTime(state.mSimTime, state.mTotalTime);
-    mGui->setFeed(state.mCurFeed, state.mCurRapid);
     mGui->setOperationStarts(mMillSimulator->GetOperationStarts());
     mGui->setOperation(QString::fromStdString(mMillSimulator->GetCurrentOperation()));
+
+    QStringList axisNames;
+    for (const SimRotaryAxis& axis : mMillSimulator->GetRotaryAxes()) {
+        axisNames << QString::fromStdString(axis.name);
+    }
+    mGui->setIndexSpans(mMillSimulator->GetIndexSpans(), axisNames);
+    // the feed, or the rotaries' positions while they turn
+    std::vector<float> angles;
+    if (mMillSimulator->GetIndexAngles(angles)) {
+        mGui->setIndexAngles(axisNames, angles);
+    }
+    else {
+        mGui->setFeed(state.mCurFeed, state.mCurRapid);
+    }
 
     mGui->setStockVisible(state.mViewItems & VIEWITEM_SIMULATION);
     mGui->setBaseVisible(state.mViewItems & VIEWITEM_BASE_SHAPE);

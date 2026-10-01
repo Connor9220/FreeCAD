@@ -25,12 +25,16 @@
 #pragma once
 
 #include <QWidget>
+#include <string>
 #include <vector>
+
+#include "MillMotion.h"
 
 namespace CAMSimulator
 {
 class Ui_GuiDisplay;
 class OperationMarkers;
+class IndexTimeline;
 
 class GuiDisplay: public QWidget
 {
@@ -45,8 +49,11 @@ public:
     void setStage(float f, int total);
     void setTime(float seconds, float totalSeconds);
     void setFeed(float feed, bool rapid);
+    void setFeedLabel(const QString& text, bool rapid);
     void setOperationStarts(const std::vector<float>& starts);
     void setOperation(const QString& name);
+    void setIndexSpans(const std::vector<SimTimeSpan>& spans, const QStringList& axisNames);
+    void setIndexAngles(const QStringList& axisNames, const std::vector<float>& angles);
 
     void setStockVisible(bool b);
     void setBaseVisible(bool b);
@@ -59,7 +66,8 @@ public:
 Q_SIGNALS:
     void play(bool b);
     void singleStep();
-    void nextOperation();
+    void nextMark();
+    void previousMark();
     void speedChanged(int s);
     void stageChanged(float f);
 
@@ -80,6 +88,7 @@ private Q_SLOTS:
     void on_playButton_clicked();
     void on_singleStepButton_clicked();
     void on_nextOpButton_clicked();
+    void on_prevOpButton_clicked();
     void on_indexModeButton_clicked();
 
     void onSlowerFasterButtonClicked();
@@ -90,6 +99,7 @@ private Q_SLOTS:
 private:
     Ui_GuiDisplay* ui;
     OperationMarkers* opMarkers;
+    IndexTimeline* indexTimeline;
 
     bool playing = true;
     int indexMode = -1;
