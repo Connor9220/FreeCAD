@@ -454,6 +454,17 @@ def _solve_analytical_2axis(
             candidates = _decompose_2axis(chain[0], chain[1], desired_axis)
             candidates += _decompose_2axis(chain[1], chain[0], desired_axis)
 
+        # A head tilts the tool where a table turns the part, and the other way about. The
+        # decomposition solves R_second · R_first · desired = Z, as for two tables; a table
+        # and a head satisfy R_table · desired = R_head · Z instead, which is the same with
+        # the head's angle negated.
+        heads = {ax.name for ax in chain if ax.role == AxisRole.HEAD_ROTARY}
+        if heads:
+            candidates = [
+                {name: (-angle if name in heads else angle) for name, angle in c.items()}
+                for c in candidates
+            ]
+
     return candidates
 
 
@@ -753,7 +764,8 @@ def solve_orientation(
         # Strategy depends on axis roles:
         #   All table: R.multVec(desired) ≈ Z
         #   All head:  R.multVec(Z) ≈ desired
-        #   Mixed:     self-consistency of decomposition math
+        #   Mixed:     R_table.multVec(desired) ≈ R_head.multVec(Z): the table turns the
+        #              part's axis to where the head points the tool
         error = float("inf")
         if len(chain) >= 2:
             all_table = all(ax.role == AxisRole.TABLE_ROTARY for ax in chain)
@@ -769,17 +781,11 @@ def solve_orientation(
                     target = FreeCAD.Vector(0, 0, 1)
                 error = (achieved - target).Length
             else:
-                # Mixed: self-consistency check (try both decomposition orders)
-                decomp_error = float("inf")
-                for first_ax, second_ax in [(chain[0], chain[1]), (chain[1], chain[0])]:
-                    second_ref, second_plane = _get_relangle_params(second_ax.rotation_vector)
-                    first_rot = FreeCAD.Rotation(first_ax.rotation_vector, candidate[first_ax.name])
-                    newvec = first_rot.multVec(desired_tool_axis)
-                    check_second = _relAngle(newvec, second_ref, second_plane)
-                    err = abs(_wrap_angle(check_second - candidate[second_ax.name]))
-                    if err < decomp_error:
-                        decomp_error = err
-                error = decomp_error
+                table = [ax for ax in chain if ax.role == AxisRole.TABLE_ROTARY]
+                head = [ax for ax in chain if ax.role == AxisRole.HEAD_ROTARY]
+                achieved = compute_rotation_matrix(head, candidate).multVec(FreeCAD.Vector(0, 0, 1))
+                target = compute_rotation_matrix(table, candidate).multVec(desired_tool_axis)
+                error = (achieved - target).Length
         elif len(chain) == 1:
             # Single axis: the _relAngle decomposition is direct, just
             # verify the candidate is an equivalent angle (base ± k*180/360)
