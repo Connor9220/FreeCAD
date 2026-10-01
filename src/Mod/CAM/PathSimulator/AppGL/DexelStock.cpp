@@ -25,7 +25,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <unordered_map>
 
 // include this last as the defines can mess up other includes
 #include "OpenGlWrapper.h"
@@ -122,16 +124,21 @@ static const char* FragShaderDexelSubtract = R"(
 
     void main()
     {
+        // Much of the footprint is rays the sweep misses: those are left as they are, read
+        // as little as can be and written not at all, here and in the copy back.
         vec2 uv = gl_FragCoord.xy / gridSize;
         vec2 cuv = gl_FragCoord.xy / captureSize;
+        vec4 capIn = texture2D(CapIn, cuv);
+        vec4 capOut = texture2D(CapOut, cuv);
+        if (!(capIn.w > 0.5 && capOut.w > 0.5 && capIn.x < capOut.x)) {
+            discard;
+        }
         vec4 e0 = texture2D(End0, uv);
         vec4 e1 = texture2D(End1, uv);
         vec4 e2 = texture2D(End2, uv);
         vec4 n0 = texture2D(Nrm0, uv);
         vec4 n1 = texture2D(Nrm1, uv);
         vec4 n2 = texture2D(Nrm2, uv);
-        vec4 capIn = texture2D(CapIn, cuv);
-        vec4 capOut = texture2D(CapOut, cuv);
 
         float e[12];
         float n[12];
@@ -236,11 +243,24 @@ static const char* FragShaderDexelCopy = R"(
     uniform sampler2D Src3;
     uniform sampler2D Src4;
     uniform sampler2D Src5;
+    uniform sampler2D CapIn;
+    uniform sampler2D CapOut;
     uniform vec2 gridSize;
+    uniform vec2 captureSize;
+    uniform float cutting;  // 1 when copying back a cut: only the rays its sweep covers
 
     void main()
     {
         vec2 uv = gl_FragCoord.xy / gridSize;
+        if (cutting > 0.5) {
+            // the rays the subtraction wrote, those the sweep covers
+            vec2 cuv = gl_FragCoord.xy / captureSize;
+            vec4 capIn = texture2D(CapIn, cuv);
+            vec4 capOut = texture2D(CapOut, cuv);
+            if (!(capIn.w > 0.5 && capOut.w > 0.5 && capIn.x < capOut.x)) {
+                discard;
+            }
+        }
         gl_FragData[0] = texture2D(Src0, uv);
         gl_FragData[1] = texture2D(Src1, uv);
         gl_FragData[2] = texture2D(Src2, uv);
@@ -442,9 +462,29 @@ static const char* FragShaderDexelMesh = R"(
 // ---------------------------------------------------------------------------------------------
 // helpers
 
+// A uniform's location, looked up once for each shader and name: the names are literals, so
+// their addresses do for keys. A cut sets some thirty uniforms; asking the driver each time
+// cost more than the cut's own drawing.
+// cleared when the shaders go, a new program possibly taking an old one's id
+static std::unordered_map<unsigned long long, int> gUniformCache;
+
+static int uniformAt(const Shader& s, const char* name)
+{
+    auto& cache = gUniformCache;
+    const unsigned long long key = ((unsigned long long)s.shaderId << 48)
+        ^ (unsigned long long)(uintptr_t)name;
+    const auto it = cache.find(key);
+    if (it != cache.end()) {
+        return it->second;
+    }
+    const int loc = glGetUniformLocation(s.shaderId, name);
+    cache.emplace(key, loc);
+    return loc;
+}
+
 static void setUniform1i(const Shader& s, const char* name, int v)
 {
-    const int loc = glGetUniformLocation(s.shaderId, name);
+    const int loc = uniformAt(s, name);
     if (loc >= 0) {
         glUniform1i(loc, v);
     }
@@ -452,7 +492,7 @@ static void setUniform1i(const Shader& s, const char* name, int v)
 
 static void setUniform1f(const Shader& s, const char* name, float v)
 {
-    const int loc = glGetUniformLocation(s.shaderId, name);
+    const int loc = uniformAt(s, name);
     if (loc >= 0) {
         glUniform1f(loc, v);
     }
@@ -460,7 +500,7 @@ static void setUniform1f(const Shader& s, const char* name, float v)
 
 static void setUniform2f(const Shader& s, const char* name, float x, float y)
 {
-    const int loc = glGetUniformLocation(s.shaderId, name);
+    const int loc = uniformAt(s, name);
     if (loc >= 0) {
         glUniform2f(loc, x, y);
     }
@@ -468,7 +508,7 @@ static void setUniform2f(const Shader& s, const char* name, float x, float y)
 
 static void setUniform3f(const Shader& s, const char* name, const vec3 v)
 {
-    const int loc = glGetUniformLocation(s.shaderId, name);
+    const int loc = uniformAt(s, name);
     if (loc >= 0) {
         glUniform3fv(loc, 1, v);
     }
@@ -476,7 +516,7 @@ static void setUniform3f(const Shader& s, const char* name, const vec3 v)
 
 static void setUniformMat(const Shader& s, const char* name, const mat4x4 m)
 {
-    const int loc = glGetUniformLocation(s.shaderId, name);
+    const int loc = uniformAt(s, name);
     if (loc >= 0) {
         glUniformMatrix4fv(loc, 1, GL_FALSE, (const GLfloat*)m);
     }
@@ -562,6 +602,7 @@ void DexelStock::Free()
     mCaptureShader.Destroy();
     mSubtractShader.Destroy();
     mPointShader.Destroy();
+    gUniformCache.clear();
     mValid = false;
 }
 
@@ -795,6 +836,9 @@ bool DexelStock::Init(
     }
 
     // the whole surface to mesh, the first time it is drawn
+    for (int c = 0; c < 3; c++) {
+        mDims[c] = dims[c];
+    }
     mMesher.Setup(mOrigin, mRes, dims);
     mMesher.MarkAllDirty();
     mValid = true;
@@ -855,6 +899,7 @@ void DexelStock::CopyGrid(const Grid& g, const unsigned int src[6], unsigned int
         setUniform1i(mCopyShader, srcNames[i], i);
     }
     setUniform2f(mCopyShader, "gridSize", (float)g.w, (float)g.h);
+    setUniform1f(mCopyShader, "cutting", 0.f);
     glBindBuffer(GL_ARRAY_BUFFER, mQuadVbo);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
@@ -995,6 +1040,12 @@ void DexelStock::Cut(const vec3 lo, const vec3 hi, const std::function<void()>& 
     if (!mValid) {
         return;
     }
+    // a sweep that misses the stock's box, a rapid above it say, cuts nothing
+    for (int c = 0; c < 3; c++) {
+        if (hi[c] < mOrigin[c] || lo[c] > mOrigin[c] + mDims[c] * mRes) {
+            return;
+        }
+    }
 
     // the rays to read back for the mesh, and the tiles of it to remake
     for (int c = 0; c < 3; c++) {
@@ -1063,17 +1114,19 @@ void DexelStock::Cut(const vec3 lo, const vec3 hi, const std::function<void()>& 
         glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
         glDrawArrays(GL_TRIANGLES, 0, 6);
 
-        // and back into the first, over the footprint only
+        // and back into the first, over the rays the sweep covers
         glBindFramebuffer(GL_FRAMEBUFFER, g.fbo[0]);
         glDrawBuffers(6, ColorAttachments);
         mCopyShader.Activate();
-        const char* srcNames[6] = {"Src0", "Src1", "Src2", "Src3", "Src4", "Src5"};
-        for (int i = 0; i < 6; i++) {
+        const char* srcNames[8] = {"Src0", "Src1", "Src2", "Src3", "Src4", "Src5", "CapIn", "CapOut"};
+        for (int i = 0; i < 8; i++) {
             glActiveTexture(GL_TEXTURE0 + i);
-            glBindTexture(GL_TEXTURE_2D, g.tex[1][i]);
+            glBindTexture(GL_TEXTURE_2D, i < 6 ? g.tex[1][i] : mCaptureTex[i - 6]);
             setUniform1i(mCopyShader, srcNames[i], i);
         }
         setUniform2f(mCopyShader, "gridSize", (float)g.w, (float)g.h);
+        setUniform2f(mCopyShader, "captureSize", (float)mCaptureW, (float)mCaptureH);
+        setUniform1f(mCopyShader, "cutting", 1.f);
         glDrawArrays(GL_TRIANGLES, 0, 6);
     }
 

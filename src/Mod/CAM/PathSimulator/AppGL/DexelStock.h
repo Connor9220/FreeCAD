@@ -134,6 +134,7 @@ private:
     bool mValid = false;
     float mRes = 1.f;
     vec3 mOrigin = {0, 0, 0};
+    int mDims[3] = {0, 0, 0};  // the lattice's nodes along each axis
     Grid mGrids[3];
 
     unsigned int mCaptureFbo = 0;
