@@ -196,7 +196,38 @@ void MillPathSegment::render(int step)
     mat4x4 mat, mat2, rmat;
     mat4x4_dup(mat, mFrame);
     mat4x4_dup(rmat, mFrameRot);
-    if (mMotionType == MTCurved) {
+    if (mMotionType == MTCurved && mSmallRad) {
+        // A tight arc: the tool swept along the chord from the step before to this one, as a
+        // straight move is, and the whole tool where the arc starts. Stamped whole at each step
+        // it left a dimple between stamps.
+        const float a0 = mStartAngRad - (step - 1) * mStepAngRad;
+        const float a1 = a0 - mStepAngRad;
+        const float dz = mDiff[PZ] / numSimSteps;
+        const float z0 = mCenter[PZ] + dz * (step - 1);
+        const float x0 = mCenter[PX] - sinf(a0) * mRadius;
+        const float y0 = mCenter[PY] + cosf(a0) * mRadius;
+        const float dx = mCenter[PX] - sinf(a1) * mRadius - x0;
+        const float dy = mCenter[PY] + cosf(a1) * mRadius - y0;
+        const float len = sqrtf(dx * dx + dy * dy);
+        mat4x4_translate_in_place(mat, x0, y0, z0);
+        if (step == 1 || len < EPSILON) {
+            endmill->toolShape.Render(mat, rmat);
+        }
+        if (len >= EPSILON) {
+            const float ang = atan2f(dy, dx);
+            mat4x4_rotate_Z(mat, mat, ang);
+            mat4x4_rotate_Z(rmat, rmat, ang);
+            mat4x4 shear;
+            mat4x4_identity(shear);
+            shear[0][2] = dz / len;
+            mat4x4_mul(mat2, mat, shear);
+            mat4x4_scale_aniso(mat2, mat2, len, 1, 1);
+            endmill->pathShape.Render(mat2, rmat);
+            mat4x4_translate_in_place(mat, len, 0, dz);
+            endmill->halfToolShape.Render(mat, rmat);
+        }
+    }
+    else if (mMotionType == MTCurved) {
         mat4x4_translate_in_place(
             mat,
             mCenter[PX],
@@ -340,8 +371,8 @@ float MillPathSegment::SetQuality(float quality, float maxStockDimension)
     if (mResolution < 0.5) {
         mResolution = 0.5;
     }
-    // a tight arc is cut by the whole tool at steps: at high quality fine enough that the
-    // scallops between them stay small, about 0.05 mm for a tool reaching 10 mm out
+    // a tight arc is cut by the tool swept along chords: at high quality short enough that the
+    // chords stay within about 0.015 mm of a 3 mm arc
     mSmallRadStep = quality >= 9 ? pi / 16 : pi / 8;
     if (quality < 4) {
         mSmallRadStep = pi / 2;

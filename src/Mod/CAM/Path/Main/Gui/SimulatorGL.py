@@ -446,7 +446,9 @@ class CAMSimulation:
             tc = PathDressup.toolController(op)
             tool = tc.Tool
             toolNumber = tc.ToolNumber
-            toolProfile = self.GetToolProfile(tool, 0.5)
+            # arcs of the profile in chords: finer at high quality, where the cut surfaces
+            # they sweep are fine enough to show them
+            toolProfile = self.GetToolProfile(tool, 0.25 if self.quality >= 9 else 0.5)
             self.millSim.AddTool(toolProfile, toolNumber, tool.Diameter, 1)
             # The simulation runs at the programmed feeds. As the cycle time
             # estimate does, a G0 without F moves at the tool controller's

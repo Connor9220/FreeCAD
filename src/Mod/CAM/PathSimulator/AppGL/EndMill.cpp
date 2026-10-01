@@ -55,8 +55,10 @@ EndMill::EndMill(const std::vector<float>& toolProfile, int toolid, float diamet
 
     // copy profile points
     for (int i = 0; i < srcBuffSize; i += 2) {
-        // add some width to reduce simulation artifacts
-        profilePoints[i] = toolProfile[i] + diameter * 0.01f;
+        // add some width to reduce simulation artifacts, a point on the axis staying there: a
+        // tip moved off it leaves the tool open at the tip and along its seams
+        const bool onAxis = fabs(toolProfile[i]) <= 0.0001f;
+        profilePoints[i] = onAxis ? 0.0f : toolProfile[i] + diameter * 0.01f;
         profilePoints[i + 1] = toolProfile[i + 1] - diameter * 0.01f;
     }
     if (missingCenterPoint) {
@@ -76,8 +78,9 @@ EndMill::~EndMill()
 
 void EndMill::GenerateDisplayLists(float quality)
 {
-    // calculate number of slices based on quality.
-    int nslices = 16;
+    // calculate number of slices based on quality: at the highest, fine enough that the cut
+    // surfaces swept by a 12 mm tool keep within 0.03 mm of round
+    int nslices = quality >= 9 ? 32 : 16;
     if (quality < 3) {
         nslices = 4;
     }
