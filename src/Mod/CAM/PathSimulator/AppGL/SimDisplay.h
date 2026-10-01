@@ -65,6 +65,17 @@ public:
     void UpdateCamera(const SoCamera& camera);
     void SetSceneMatrix(const mat4x4 scene);
 
+    // The cache: the cut stock as last drawn, kept between frames so a frame draws only the
+    // moves since. It holds the same geometry buffer and depth and stencil as the frame.
+    void BeginCacheDraw(bool clear);
+    void EndCacheDraw();
+    void ClearCacheHoles();
+    void CopyCacheToFrame();
+    unsigned int ViewVersion() const
+    {
+        return mViewVersion;
+    }
+
     void SetPathColor(const vec3& normal, const vec3& rapid);
 
 public:
@@ -94,6 +105,7 @@ protected:
     Shader shaderGeom, shaderSSAO, shaderSSAOLighting, shaderSSAOBlur;
     Shader shaderGeomCloser;
     Shader shaderLinePath;
+    Shader shaderClear;
 
     vec3 lightColor = {0.5f, 0.6f, 0.7f};
     vec3 lightPos = {20.0f, 20.0f, 10.0f};
@@ -132,6 +144,15 @@ protected:
     unsigned int mFboNormTexture = 0;
     unsigned int mRboDepthStencil = 0;
     unsigned int mFboQuadVBO = 0;
+
+    // cache frame buffer, and where geometry passes draw: the frame's buffer, or the cache
+    unsigned int mCacheFbo = 0;
+    unsigned int mCacheColTexture = 0;
+    unsigned int mCachePosTexture = 0;
+    unsigned int mCacheNormTexture = 0;
+    unsigned int mCacheRboDepthStencil = 0;
+    bool mDrawToCache = false;
+    unsigned int mViewVersion = 0;  // counts changes of view, projection and size
 
     // ssao frame buffers
     bool mSsaoValid = false;

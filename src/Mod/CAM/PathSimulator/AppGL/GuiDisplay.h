@@ -62,6 +62,8 @@ public:
     void setSsaoEnabled(bool b);
     void setTablePoseEnabled(bool b);
     void setIndexMode(int mode);
+    void setIncrementalEnabled(bool b);
+    void setFps(float fps);
 
 Q_SIGNALS:
     void play(bool b);
@@ -79,6 +81,7 @@ Q_SIGNALS:
     void ssaoEnableChanged(bool b);
     void tablePoseEnableChanged(bool b);
     void indexModeChanged(int mode);
+    void incrementalEnableChanged(bool b);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;

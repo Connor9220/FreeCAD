@@ -133,6 +133,10 @@ void DlgCAMSimulator::connectTo(GuiDisplay& gui, Dummy3DViewer& dv)
         mMillSimulator->SetIndexMode(mode);
     });
 
+    connect(&gui, &GuiDisplay::incrementalEnableChanged, this, [this](bool b) {
+        mMillSimulator->EnableIncremental(b);
+    });
+
     connect(&gui, &GuiDisplay::stockVisibleChanged, this, &DlgCAMSimulator::setStockVisible);
     connect(&gui, &GuiDisplay::baseVisibleChanged, this, &DlgCAMSimulator::setBaseVisible);
 
@@ -191,6 +195,8 @@ void DlgCAMSimulator::updateGui()
     mGui->setSsaoEnabled(state.mViewSSAO);
     mGui->setTablePoseEnabled(state.mViewTablePose);
     mGui->setIndexMode(state.mIndexMode);
+    mGui->setIncrementalEnabled(state.mIncremental);
+    mGui->setFps(mFps);
 
     if (mDummyViewer && !mDummyViewer->isAnimating()) {
         mGui->setRotateEnabled(false);
@@ -607,6 +613,17 @@ void DlgCAMSimulator::paintGL()
 
 
     mMillSimulator->ProcessSim(elapsed);
+
+    // frames drawn per second, over the last second or so, for comparing ways of drawing
+    if (mLastProcessSim != clock::time_point::min()) {
+        mFrameTimes.push_back(now);
+        while (mFrameTimes.size() > 2 && now - mFrameTimes.front() > std::chrono::seconds(1)) {
+            mFrameTimes.pop_front();
+        }
+        const float span
+            = std::chrono::duration<float>(mFrameTimes.back() - mFrameTimes.front()).count();
+        mFps = span > 0 ? (float)(mFrameTimes.size() - 1) / span : 0.f;
+    }
 
     mLastProcessSim = now;
 }

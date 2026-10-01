@@ -67,6 +67,7 @@ struct MillSimulationState
     bool mViewSSAO = false;
     bool mViewTablePose = true;  // the part turns with the rotary table; else the tool tilts
     int mIndexMode = 0;          // how an index turns the table: an IndexMode
+    bool mIncremental = false;   // keep the cut stock between frames and draw only new moves
 
     bool mSimPlaying = false;
     bool mSingleStep = false;
@@ -124,6 +125,7 @@ public:
 
     void SetPathVisible(bool b);
     void EnableSsao(bool b);
+    void EnableIncremental(bool b);
     void EnableTablePose(bool b);
     void SetIndexMode(int mode);
     void SetRotaryAxes(const std::vector<SimRotaryAxis>& axes);
@@ -143,6 +145,8 @@ protected:
     void GlsimRenderStock(void);
     void GlsimRenderTools(void);
     void GlsimEnd(void);
+    void RenderSweeps(int first, bool fromScratch);
+    void RenderSimulationCached();
     void renderSegmentForward(int iSeg);
     void renderSegmentReversed(int iSeg);
     void CalcSegmentPositions();
@@ -189,6 +193,13 @@ public:
     std::vector<float> mOpStarts;  // when each operation starts, as a share of the program's time
     std::vector<SimRotaryAxis> mRotaryAxes;
     std::vector<Point3D> mStockPoints;  // the stock's vertices, for how far it reaches from an axis
+
+    // what the cache holds: the cut stock drawn up to this step, in this view
+    bool mCacheValid = false;
+    int mCachedPathStep = -1;
+    int mCachedSubStep = 0;
+    unsigned int mCachedViewVersion = 0;
+    int mCachedViewItems = 0;
     std::vector<SimTimeSpan> mIndexSpans;  // when the rotaries turn
     std::vector<float> mMarks;             // seconds the skip button stops at, in order
     clock::time_point mHoldUntil;          // playback waits here after a back skip

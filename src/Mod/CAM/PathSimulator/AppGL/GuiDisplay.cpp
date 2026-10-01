@@ -256,6 +256,7 @@ GuiDisplay::GuiDisplay(QWidget* parent)
     connect(ui->rotateButton, &QToolButton::toggled, this, &GuiDisplay::rotateEnableChanged);
     connect(ui->pathButton, &QToolButton::toggled, this, &GuiDisplay::pathVisibleChanged);
     connect(ui->ssaoButton, &QToolButton::toggled, this, &GuiDisplay::ssaoEnableChanged);
+    connect(ui->incrementalButton, &QToolButton::toggled, this, &GuiDisplay::incrementalEnableChanged);
     connect(ui->tablePoseButton, &QToolButton::toggled, this, &GuiDisplay::tablePoseEnableChanged);
 }
 
@@ -514,6 +515,20 @@ void GuiDisplay::setSsaoEnabled(bool b)
 {
     QSignalBlocker blocker(ui->ssaoButton);
     ui->ssaoButton->setChecked(b);
+}
+
+void GuiDisplay::setIncrementalEnabled(bool b)
+{
+    QSignalBlocker blocker(ui->incrementalButton);
+    ui->incrementalButton->setChecked(b);
+}
+
+void GuiDisplay::setFps(float fps)
+{
+    const QString text = fps > 0 ? tr("%1 fps").arg(fps, 0, 'f', 0) : QString();
+    if (ui->fpsLabel->text() != text) {
+        ui->fpsLabel->setText(text);
+    }
 }
 
 void GuiDisplay::setIndexMode(int mode)

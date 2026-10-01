@@ -194,6 +194,7 @@
         <file>gl_simulator/RotarySequence.png</file>
         <file>gl_simulator/RotaryTogether.png</file>
         <file>gl_simulator/RotaryShortest.png</file>
+        <file>gl_simulator/IncrementalDraw.png</file>
         <file>preferences/Advanced.ui</file>
         <file>preferences/PathDressupHoldingTags.ui</file>
         <file>preferences/PathJob.ui</file>

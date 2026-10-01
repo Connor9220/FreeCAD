@@ -471,6 +471,18 @@ const char* FragShader2dFbo = R"(
     }
 )";
 
+// Clears the geometry buffer where it runs: color, position and normal all to nothing
+const char* FragShaderClear = R"(
+    #version 120
+
+    void main()
+    {
+        gl_FragData[0] = vec4(0.0);
+        gl_FragData[1] = vec4(0.0);
+        gl_FragData[2] = vec4(0.0);
+    }
+)";
+
 const char* VertShaderGeom = R"(
     #version 120
 

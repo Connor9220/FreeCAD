@@ -87,6 +87,9 @@ void SimDisplay::InitShaders()
 
     // Mill Path Line Shader
     shaderLinePath.CompileShader("PathLine", VertShader3DLine, FragShader3DLine);
+
+    // clears the cache's geometry where the stock has been cut through
+    shaderClear.CompileShader("Clear", VertShader2DFbo, FragShaderClear);
 }
 
 void SimDisplay::CreateFboQuad()
@@ -182,7 +185,28 @@ void SimDisplay::CreateDisplayFbos()
         return;
     }
 
+    // the cache: the same buffers again
+    glGenFramebuffers(1, &mCacheFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, mCacheFbo);
+    CreateGBufTex(GL_TEXTURE0, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, mCacheColTexture);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mCacheColTexture, 0);
+    CreateGBufTex(GL_TEXTURE1, GL_RGB32F, GL_RGBA, GL_FLOAT, mCachePosTexture);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, mCachePosTexture, 0);
+    CreateGBufTex(GL_TEXTURE2, GL_RGB32F, GL_RGBA, GL_FLOAT, mCacheNormTexture);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, mCacheNormTexture, 0);
+    glDrawBuffers(3, attachments);
+    glGenRenderbuffers(1, &mCacheRboDepthStencil);
+    glBindRenderbuffer(GL_RENDERBUFFER, mCacheRboDepthStencil);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, mWidth, mHeight);
+    glFramebufferRenderbuffer(
+        GL_FRAMEBUFFER,
+        GL_DEPTH_STENCIL_ATTACHMENT,
+        GL_RENDERBUFFER,
+        mCacheRboDepthStencil
+    );
+
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    mViewVersion++;
 }
 
 void SimDisplay::CreateSsaoFbos()
@@ -269,6 +293,7 @@ void SimDisplay::CleanFbos()
 {
     // cleanup frame buffers
     GLDELETE_FRAMEBUFFER(mFbo);
+    GLDELETE_FRAMEBUFFER(mCacheFbo);
     GLDELETE_FRAMEBUFFER(mSsaoFbo);
     GLDELETE_FRAMEBUFFER(mSsaoBlurFbo);
 
@@ -280,6 +305,10 @@ void SimDisplay::CleanFbos()
     GLDELETE_TEXTURE(mFboSsaoBlurTexture);
     GLDELETE_TEXTURE(mFboRandTexture);
     GLDELETE_RENDERBUFFER(mRboDepthStencil);
+    GLDELETE_TEXTURE(mCacheColTexture);
+    GLDELETE_TEXTURE(mCachePosTexture);
+    GLDELETE_TEXTURE(mCacheNormTexture);
+    GLDELETE_RENDERBUFFER(mCacheRboDepthStencil);
 }
 
 void SimDisplay::CleanGL()
@@ -298,6 +327,7 @@ void SimDisplay::CleanGL()
     shaderSSAO.Destroy();
     shaderSSAOLighting.Destroy();
     shaderSSAOBlur.Destroy();
+    shaderClear.Destroy();
 
     displayInitiated = false;
 }
@@ -323,7 +353,7 @@ void SimDisplay::StartDepthPass()
 
 void SimDisplay::StartGeometryPass(const vec3& objColor, bool invertNormals)
 {
-    glBindFramebuffer(GL_FRAMEBUFFER, mFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, mDrawToCache ? mCacheFbo : mFbo);
     shaderGeom.Activate();
     shaderGeom.UpdateNormalState(invertNormals);
     shaderGeom.UpdateViewMat(mMatView);
@@ -336,13 +366,89 @@ void SimDisplay::StartGeometryPass(const vec3& objColor, bool invertNormals)
 // slightly closer to the camera. This mitigates overlapping faces artifacts.
 void SimDisplay::StartCloserGeometryPass(const vec3& objColor)
 {
-    glBindFramebuffer(GL_FRAMEBUFFER, mFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, mDrawToCache ? mCacheFbo : mFbo);
     shaderGeomCloser.Activate();
     shaderGeomCloser.UpdateNormalState(false);
     shaderGeomCloser.UpdateViewMat(mMatView);
     shaderGeomCloser.UpdateObjColor(objColor);
     glEnable(GL_CULL_FACE);
     glDisable(GL_BLEND);
+}
+
+void SimDisplay::BeginCacheDraw(bool clear)
+{
+    // draw the cut stock into the cache, from nothing when asked
+    mDrawToCache = true;
+    glBindFramebuffer(GL_FRAMEBUFFER, mCacheFbo);
+    if (clear) {
+        glClearColor(0, 0, 0, 0);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glDepthMask(GL_TRUE);
+        glStencilMask(0xFF);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    }
+    glEnable(GL_CULL_FACE);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+}
+
+void SimDisplay::EndCacheDraw()
+{
+    mDrawToCache = false;
+    glBindFramebuffer(GL_FRAMEBUFFER, mFbo);
+}
+
+void SimDisplay::ClearCacheHoles()
+{
+    // Where the stock has been cut through, the stencil is 0 after the back of the stock is
+    // drawn, and nothing of the stock shows: clear what the cache held there before.
+    glBindFramebuffer(GL_FRAMEBUFFER, mCacheFbo);
+    shaderClear.Activate();
+    SetupVertexAttribs();
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glEnable(GL_STENCIL_TEST);
+    glStencilFunc(GL_EQUAL, 0, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+}
+
+void SimDisplay::CopyCacheToFrame()
+{
+    // the cut stock into the frame's buffer, its geometry and its depth and stencil, for the
+    // tool and the rest to be drawn over
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, mCacheFbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, mFbo);
+    const unsigned int attachments[3]
+        = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2};
+    for (unsigned int attachment : attachments) {
+        glReadBuffer(attachment);
+        glDrawBuffers(1, &attachment);
+        glBlitFramebuffer(0, 0, mWidth, mHeight, 0, 0, mWidth, mHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    }
+    glBlitFramebuffer(
+        0,
+        0,
+        mWidth,
+        mHeight,
+        0,
+        0,
+        mWidth,
+        mHeight,
+        GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
+        GL_NEAREST
+    );
+    glBindFramebuffer(GL_FRAMEBUFFER, mFbo);
+    glDrawBuffers(3, attachments);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glBindFramebuffer(GL_FRAMEBUFFER, mCacheFbo);
+    glDrawBuffers(3, attachments);
+    glBindFramebuffer(GL_FRAMEBUFFER, mFbo);
 }
 
 void SimDisplay::RenderLightObject()
@@ -592,12 +698,22 @@ void SimDisplay::UpdateViewMatrix()
     const auto target = mCameraPosition + dir;
     mat4x4_look_at(mMatLookAt, mCameraPosition.getValue(), target.getValue(), up.getValue());
     mat4x4_mul(mMatView, mMatLookAt, mMatScene);
+    mViewVersion++;
 
     updateDisplay = true;
 }
 
 void SimDisplay::SetSceneMatrix(const mat4x4 scene)
 {
+    for (int c = 0; c < 4; c++) {
+        for (int r = 0; r < 4; r++) {
+            // the scene turned, beyond rounding: the cache shows another view
+            if (std::fabs(mMatScene[c][r] - scene[c][r]) > 1e-5f * (1.f + std::fabs(scene[c][r]))) {
+                mViewVersion++;
+                c = r = 4;
+            }
+        }
+    }
     mat4x4_dup(mMatScene, scene);
     mat4x4_mul(mMatView, mMatLookAt, mMatScene);
 }
@@ -609,6 +725,7 @@ void SimDisplay::UpdateProjectionMatrix()
     const float aspect = (float)mWidth / mHeight;
 
     mat4x4 projmat;
+    mViewVersion++;
 
     if (mCameraPerspective) {
         mat4x4_perspective(projmat, mCameraHeightAngle, aspect, mCameraNearDistance, mCameraFarDistance);

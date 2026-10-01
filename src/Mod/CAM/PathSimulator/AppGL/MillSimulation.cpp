@@ -80,6 +80,7 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
 {
     ClearMillPathSegments();
     mOpStarts.clear();
+    mCacheValid = false;
     millPathLine.Clear();
     // mViewSSAO = guiDisplay.IsChecked(eGuiItemAmbientOclusion);
 
@@ -903,6 +904,11 @@ void MillSimulation::GetScenePose(quat pose)
         PoseFromAngles(pose, angles);
         return;
     }
+    if (p->frameFrom == p->frameTo && !p->index) {
+        // within a frame the table holds its pose, the very same each frame
+        GetFramePose(pose, frames[p->frameTo]);
+        return;
+    }
     quat from, to;
     if (mViewTablePose && HasAxisAngles(p)) {
         // the shortest turn between where the rotaries are and where they go
@@ -935,32 +941,70 @@ void MillSimulation::RenderSimulation()
     if ((mViewItems & VIEWITEM_SIMULATION) == 0) {
         return;
     }
+    RenderSweeps(0, true);
+}
 
+void MillSimulation::RenderSimulationCached()
+{
+    // The cut stock is kept in the cache between frames. While the view, what is shown and the
+    // part's pose stay as they were and the simulation only moves on, a frame cuts into what the
+    // cache holds with the moves since, the one under way again as it has grown. Anything else
+    // draws it all again, as RenderSimulation does.
+    const bool forward = mPathStep > mCachedPathStep
+        || (mPathStep == mCachedPathStep && mSubStep >= mCachedSubStep);
+    const bool reuse = mCacheValid && mCachedPathStep >= 0 && forward
+        && mCachedViewVersion == simDisplay.ViewVersion() && mCachedViewItems == mViewItems;
+
+    simDisplay.BeginCacheDraw(!reuse);
+    RenderSweeps(reuse ? mCachedPathStep : 0, !reuse);
+    simDisplay.EndCacheDraw();
+    simDisplay.CopyCacheToFrame();
+
+    mCacheValid = true;
+    mCachedPathStep = mPathStep;
+    mCachedSubStep = mSubStep;
+    mCachedViewVersion = simDisplay.ViewVersion();
+    mCachedViewItems = mViewItems;
+}
+
+void MillSimulation::RenderSweeps(int first, bool fromScratch)
+{
+    // The stock less the tool's sweeps from first to the current step: the stock's front into
+    // depth, each sweep pushing the surface back where it lies inside it, the stock's back
+    // clipping where it is cut through, then the colors. From scratch the stock starts the
+    // depth; otherwise the depth already holds the surface the earlier sweeps left.
     simDisplay.StartDepthPass();
 
     GlsimStart();
-    mStockObject.render();
+    if (fromScratch) {
+        mStockObject.render();
+    }
 
     GlsimToolStep2();
 
-    for (int i = 0; i <= mPathStep; i++) {
+    for (int i = first; i <= mPathStep; i++) {
         renderSegmentForward(i);
     }
 
-    for (int i = mPathStep; i >= 0; i--) {
+    for (int i = mPathStep; i >= first; i--) {
         renderSegmentForward(i);
     }
 
-    for (int i = 0; i < mPathStep; i++) {
+    for (int i = first; i < mPathStep; i++) {
         renderSegmentReversed(i);
     }
 
-    for (int i = mPathStep; i >= 0; i--) {
+    for (int i = mPathStep; i >= first; i--) {
         renderSegmentReversed(i);
     }
 
     GlsimClipBack();
     mStockObject.render();
+
+    if (!fromScratch) {
+        // what the cache held where the stock is now cut through
+        simDisplay.ClearCacheHoles();
+    }
 
     // start coloring
     simDisplay.StartGeometryPass(stockColor, false);
@@ -970,7 +1014,7 @@ void MillSimulation::RenderSimulation()
     // render cuts (back faces of tools)
     simDisplay.StartGeometryPass(cutColor, true);
     GlsimRenderTools();
-    for (int i = 0; i <= mPathStep; i++) {
+    for (int i = first; i <= mPathStep; i++) {
         MillPathSegment* p = MillPathSegments.at(i);
         if (!p->isCutting) {
             continue;
@@ -1093,7 +1137,12 @@ void MillSimulation::Render()
     if (simDisplay.updateDisplay) {
         UpdateScene();
         simDisplay.PrepareFrameBuffer();
-        RenderSimulation();
+        if (mIncremental && (mViewItems & VIEWITEM_SIMULATION) != 0) {
+            RenderSimulationCached();
+        }
+        else {
+            RenderSimulation();
+        }
         RenderTool();
         RenderBaseShape();
         RenderPath();
@@ -1180,6 +1229,7 @@ void MillSimulation::SetBoxStock(float x, float y, float z, float l, float w, fl
 {
     mStockObject.GenerateBoxStock(x, y, z, l, w, h);
     simDisplay.ScaleViewToStock(&mStockObject);
+    mCacheValid = false;
 }
 
 void MillSimulation::SetArbitraryStock(
@@ -1189,6 +1239,7 @@ void MillSimulation::SetArbitraryStock(
 {
     mStockObject.GenerateSolid(verts, indices);
     simDisplay.ScaleViewToStock(&mStockObject);
+    mCacheValid = false;
     mStockPoints.clear();
     for (const Vertex& v : verts) {
         mStockPoints.push_back({v.x, v.y, v.z});
@@ -1260,6 +1311,17 @@ void MillSimulation::EnableSsao(bool b)
     }
 
     mViewSSAO = b;
+    simDisplay.updateDisplay = true;
+}
+
+void MillSimulation::EnableIncremental(bool b)
+{
+    if (b == mIncremental) {
+        return;
+    }
+
+    mIncremental = b;
+    mCacheValid = false;
     simDisplay.updateDisplay = true;
 }
 
@@ -1410,6 +1472,7 @@ void MillSimulation::SetState(const MillSimulationState& state)
     mViewPath = state.mViewPath;
     mViewSSAO = state.mViewSSAO;
     mViewTablePose = state.mViewTablePose;
+    EnableIncremental(state.mIncremental);
     SetIndexMode(state.mIndexMode);
 }
 

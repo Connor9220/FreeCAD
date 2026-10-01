@@ -154,6 +154,19 @@
       </widget>
      </item>
      <item>
+      <widget class="QLabel" name="fpsLabel">
+       <property name="toolTip">
+        <string>Frames drawn per second</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">color:white; padding-left:12px</string>
+       </property>
+       <property name="text">
+        <string notr="true"/>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QLabel" name="opLabel">
        <property name="toolTip">
         <string>Operation the current move belongs to</string>
@@ -273,6 +286,23 @@
        <property name="icon">
         <iconset resource="../../Gui/Resources/Path.qrc">
          <normaloff>:/gl_simulator/RotarySequence.png</normaloff>:/gl_simulator/RotarySequence.png</iconset>
+       </property>
+       <property name="autoRaise">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QToolButton" name="incrementalButton">
+       <property name="toolTip">
+        <string>Incremental drawing: keep the cut stock between frames and draw only the moves since, so long jobs stay fast. A change of view, of what is shown or of the part's pose, or going back, draws it all again. Off: draw everything every frame.</string>
+       </property>
+       <property name="icon">
+        <iconset resource="../../Gui/Resources/Path.qrc">
+         <normaloff>:/gl_simulator/IncrementalDraw.png</normaloff>:/gl_simulator/IncrementalDraw.png</iconset>
+       </property>
+       <property name="checkable">
+        <bool>true</bool>
        </property>
        <property name="autoRaise">
         <bool>true</bool>

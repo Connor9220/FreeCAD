@@ -28,6 +28,7 @@
 # pragma warning(disable : 4251)
 #endif
 
+#include <deque>
 #include <queue>
 #include <functional>
 #include <chrono>
@@ -183,6 +184,8 @@ private:
 
     std::unique_ptr<MillSimulationState> mState;
     clock::time_point mLastProcessSim = clock::time_point::min();
+    std::deque<clock::time_point> mFrameTimes;
+    float mFps = 0;
 
     GuiDisplay* mGui = nullptr;
     Dummy3DViewer* mDummyViewer = nullptr;
