@@ -25,6 +25,7 @@
 #include "MillPathSegment.h"
 
 #include "GlUtils.h"
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <numbers>
@@ -265,6 +266,51 @@ void MillPathSegment::GetToolRotation(mat4x4 rot) const
     mat4x4_dup(rot, mFrameRot);
 }
 
+void MillPathSegment::BoundingBox(vec3 lo, vec3 hi) const
+{
+    // The box around everything the segment's tool sweeps, on the part: its path in the frame,
+    // widened by the tool's radius across and its length along, through the frame.
+    float maxR = 0, zMin = 0, zMax = 0;
+    const std::vector<float>& prof = endmill->profilePoints;
+    for (size_t i = 0; i + 1 < prof.size(); i += 2) {
+        maxR = std::max(maxR, std::fabs(prof[i]));
+        zMin = std::min(zMin, prof[i + 1]);
+        zMax = std::max(zMax, prof[i + 1]);
+    }
+    vec3 pLo, pHi;
+    for (int c = 0; c < 3; c++) {
+        pLo[c] = std::min(mStartPos[c], mStartPos[c] + mDiff[c]);
+        pHi[c] = std::max(mStartPos[c], mStartPos[c] + mDiff[c]);
+    }
+    if (mMotionType == MTCurved) {
+        // the whole circle, to keep it simple
+        for (int c = 0; c < 2; c++) {
+            pLo[c] = std::min(pLo[c], mCenter[c] - mRadius);
+            pHi[c] = std::max(pHi[c], mCenter[c] + mRadius);
+        }
+    }
+    const float boxLo[3] = {pLo[0] - maxR, pLo[1] - maxR, pLo[2] + zMin};
+    const float boxHi[3] = {pHi[0] + maxR, pHi[1] + maxR, pHi[2] + zMax};
+    for (int c = 0; c < 3; c++) {
+        lo[c] = 1e30f;
+        hi[c] = -1e30f;
+    }
+    for (int k = 0; k < 8; k++) {
+        vec3 corner;
+        FramePosToWorld(
+            corner,
+            mFrame,
+            (k & 1) ? boxHi[0] : boxLo[0],
+            (k & 2) ? boxHi[1] : boxLo[1],
+            (k & 4) ? boxHi[2] : boxLo[2]
+        );
+        for (int c = 0; c < 3; c++) {
+            lo[c] = std::min(lo[c], corner[c]);
+            hi[c] = std::max(hi[c], corner[c]);
+        }
+    }
+}
+
 float MillPathSegment::Length() const
 {
     if (mMotionType == MTCurved) {
@@ -294,7 +340,9 @@ float MillPathSegment::SetQuality(float quality, float maxStockDimension)
     if (mResolution < 0.5) {
         mResolution = 0.5;
     }
-    mSmallRadStep = pi / 8;
+    // a tight arc is cut by the whole tool at steps: at high quality fine enough that the
+    // scallops between them stay small, about 0.05 mm for a tool reaching 10 mm out
+    mSmallRadStep = quality >= 9 ? pi / 16 : pi / 8;
     if (quality < 4) {
         mSmallRadStep = pi / 2;
     }

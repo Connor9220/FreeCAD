@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include "DexelStock.h"
 #include "GCodeParser.h"
 #include "MillPathLine.h"
 #include "MillPathSegment.h"
@@ -68,6 +69,7 @@ struct MillSimulationState
     bool mViewTablePose = true;  // the part turns with the rotary table; else the tool tilts
     int mIndexMode = 0;          // how an index turns the table: an IndexMode
     bool mIncremental = false;   // keep the cut stock between frames and draw only new moves
+    bool mDexelEngine = false;   // the stock as dexels, cut once, rather than CSG every frame
 
     bool mSimPlaying = false;
     bool mSingleStep = false;
@@ -126,6 +128,7 @@ public:
     void SetPathVisible(bool b);
     void EnableSsao(bool b);
     void EnableIncremental(bool b);
+    void EnableDexel(bool b);
     void EnableTablePose(bool b);
     void SetIndexMode(int mode);
     void SetRotaryAxes(const std::vector<SimRotaryAxis>& axes);
@@ -146,6 +149,9 @@ protected:
     void GlsimRenderTools(void);
     void GlsimEnd(void);
     void RenderSweeps(int first, bool fromScratch);
+    bool PrepareDexel();
+    bool CutDexel();
+    void RenderDexel();
     void RenderSimulationCached();
     void renderSegmentForward(int iSeg);
     void renderSegmentReversed(int iSeg);
@@ -193,6 +199,18 @@ public:
     std::vector<float> mOpStarts;  // when each operation starts, as a share of the program's time
     std::vector<SimRotaryAxis> mRotaryAxes;
     std::vector<Point3D> mStockPoints;  // the stock's vertices, for how far it reaches from an axis
+
+    // the stock as dexels: set up from the stock's mesh, cut up to this step
+    DexelStock mDexel;
+    bool mDexelTried = false;
+    bool mDexelBehind = false;
+    int mDexelFramesBehind = 0;
+    std::vector<std::pair<int, int>> mDexelSnaps;  // the segment each snapshot is before, its id
+    int mDexelSeg = 0;
+    int mDexelSub = 0;
+    float mQuality = 10;
+    std::vector<Vertex> mStockVerts;
+    std::vector<GLushort> mStockIndices;
 
     // what the cache holds: the cut stock drawn up to this step, in this view
     bool mCacheValid = false;

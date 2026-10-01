@@ -375,6 +375,19 @@ void SimDisplay::StartCloserGeometryPass(const vec3& objColor)
     glDisable(GL_BLEND);
 }
 
+void SimDisplay::GetDexelView(mat4x4 view, mat4x4 projection, float& pointScale, bool& perspective) const
+{
+    mat4x4_dup(view, mMatView);
+    mat4x4_dup(projection, mMatProjection);
+    pointScale = mMatProjection[1][1] * (float)mHeight * 0.5f;
+    perspective = mCameraPerspective;
+}
+
+void SimDisplay::RestoreViewport() const
+{
+    glViewport(0, 0, mWidth, mHeight);
+}
+
 void SimDisplay::BeginCacheDraw(bool clear)
 {
     // draw the cut stock into the cache, from nothing when asked
@@ -736,6 +749,7 @@ void SimDisplay::UpdateProjectionMatrix()
         mat4x4_ortho(projmat, -w / 2, w / 2, -h / 2, h / 2, mCameraNearDistance, mCameraFarDistance);
     }
 
+    mat4x4_dup(mMatProjection, projmat);
     shader3D.Activate();
     shader3D.UpdateProjectionMat(projmat);
     shaderInv3D.Activate();

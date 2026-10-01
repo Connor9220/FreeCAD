@@ -27,6 +27,10 @@ SET(CAMSimulator_SRCS_Module
 )
 
 SET(CAMSimulator_SRCS_Core
+    DexelMesh.cpp
+    DexelMesh.h
+    DexelStock.cpp
+    DexelStock.h
     EndMill.cpp
     EndMill.h
     GCodeParser.cpp

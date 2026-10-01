@@ -76,6 +76,11 @@ public:
         return mViewVersion;
     }
 
+    // what the dexel stock draws with: the view, the projection, and the pixels a millimetre
+    // covers, at unit depth when the camera is perspective
+    void GetDexelView(mat4x4 view, mat4x4 projection, float& pointScale, bool& perspective) const;
+    void RestoreViewport() const;
+
     void SetPathColor(const vec3& normal, const vec3& rapid);
 
 public:
@@ -114,6 +119,7 @@ protected:
     vec3 pathLineColorPassed = {0.9f, 0.3f, 0.3f};
 
     mat4x4 mMatLookAt;
+    mat4x4 mMatProjection = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
     mat4x4 mMatScene = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
     mat4x4 mMatView = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};  // the camera's view
                                                                                  // of the scene, as

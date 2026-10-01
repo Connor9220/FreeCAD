@@ -24,6 +24,8 @@
 
 #include "MillSimulation.h"
 
+#include <Base/Console.h>
+
 #include "GlUtils.h"
 #include <algorithm>
 #include <cctype>
@@ -37,6 +39,14 @@
 
 namespace CAMSimulator
 {
+
+// The most time a frame spends cutting, and meshing once the cuts have caught up: a jump far
+// ahead catches up over frames that keep the display moving rather than holding it still.
+constexpr double DexelCutMsPerFrame = 50.0;
+constexpr double DexelMeshMsPerFrame = 12.0;
+// A long program keeps this many snapshots of its dexels, evenly through it, for going back.
+constexpr int DexelSnapshots = 5;
+constexpr size_t DexelSnapshotMinSegments = 2000;
 
 MillSimulation::MillSimulation()
 {}
@@ -60,6 +70,8 @@ void MillSimulation::Clear()
 
     ClearMillPathSegments();
     mOpStarts.clear();
+    mDexel.Free();
+    mDexelTried = false;
 
     for (unsigned int i = 0; i < mToolTable.size(); i++) {
         delete mToolTable[i];
@@ -81,6 +93,11 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
     ClearMillPathSegments();
     mOpStarts.clear();
     mCacheValid = false;
+    mQuality = quality;
+    mDexel.Free();
+    mDexelTried = false;
+    mDexelSeg = 0;
+    mDexelSub = 0;
     millPathLine.Clear();
     // mViewSSAO = guiDisplay.IsChecked(eGuiItemAmbientOclusion);
 
@@ -396,10 +413,12 @@ void MillSimulation::PartPos(vec3 out, const MillMotion& m, const std::vector<fl
 }
 
 // The most a continuous rotary move turns before it is split: each piece is drawn as a straight
-// move in a frame turned by its middle angle, off the true path by r (1 - cos(a/2)), 0.03 mm for
-// 6 degrees at a radius of 25 mm. A rapid takes coarser pieces, 0.4 mm off at 25 mm: it is drawn
-// only when it reaches the stock, and the tool is shown on its true path whatever the pieces.
-constexpr float MaxContinuousTurn = 6.f;
+// move in a frame turned by its middle angle, off the true path by r (1 - cos(a/2)), under
+// 0.004 mm for 2 degrees at a radius of 25 mm; the joins between pieces, where the swept tool
+// turns, leave teeth on an edge cut by the tool's side, a third the size of 6 degree pieces'.
+// A rapid takes coarser pieces, 0.4 mm off at 25 mm: it is drawn only when it reaches the
+// stock, and the tool is shown on its true path whatever the pieces.
+constexpr float MaxContinuousTurn = 2.f;
 constexpr float MaxContinuousRapidTurn = 20.f;
 
 int MillSimulation::AddContinuousSegments(
@@ -1136,8 +1155,23 @@ void MillSimulation::Render()
 
     if (simDisplay.updateDisplay) {
         UpdateScene();
+        const bool dexel = mDexelEngine && (mViewItems & VIEWITEM_SIMULATION) != 0 && PrepareDexel();
+        if (dexel) {
+            mDexelBehind = !CutDexel();
+            // and the mesh once the cuts have caught up, a few milliseconds of it a frame: while
+            // they are behind, every few frames, so a long catch up still shows its progress
+            mDexelFramesBehind = mDexelBehind ? mDexelFramesBehind + 1 : 0;
+            if ((!mDexelBehind || mDexelFramesBehind % 8 == 0)
+                && !mDexel.Sync(DexelMeshMsPerFrame)) {
+                mDexelBehind = true;
+            }
+            simDisplay.RestoreViewport();
+        }
         simDisplay.PrepareFrameBuffer();
-        if (mIncremental && (mViewItems & VIEWITEM_SIMULATION) != 0) {
+        if (dexel) {
+            RenderDexel();
+        }
+        else if (mIncremental && (mViewItems & VIEWITEM_SIMULATION) != 0) {
             RenderSimulationCached();
         }
         else {
@@ -1146,7 +1180,9 @@ void MillSimulation::Render()
         RenderTool();
         RenderBaseShape();
         RenderPath();
-        simDisplay.updateDisplay = false;
+        // the dexels behind the step keep cutting next frame
+        simDisplay.updateDisplay = mDexelBehind;
+        mDexelBehind = false;
         simDisplay.RenderResult(true, mViewSSAO);
     }
     else {
@@ -1240,6 +1276,10 @@ void MillSimulation::SetArbitraryStock(
     mStockObject.GenerateSolid(verts, indices);
     simDisplay.ScaleViewToStock(&mStockObject);
     mCacheValid = false;
+    mStockVerts = verts;
+    mStockIndices = indices;
+    mDexel.Free();
+    mDexelTried = false;
     mStockPoints.clear();
     for (const Vertex& v : verts) {
         mStockPoints.push_back({v.x, v.y, v.z});
@@ -1312,6 +1352,148 @@ void MillSimulation::EnableSsao(bool b)
 
     mViewSSAO = b;
     simDisplay.updateDisplay = true;
+}
+
+void MillSimulation::EnableDexel(bool b)
+{
+    if (b == mDexelEngine) {
+        return;
+    }
+
+    mDexelEngine = b;
+    simDisplay.updateDisplay = true;
+}
+
+bool MillSimulation::PrepareDexel()
+{
+    // the dexels are set up from the stock's mesh the first time they are drawn, the rays a
+    // sixtieth of the stock's longest side apart for each step of quality
+    if (mDexel.IsValid()) {
+        return true;
+    }
+    if (mDexelTried || mStockVerts.empty()) {
+        return false;
+    }
+    mDexelTried = true;
+    const float maxDim = std::max({mStockObject.size[0], mStockObject.size[1], mStockObject.size[2]});
+    const float resolution = maxDim / (60.f * std::clamp(mQuality, 1.f, 10.f));
+    mDexelSeg = 0;
+    mDexelSub = 0;
+    mDexelSnaps.clear();
+    if (!mDexel.Init(mStockVerts, mStockIndices, resolution)) {
+        Base::Console().warning(
+            "CAM Simulator: the dexel stock could not be set up on this OpenGL; drawing with CSG.\n"
+        );
+        return false;
+    }
+    return true;
+}
+
+
+
+bool MillSimulation::CutDexel()
+{
+    // Cut the dexels up to the current step: the segments since the last frame, and the one
+    // under way as far as it has gone, again as it grows. Going back starts over from the stock
+    // as set up. True when caught up.
+    if (mPathStep < 0) {
+        if (mDexelSeg > 0 || mDexelSub > 0) {
+            mDexel.Reset();
+            mDexelSeg = 0;
+            mDexelSub = 0;
+        }
+        return true;
+    }
+    if (mPathStep < mDexelSeg || (mPathStep == mDexelSeg && mSubStep < mDexelSub)) {
+        // back to the latest snapshot at or before the place gone back to, or to the start
+        int best = -1;
+        for (size_t i = 0; i < mDexelSnaps.size(); i++) {
+            if (mDexelSnaps[i].first <= mPathStep
+                && (best < 0 || mDexelSnaps[i].first > mDexelSnaps[best].first)) {
+                best = (int)i;
+            }
+        }
+        if (best >= 0) {
+            mDexel.RestoreSnapshot(mDexelSnaps[best].second);
+            mDexelSeg = mDexelSnaps[best].first;
+        }
+        else {
+            mDexel.Reset();
+            mDexelSeg = 0;
+        }
+        mDexelSub = 0;
+    }
+
+    // the time a frame may take, looked at every few cuts
+    const auto start = clock::now();
+    const auto until = start + std::chrono::microseconds((long)(DexelCutMsPerFrame * 1000));
+    int budget = 32;
+    auto spent = [&] {
+        if (--budget > 0) {
+            return false;
+        }
+        budget = 32;
+        return clock::now() > until;
+    };
+    for (;;) {
+        MillPathSegment* p = MillPathSegments[mDexelSeg];
+        const int to = mDexelSeg == mPathStep ? mSubStep : p->numSimSteps;
+        if (p->isCutting && to > mDexelSub) {
+            vec3 lo, hi;
+            p->BoundingBox(lo, hi);
+            if (p->isMultyPart) {
+                // an arc, piece by piece as it is drawn
+                while (mDexelSub < to) {
+                    const int k = ++mDexelSub;
+                    mDexel.Cut(lo, hi, [p, k] { p->render(k); });
+                    if (mDexelSub < to && spent()) {
+                        return false;
+                    }
+                }
+            }
+            else {
+                // a straight move, its sweep so far
+                mDexel.Cut(lo, hi, [p, to] { p->render(to); });
+                mDexelSub = to;
+            }
+        }
+        else {
+            mDexelSub = std::max(mDexelSub, to);
+        }
+        if (mDexelSeg == mPathStep) {
+            return true;
+        }
+        mDexelSeg++;
+        mDexelSub = 0;
+        // a snapshot every so often on a long program, each the stock before that segment
+        const int every = (int)MillPathSegments.size() / (DexelSnapshots + 1);
+        if (MillPathSegments.size() >= DexelSnapshotMinSegments && mDexelSeg % every == 0) {
+            bool have = false;
+            for (const auto& snap : mDexelSnaps) {
+                have = have || snap.first == mDexelSeg;
+            }
+            const int id = have ? -1 : mDexel.SaveSnapshot();
+            if (id >= 0) {
+                mDexelSnaps.emplace_back(mDexelSeg, id);
+            }
+        }
+        if (spent()) {
+            return false;
+        }
+    }
+}
+
+void MillSimulation::RenderDexel()
+{
+    mat4x4 view, projection;
+    float pointScale = 1;
+    bool perspective = true;
+    simDisplay.GetDexelView(view, projection, pointScale, perspective);
+    mDexel.Render(view, projection, pointScale, perspective, stockColor, cutColor);
+    // the tool stands where the current segment has got to, though the cut drew it earlier
+    if (mPathStep >= 0) {
+        MillPathSegments[mPathStep]->SetStepNumber(mSubStep);
+    }
 }
 
 void MillSimulation::EnableIncremental(bool b)
@@ -1472,6 +1654,7 @@ void MillSimulation::SetState(const MillSimulationState& state)
     mViewPath = state.mViewPath;
     mViewSSAO = state.mViewSSAO;
     mViewTablePose = state.mViewTablePose;
+    EnableDexel(state.mDexelEngine);
     EnableIncremental(state.mIncremental);
     SetIndexMode(state.mIndexMode);
 }

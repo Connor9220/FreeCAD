@@ -64,6 +64,11 @@ public:
     void GetToolRotation(mat4x4 rot) const;
     void SetMinSimSteps(int steps);
     float Length() const;
+    void BoundingBox(vec3 lo, vec3 hi) const;
+    void SetStepNumber(int step)
+    {
+        mStepNumber = step;
+    }
     static float SetQuality(float quality, float maxStockDimension);  // 1 minimum, 10 maximum
 
 public:

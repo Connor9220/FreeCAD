@@ -63,6 +63,7 @@ public:
     void setTablePoseEnabled(bool b);
     void setIndexMode(int mode);
     void setIncrementalEnabled(bool b);
+    void setDexelEnabled(bool b);
     void setFps(float fps);
 
 Q_SIGNALS:
@@ -82,6 +83,7 @@ Q_SIGNALS:
     void tablePoseEnableChanged(bool b);
     void indexModeChanged(int mode);
     void incrementalEnableChanged(bool b);
+    void dexelEnableChanged(bool b);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;

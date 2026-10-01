@@ -137,6 +137,10 @@ void DlgCAMSimulator::connectTo(GuiDisplay& gui, Dummy3DViewer& dv)
         mMillSimulator->EnableIncremental(b);
     });
 
+    connect(&gui, &GuiDisplay::dexelEnableChanged, this, [this](bool b) {
+        mMillSimulator->EnableDexel(b);
+    });
+
     connect(&gui, &GuiDisplay::stockVisibleChanged, this, &DlgCAMSimulator::setStockVisible);
     connect(&gui, &GuiDisplay::baseVisibleChanged, this, &DlgCAMSimulator::setBaseVisible);
 
@@ -196,6 +200,7 @@ void DlgCAMSimulator::updateGui()
     mGui->setTablePoseEnabled(state.mViewTablePose);
     mGui->setIndexMode(state.mIndexMode);
     mGui->setIncrementalEnabled(state.mIncremental);
+    mGui->setDexelEnabled(state.mDexelEngine);
     mGui->setFps(mFps);
 
     if (mDummyViewer && !mDummyViewer->isAnimating()) {

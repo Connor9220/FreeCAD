@@ -309,6 +309,23 @@
        </property>
       </widget>
      </item>
+     <item>
+      <widget class="QToolButton" name="dexelButton">
+       <property name="toolTip">
+        <string>Dexel stock: keep the stock as rays of material, each move cut from them once, so a frame costs the same however far the program has run and from any view. Off: the stock less every move so far, drawn every frame (CSG).</string>
+       </property>
+       <property name="icon">
+        <iconset resource="../../Gui/Resources/Path.qrc">
+         <normaloff>:/gl_simulator/DexelStock.png</normaloff>:/gl_simulator/DexelStock.png</iconset>
+       </property>
+       <property name="checkable">
+        <bool>true</bool>
+       </property>
+       <property name="autoRaise">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
     </layout>
    </item>
   </layout>
