@@ -35,7 +35,7 @@
 namespace CAMSimulator
 {
 
-static char TokTypes[] = "GTXYZIJKRF";
+static char TokTypes[] = "GTXYZIJKRFABC";
 
 GCodeParser::~GCodeParser()
 {
@@ -91,9 +91,11 @@ void GCodeParser::SetFrame(const MillFrame& frame)
 
 void GCodeParser::BeginOperation(const std::string& name)
 {
-    // the motions after this belong to the operation
+    // the motions after this belong to the operation, which turns no rotary until it says so
     OpNames.push_back(name);
     lastState.op = (int)OpNames.size() - 1;
+    lastState.hasRot = false;
+    lastState.rot[0] = lastState.rot[1] = lastState.rot[2] = 0;
 }
 
 bool GCodeParser::Parse(const char* filename)
@@ -220,6 +222,10 @@ bool GCodeParser::ParseLine(const char* ptr)
     newState.tool = lastState.tool;
     newState.frame = lastState.frame;
     newState.op = lastState.op;
+    newState.hasRot = lastState.hasRot;
+    for (int k = 0; k < 3; k++) {
+        newState.rot[k] = lastState.rot[k];
+    }
 
     newState.retract_mode = lastState.retract_mode;
     newState.retract_z = lastState.retract_z;
@@ -295,12 +301,21 @@ bool GCodeParser::ParseLine(const char* ptr)
             case 'F':
                 feed = token.fval;
                 break;
+
+            case 'A':
+            case 'B':
+            case 'C':
+                newState.rot[token.letter - 'A'] = token.fval;
+                newState.hasRot = true;
+                validMotion = true;
+                break;
         }
     }
 
-    // A G0 or G1 with only an F sets the rate for the moves after it
+    // A G0 or G1 with only an F sets the rate for the moves after it. An F of 0 sets nothing, as
+    // the cycle time estimate reads it: operations write F0 on moves the tool controller paces.
     newState.rapid = newState.cmd == eMoveLiner && cmd == 0;
-    if (feed >= 0) {
+    if (feed > 0) {
         (newState.rapid ? rapidFeed : cutFeed) = feed;
     }
     newState.feed = newState.rapid ? rapidFeed : cutFeed;

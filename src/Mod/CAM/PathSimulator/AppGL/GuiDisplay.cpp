@@ -232,8 +232,17 @@ GuiDisplay::GuiDisplay(QWidget* parent)
     opMarkers = new OperationMarkers(ui->stageSlider);
     ui->stageSlider->installEventFilter(this);
 
+    // the slider is set in a little from the left, where the bars under it name their axes
+    const int sliderRow = ui->verticalLayout->indexOf(ui->stageSlider);
+    ui->verticalLayout->removeWidget(ui->stageSlider);
+    auto row = new QHBoxLayout();
+    row->setSpacing(0);
+    row->addSpacing(14);
+    row->addWidget(ui->stageSlider);
+    ui->verticalLayout->insertLayout(sliderRow, row);
+
     indexTimeline = new IndexTimeline(ui->stageSlider, this);
-    ui->verticalLayout->insertWidget(ui->verticalLayout->indexOf(ui->stageSlider) + 1, indexTimeline);
+    ui->verticalLayout->insertWidget(sliderRow + 1, indexTimeline);
 
     playing = true;
     setPlaying(false);

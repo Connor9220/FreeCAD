@@ -151,6 +151,18 @@ protected:
     void AdvanceTime(float seconds);
     void ComputeTimes();
     bool HasAxisAngles(const MillPathSegment* p) const;
+    std::vector<float> MotionAngles(const MillMotion& m) const;
+    void PartPos(vec3 out, const MillMotion& m, const std::vector<float>& angles) const;
+    void MarkClearRapids();
+    int AddContinuousSegments(
+        const EndMill& tool,
+        const MillMotion& from,
+        const MillMotion& to,
+        const std::vector<float>& angFrom,
+        const std::vector<float>& angTo,
+        int index,
+        int segId
+    );
     bool UsesAxisAngles(const MillPathSegment* p) const;
     float IndexAngles(const MillPathSegment* p, float s, std::vector<float>* angles) const;
     float IndexSchedule(const MillPathSegment* p, std::vector<float>& begin, std::vector<float>& span) const;
@@ -176,6 +188,7 @@ public:
     std::vector<MillPathSegment*> MillPathSegments;
     std::vector<float> mOpStarts;  // when each operation starts, as a share of the program's time
     std::vector<SimRotaryAxis> mRotaryAxes;
+    std::vector<Point3D> mStockPoints;  // the stock's vertices, for how far it reaches from an axis
     std::vector<SimTimeSpan> mIndexSpans;  // when the rotaries turn
     std::vector<float> mMarks;             // seconds the skip button stops at, in order
     clock::time_point mHoldUntil;          // playback waits here after a back skip

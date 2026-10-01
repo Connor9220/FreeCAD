@@ -26,6 +26,7 @@
 
 #include "GlUtils.h"
 #include <algorithm>
+#include <cctype>
 #include <iostream>
 #include <numbers>
 
@@ -102,7 +103,7 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
     const std::vector<MillFrame>& frames = mCodeParser.Frames;
 
     vec3 startPos;
-    FramePosToWorld(startPos, frames[prevMotion.frame].mat, prevMotion.x, prevMotion.y, prevMotion.z);
+    PartPos(startPos, prevMotion, MotionAngles(prevMotion));
     MillPathPosition mpPos;
     mpPos.X = startPos[0];
     mpPos.Y = startPos[1];
@@ -113,13 +114,51 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
     for (int i = 1; i < nOperations; i++) {
         const MillMotion curMotion = mCodeParser.Operations[i];
         const EndMill* tool = GetTool(curMotion.tool);
-        if (tool != nullptr) {
-            // a move into another work plane frame starts where the last one ended, in the
-            // world, and is drawn in the new frame. If it changes the tool axis the machine
-            // indexes its rotary axes, which a straight sweep does not show: it cuts nothing.
+        if (tool != nullptr && curMotion.hasRot && !mRotaryAxes.empty()) {
+            // the program turns the rotaries as it cuts
+            segId = AddContinuousSegments(
+                *tool,
+                prevMotion,
+                curMotion,
+                MotionAngles(prevMotion),
+                MotionAngles(curMotion),
+                i,
+                segId
+            );
+        }
+        else if (tool != nullptr) {
+            // A move into another work plane frame, or out of an operation that turned the
+            // rotaries itself, starts where the last one ended, in the world, and is drawn in
+            // the new frame. If it changes the tool axis the machine indexes its rotary axes,
+            // which a straight sweep does not show: it cuts nothing.
+            const std::vector<float> angFrom = MotionAngles(prevMotion);
+            const std::vector<float> angTo = MotionAngles(curMotion);
+            const bool leavingRotary = prevMotion.hasRot && !mRotaryAxes.empty();
             MillMotion fromMotion = prevMotion;
             bool isCutting = true;
-            if (fromMotion.frame != curMotion.frame) {
+            if (leavingRotary) {
+                vec3 world, local;
+                PartPos(world, prevMotion, angFrom);
+                mat4x4 inv;
+                mat4x4_invert(inv, frames[curMotion.frame].mat);
+                FramePosToWorld(local, inv, world[0], world[1], world[2]);
+                fromMotion.x = local[0];
+                fromMotion.y = local[1];
+                fromMotion.z = local[2];
+                fromMotion.frame = curMotion.frame;
+                fromMotion.hasRot = false;
+                // the tool's axis on the part where the rotaries left it, against the frame's
+                quat pose, unposed;
+                PoseFromAngles(pose, angFrom);
+                quat_conj(unposed, pose);
+                vec3 z = {0, 0, 1}, axis;
+                quat_mul_vec3(axis, unposed, z);
+                const float* frameZ = frames[curMotion.frame].mat[2];
+                isCutting = std::fabs(axis[0] - frameZ[0]) < 1e-4f
+                    && std::fabs(axis[1] - frameZ[1]) < 1e-4f
+                    && std::fabs(axis[2] - frameZ[2]) < 1e-4f;
+            }
+            else if (fromMotion.frame != curMotion.frame) {
                 isCutting
                     = FramesShareToolAxis(frames[fromMotion.frame].mat, frames[curMotion.frame].mat);
                 MotionToFrame(fromMotion, frames, curMotion.frame);
@@ -129,20 +168,27 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
             segment->isCutting = isCutting;
             segment->frameFrom = prevMotion.frame;
             segment->frameTo = curMotion.frame;
+            segment->index = prevMotion.frame != curMotion.frame || leavingRotary;
+            segment->angFrom = angFrom;
+            segment->angTo = angTo;
             // How far the table turns: the angle between the poses, and each axis's travel when
             // the positions are known. Give it time to be seen: a step every 1.5 degrees.
             float turn = 0;
             float axisTurn = 0;
-            if (prevMotion.frame != curMotion.frame) {
-                turn = QuatAngle(frames[prevMotion.frame].pose, frames[curMotion.frame].pose)
-                    * 180.f / std::numbers::pi_v<float>;
-            }
-            if (HasAxisAngles(segment)) {
-                const MillFrame& a = frames[prevMotion.frame];
-                const MillFrame& b = frames[curMotion.frame];
-                for (size_t k = 0; k < a.angles.size(); k++) {
-                    axisTurn += std::fabs(b.angles[k] - a.angles[k]);
+            if (segment->index) {
+                quat a, b;
+                if (HasAxisAngles(segment)) {
+                    PoseFromAngles(a, angFrom);
+                    PoseFromAngles(b, angTo);
+                    for (size_t k = 0; k < angFrom.size(); k++) {
+                        axisTurn += std::fabs(angTo[k] - angFrom[k]);
+                    }
                 }
+                else {
+                    vec4_dup(a, frames[prevMotion.frame].pose);
+                    vec4_dup(b, frames[curMotion.frame].pose);
+                }
+                turn = QuatAngle(a, b) * 180.f / std::numbers::pi_v<float>;
             }
             segment->SetMinSimSteps((int)(std::max(turn, axisTurn) / 1.5f));
 
@@ -165,6 +211,7 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
     assert(mNTotalSteps >= 0);
 
     ComputeTimes();
+    MarkClearRapids();
 
     mNPathSteps = (int)MillPathSegments.size();
     millPathLine.GenerateModel();
@@ -311,6 +358,191 @@ void MillSimulation::renderSegmentReversed(int iSeg)
     }
 }
 
+std::vector<float> MillSimulation::MotionAngles(const MillMotion& m) const
+{
+    // The rotaries' positions at a motion, as SetRotaryAxes lists the axes: the program's own
+    // rotary words when it turns them as it cuts, the frame's pose otherwise.
+    const size_t n = mRotaryAxes.size();
+    std::vector<float> angles(n, 0.f);
+    if (m.hasRot) {
+        for (size_t k = 0; k < n; k++) {
+            const std::string& name = mRotaryAxes[k].name;
+            const char letter = name.empty() ? '\0' : (char)std::toupper(name[0]);
+            if (letter >= 'A' && letter <= 'C') {
+                angles[k] = m.rot[letter - 'A'];
+            }
+        }
+    }
+    else if (mCodeParser.Frames[m.frame].angles.size() == n) {
+        angles = mCodeParser.Frames[m.frame].angles;
+    }
+    return angles;
+}
+
+void MillSimulation::PartPos(vec3 out, const MillMotion& m, const std::vector<float>& angles) const
+{
+    // A motion's position on the part. A frame's motion is given in the frame; a motion that
+    // carries rotary words is the machine's, with the part turned by them, so it turns back.
+    FramePosToWorld(out, mCodeParser.Frames[m.frame].mat, m.x, m.y, m.z);
+    if (m.hasRot) {
+        quat pose, unposed;
+        PoseFromAngles(pose, angles);
+        quat_conj(unposed, pose);
+        vec3 machine;
+        vec3_dup(machine, out);
+        quat_mul_vec3(out, unposed, machine);
+    }
+}
+
+// The most a continuous rotary move turns before it is split: each piece is drawn as a straight
+// move in a frame turned by its middle angle, off the true path by r (1 - cos(a/2)), 0.03 mm for
+// 6 degrees at a radius of 25 mm. A rapid takes coarser pieces, 0.4 mm off at 25 mm: it is drawn
+// only when it reaches the stock, and the tool is shown on its true path whatever the pieces.
+constexpr float MaxContinuousTurn = 6.f;
+constexpr float MaxContinuousRapidTurn = 20.f;
+
+int MillSimulation::AddContinuousSegments(
+    const EndMill& tool,
+    const MillMotion& from,
+    const MillMotion& to,
+    const std::vector<float>& angFrom,
+    const std::vector<float>& angTo,
+    int index,
+    int segId
+)
+{
+    // A move that turns the rotaries as it cuts, X, Z and A together say. On the machine the
+    // tool goes straight from one point to the next while the part turns under it. Each piece
+    // is drawn in a frame turned with the part by the piece's middle angle, where the tool
+    // stands near enough upright and its path near enough straight, and that frame carries the
+    // cut onto the part.
+    const size_t n = angFrom.size();
+    vec3 partFrom, m0, m1;
+    PartPos(partFrom, from, angFrom);
+    quat pose0;
+    PoseFromAngles(pose0, angFrom);
+    quat_mul_vec3(m0, pose0, partFrom);  // where the move starts, on the machine
+    FramePosToWorld(m1, mCodeParser.Frames[to.frame].mat, to.x, to.y, to.z);
+
+    float maxTurn = 0;
+    for (size_t k = 0; k < n; k++) {
+        maxTurn = std::max(maxTurn, std::fabs(angTo[k] - angFrom[k]));
+    }
+    const float maxPiece = to.rapid ? MaxContinuousRapidTurn : MaxContinuousTurn;
+    const int pieces = std::max(1, (int)std::ceil(maxTurn / maxPiece));
+
+    for (int s = 0; s < pieces; s++) {
+        const float t0 = (float)s / (float)pieces;
+        const float t1 = (float)(s + 1) / (float)pieces;
+        std::vector<float> a0(n), a1(n), am(n);
+        for (size_t k = 0; k < n; k++) {
+            a0[k] = angFrom[k] + (angTo[k] - angFrom[k]) * t0;
+            a1[k] = angFrom[k] + (angTo[k] - angFrom[k]) * t1;
+            am[k] = 0.5f * (a0[k] + a1[k]);
+        }
+        vec3 ms, me;
+        for (int c = 0; c < 3; c++) {
+            ms[c] = m0[c] + (m1[c] - m0[c]) * t0;
+            me[c] = m0[c] + (m1[c] - m0[c]) * t1;
+        }
+        // in the piece's frame a machine point at angles a is at Tm · Ta^-1 · m
+        quat tm, ts, te, us, ue, toS, toE;
+        PoseFromAngles(tm, am);
+        PoseFromAngles(ts, a0);
+        PoseFromAngles(te, a1);
+        quat_conj(us, ts);
+        quat_conj(ue, te);
+        quat_mul(toS, tm, us);
+        quat_mul(toE, tm, ue);
+        vec3 qs, qe;
+        quat_mul_vec3(qs, toS, ms);
+        quat_mul_vec3(qe, toE, me);
+
+        MillMotion fromPiece = to;
+        MillMotion toPiece = to;
+        fromPiece.x = qs[0];
+        fromPiece.y = qs[1];
+        fromPiece.z = qs[2];
+        toPiece.x = qe[0];
+        toPiece.y = qe[1];
+        toPiece.z = qe[2];
+        fromPiece.cmd = toPiece.cmd = eMoveLiner;
+
+        // the frame: the piece's coordinates onto the part, Tm^-1
+        quat unposed;
+        quat_conj(unposed, tm);
+        mat4x4 frame;
+        mat4x4_from_quat(frame, unposed);
+
+        auto segment = new MillPathSegment(tool, fromPiece, toPiece, frame);
+        segment->continuous = true;
+        segment->isCutting = true;
+        segment->frameFrom = segment->frameTo = to.frame;
+        segment->angFrom = a0;
+        segment->angTo = a1;
+        float travel = 0;
+        for (int c = 0; c < 3; c++) {
+            travel += (me[c] - ms[c]) * (me[c] - ms[c]);
+        }
+        segment->machineLength = std::sqrt(travel);
+        vec3_dup(segment->machineFrom, ms);
+        vec3_dup(segment->machineTo, me);
+        segment->rotaryTravel = maxTurn / (float)pieces;
+        segment->op = to.op;
+        segment->feed = to.feed;
+        segment->isRapid = to.rapid;
+        segment->firstStep = mNTotalSteps;
+        segment->indexInArray = index;
+        segment->segmentIndex = segId++;
+        mNTotalSteps += segment->numSimSteps;
+        MillPathSegments.push_back(segment);
+        segment->AppendPathPoints(millPathLine.MillPathPointsBuffer);
+    }
+    return segId;
+}
+
+void MillSimulation::MarkClearRapids()
+{
+    // A rapid that turns the part on a single rotary axis, returning between passes say, cuts
+    // nothing while the tool stays farther from the axis than the stock reaches, and is left out
+    // of the drawing of the cuts, which redraws every cutting move each frame.
+    if (mRotaryAxes.size() != 1 || mRotaryAxes[0].head || mStockPoints.empty()) {
+        return;
+    }
+    vec3 u;
+    vec3_norm(u, mRotaryAxes[0].axis);
+    auto perp = [&u](vec3 out, const float* v) {
+        const float along = vec3_mul_inner(v, u);
+        for (int c = 0; c < 3; c++) {
+            out[c] = v[c] - along * u[c];
+        }
+    };
+    // how far the stock reaches from the axis: its farthest vertex
+    float reach = 0;
+    for (const Point3D& pt : mStockPoints) {
+        const vec3 v = {pt.x, pt.y, pt.z};
+        vec3 d;
+        perp(d, v);
+        reach = std::max(reach, vec3_len(d));
+    }
+    for (MillPathSegment* p : MillPathSegments) {
+        if (!p->continuous || !p->isRapid) {
+            continue;
+        }
+        // the closest the tool's straight path on the machine comes to the axis
+        vec3 d0, d1, dd;
+        perp(d0, p->machineFrom);
+        perp(d1, p->machineTo);
+        vec3_sub(dd, d1, d0);
+        const float len2 = vec3_mul_inner(dd, dd);
+        const float t = len2 > 1e-12f ? std::clamp(-vec3_mul_inner(d0, dd) / len2, 0.f, 1.f) : 0.f;
+        vec3 closest;
+        vec3_scale(closest, dd, t);
+        vec3_add(closest, closest, d0);
+        p->isCutting = vec3_len(closest) <= reach;
+    }
+}
+
 void MillSimulation::ComputeTimes()
 {
     // The machine's time over each segment: its length at its feed, as the cycle time estimate
@@ -319,7 +551,21 @@ void MillSimulation::ComputeTimes()
     const std::vector<MillFrame>& frames = mCodeParser.Frames;
     mTotalTime = 0;
     for (MillPathSegment* p : MillPathSegments) {
-        float duration = p->feed > 0 ? p->Length() / p->feed : (float)p->numSimSteps / 60.f;
+        // A move that turns the rotaries as it cuts is timed as the control does: by its travel
+        // in X, Y and Z when it has some, by the turn when it is the rotaries alone.
+        const float length = !p->continuous ? p->Length()
+            : p->machineLength > 1e-6f      ? p->machineLength
+                                            : p->rotaryTravel;
+        float duration = p->feed > 0 ? length / p->feed : (float)p->numSimSteps / 60.f;
+        if (p->continuous) {
+            // and no faster than the rotaries can turn
+            for (size_t k = 0; k < p->angFrom.size() && k < mRotaryAxes.size(); k++) {
+                if (mRotaryAxes[k].rate > 0) {
+                    const float turn = std::fabs(p->angTo[k] - p->angFrom[k]);
+                    duration = std::max(duration, turn / mRotaryAxes[k].rate);
+                }
+            }
+        }
         p->rotaryTime = 0;
         if (UsesAxisAngles(p)) {
             p->rotaryTime = IndexAngles(p, 0, nullptr);
@@ -349,8 +595,8 @@ void MillSimulation::ComputeTimes()
             continue;
         }
         if (UsesAxisAngles(p)) {
-            const std::vector<float>& a = frames[p->frameFrom].angles;
-            const std::vector<float>& b = frames[p->frameTo].angles;
+            const std::vector<float>& a = p->angFrom;
+            const std::vector<float>& b = p->angTo;
             std::vector<float> begin, span;
             IndexSchedule(p, begin, span);
             for (size_t k = 0; k < a.size(); k++) {
@@ -406,11 +652,9 @@ bool MillSimulation::UsesAxisAngles(const MillPathSegment* p) const
 
 bool MillSimulation::HasAxisAngles(const MillPathSegment* p) const
 {
-    // a move between frames whose rotary positions are both known
-    const std::vector<MillFrame>& frames = mCodeParser.Frames;
-    return p->frameFrom != p->frameTo && !mRotaryAxes.empty()
-        && frames[p->frameFrom].angles.size() == mRotaryAxes.size()
-        && frames[p->frameTo].angles.size() == mRotaryAxes.size();
+    // an index whose rotary positions are known at both ends
+    return p->index && !mRotaryAxes.empty() && p->angFrom.size() == mRotaryAxes.size()
+        && p->angTo.size() == mRotaryAxes.size();
 }
 
 float MillSimulation::IndexSchedule(
@@ -424,8 +668,8 @@ float MillSimulation::IndexSchedule(
     // another, lowest first, or all axes move at once when the index mode says together.
     // begin and span get each axis's start and length in seconds into the turn; returns the
     // time the whole turn takes.
-    const std::vector<float>& a = mCodeParser.Frames[p->frameFrom].angles;
-    const std::vector<float>& b = mCodeParser.Frames[p->frameTo].angles;
+    const std::vector<float>& a = p->angFrom;
+    const std::vector<float>& b = p->angTo;
     const size_t n = mRotaryAxes.size();
     std::vector<int> sequences;
     for (const SimRotaryAxis& axis : mRotaryAxes) {
@@ -462,8 +706,8 @@ float MillSimulation::IndexAngles(const MillPathSegment* p, float s, std::vector
     std::vector<float> begin, span;
     const float total = IndexSchedule(p, begin, span);
     if (angles) {
-        const std::vector<float>& a = mCodeParser.Frames[p->frameFrom].angles;
-        const std::vector<float>& b = mCodeParser.Frames[p->frameTo].angles;
+        const std::vector<float>& a = p->angFrom;
+        const std::vector<float>& b = p->angTo;
         *angles = a;
         for (size_t k = 0; k < a.size(); k++) {
             const float frac = span[k] > 0 ? std::clamp((s - begin[k]) / span[k], 0.f, 1.f)
@@ -641,6 +885,17 @@ void MillSimulation::GetScenePose(quat pose)
     // the table turns over a move between frames, and holds its pose otherwise
     const MillPathSegment* p = MillPathSegments.at(mPathStep);
     const float t = std::clamp((float)mSubStep / (float)p->numSimSteps, 0.f, 1.f);
+    if (p->continuous) {
+        // the part turns with the rotaries as the tool cuts
+        if (mViewTablePose) {
+            std::vector<float> angles(p->angFrom.size());
+            for (size_t k = 0; k < angles.size(); k++) {
+                angles[k] = p->angFrom[k] + (p->angTo[k] - p->angFrom[k]) * t;
+            }
+            PoseFromAngles(pose, angles);
+        }
+        return;
+    }
     if (mViewTablePose && UsesAxisAngles(p)) {
         // axis by axis, as the machine turns
         std::vector<float> angles;
@@ -649,8 +904,15 @@ void MillSimulation::GetScenePose(quat pose)
         return;
     }
     quat from, to;
-    GetFramePose(from, frames[p->frameFrom]);
-    GetFramePose(to, frames[p->frameTo]);
+    if (mViewTablePose && HasAxisAngles(p)) {
+        // the shortest turn between where the rotaries are and where they go
+        PoseFromAngles(from, p->angFrom);
+        PoseFromAngles(to, p->angTo);
+    }
+    else {
+        GetFramePose(from, frames[p->frameFrom]);
+        GetFramePose(to, frames[p->frameTo]);
+    }
     QuatSlerp(pose, from, to, t);
 }
 
@@ -734,7 +996,25 @@ void MillSimulation::RenderTool()
     p->GetHeadPosition(toolPos);
     mat4x4 tmat, rmat;
     p->GetToolRotation(rmat);
-    if (UsesAxisAngles(p)) {
+    if (p->continuous) {
+        // on its true path: straight on the machine, the part turned back by where the
+        // rotaries are, not along the piece's chord
+        const float t = std::clamp((float)mSubStep / (float)p->numSimSteps, 0.f, 1.f);
+        std::vector<float> angles(p->angFrom.size());
+        for (size_t k = 0; k < angles.size(); k++) {
+            angles[k] = p->angFrom[k] + (p->angTo[k] - p->angFrom[k]) * t;
+        }
+        vec3 machine;
+        for (int c = 0; c < 3; c++) {
+            machine[c] = p->machineFrom[c] + (p->machineTo[c] - p->machineFrom[c]) * t;
+        }
+        quat pose, unposed;
+        PoseFromAngles(pose, angles);
+        quat_conj(unposed, pose);
+        quat_mul_vec3(toolPos, unposed, machine);
+        mat4x4_from_quat(rmat, unposed);
+    }
+    else if (UsesAxisAngles(p)) {
         // Axis by axis: the head tilts the tool on the machine, and the part, which the tool is
         // drawn on, has turned with the table; the tool stands on the part as the one tilt
         // with the other taken back.
@@ -909,6 +1189,11 @@ void MillSimulation::SetArbitraryStock(
 {
     mStockObject.GenerateSolid(verts, indices);
     simDisplay.ScaleViewToStock(&mStockObject);
+    mStockPoints.clear();
+    for (const Vertex& v : verts) {
+        mStockPoints.push_back({v.x, v.y, v.z});
+    }
+    MarkClearRapids();
 }
 
 void MillSimulation::SetStockVisible(bool b)

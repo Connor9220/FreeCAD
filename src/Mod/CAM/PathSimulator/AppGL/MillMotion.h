@@ -59,10 +59,12 @@ struct MillMotion
     float r = 0.0f;
     char retract_mode = '\0';
     float retract_z = 0;
-    int frame = 0;       // index into the parser's frame table, 0 is the world
-    float feed = 0;      // feed rate the motion is made at, in mm/s; 0 when not known
-    bool rapid = false;  // a G0, or a canned cycle's rapid part
-    int op = -1;         // index into the parser's operation names, -1 before the first
+    int frame = 0;             // index into the parser's frame table, 0 is the world
+    float feed = 0;            // feed rate the motion is made at, in mm/s; 0 when not known
+    bool rapid = false;        // a G0, or a canned cycle's rapid part
+    int op = -1;               // index into the parser's operation names, -1 before the first
+    float rot[3] = {0, 0, 0};  // A, B and C, degrees, when the program turns the rotaries itself
+    bool hasRot = false;  // the operation's moves carry rotary words: x, y, z are the machine's
 };
 
 // A work plane frame: an operation's path is stored in its frame, with the tool along the frame's

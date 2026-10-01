@@ -80,7 +80,14 @@ public:
     int op = -1;          // the operation the segment's move belongs to
     float turn = 0;       // degrees between the poses the segment indexes between; 0 for a move
     float axisTurn = 0;  // degrees the rotaries travel over the index, when their positions are known
-    float rotaryTime = 0;  // seconds of the segment's time the rotaries take to turn
+    float rotaryTime = 0;     // seconds of the segment's time the rotaries take to turn
+    bool index = false;       // the rotaries turn between frames, the tool cutting nothing new
+    bool continuous = false;  // the program turns the rotaries as it cuts, XYZA and the like
+    std::vector<float> angFrom, angTo;  // the rotaries' positions at the ends, degrees
+    float machineLength = 0;            // a continuous move's travel in X, Y and Z on the machine
+    float rotaryTravel = 0;             // and the most any rotary turns over it, degrees
+    vec3 machineFrom = {0, 0, 0};       // a continuous move's ends on the machine
+    vec3 machineTo = {0, 0, 0};
     int numSimSteps;
     int indexInArray = -1;
     int segmentIndex = -1;

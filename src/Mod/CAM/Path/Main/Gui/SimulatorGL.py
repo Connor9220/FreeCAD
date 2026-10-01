@@ -139,6 +139,20 @@ def HeadAxes(machine):
     return [ax for ax in chain if ax.role == AxisRole.HEAD_ROTARY]
 
 
+def LastRotaryPositions(op, axes):
+    """LastRotaryPositions(op, axes) ... {axis name: position} for each of
+    the axes whose word op's path carries: where an operation that turns the
+    rotaries itself, a 4th-axis surface say, leaves them."""
+    positions = {}
+    commands = op.Path.Commands if op.Path else []
+    for ax in axes:
+        for cmd in reversed(commands):
+            if ax.name in cmd.Parameters:
+                positions[ax.name] = float(cmd.Parameters[ax.name])
+                break
+    return positions
+
+
 def IndexRate(machine):
     """IndexRate(machine) ... how fast, in degrees per second, the machine's
     rotaries turn into a new pose: the slowest axis sets the pace. 0 when
@@ -459,6 +473,11 @@ class CAMSimulation:
             opCommands = op.Path.Commands
             for cmd in opCommands:
                 self.millSim.AddCommand(cmd)
+            # an operation that turns the rotaries itself leaves them where it ends, and the
+            # next operation's pose is solved from there
+            ended = LastRotaryPositions(op, axes)
+            if ended:
+                positions = dict(positions or {}, **ended)
         self.millSim.BeginSimulation(self.stock, self.quality)
         if self.baseShape is not None:
             self.millSim.SetBaseShape(self.baseShape, 1)
