@@ -62,6 +62,20 @@
       </widget>
      </item>
      <item>
+      <widget class="QToolButton" name="nextOpButton">
+       <property name="toolTip">
+        <string>Skip to the next operation</string>
+       </property>
+       <property name="icon">
+        <iconset resource="../../Gui/Resources/Path.qrc">
+         <normaloff>:/gl_simulator/NextOperation.png</normaloff>:/gl_simulator/NextOperation.png</iconset>
+       </property>
+       <property name="autoRaise">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QToolButton" name="slowerButton">
        <property name="toolTip">
         <string>Decrease simulation speed</string>
@@ -116,6 +130,19 @@
       <widget class="QLabel" name="feedLabel">
        <property name="toolTip">
         <string>Feed rate of the current move</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">color:white; padding-left:12px</string>
+       </property>
+       <property name="text">
+        <string notr="true"/>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="opLabel">
+       <property name="toolTip">
+        <string>Operation the current move belongs to</string>
        </property>
        <property name="styleSheet">
         <string notr="true">color:white; padding-left:12px</string>

@@ -25,6 +25,7 @@
 #pragma once
 
 #include "MillMotion.h"
+#include <string>
 #include <vector>
 
 namespace CAMSimulator
@@ -51,10 +52,12 @@ public:
     bool Parse(const char* filename);
     bool AddLine(const char* ptr);
     void SetFrame(const MillFrame& frame);
+    void BeginOperation(const std::string& name);
 
 public:
     std::vector<MillMotion> Operations;
     std::vector<MillFrame> Frames;
+    std::vector<std::string> OpNames;
     MillMotion lastState;
 
 protected:

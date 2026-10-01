@@ -86,6 +86,10 @@ public:
     bool LoadGCodeFile(const char* fileName);
     bool AddGcodeLine(const char* line);
     void SetFrame(const MillFrame& frame);
+    void BeginOperation(const std::string& name);
+    void SkipToNextOperation();
+    const std::vector<float>& GetOperationStarts() const;
+    std::string GetCurrentOperation() const;
 
     void SetPlaying(bool b);
     void SingleStep();
@@ -144,6 +148,7 @@ public:
     SimDisplay simDisplay;
     MillPathLine millPathLine;
     std::vector<MillPathSegment*> MillPathSegments;
+    std::vector<float> mOpStarts;  // when each operation starts, as a share of the program's time
 
     int mWidth = -1;
     int mHeight = -1;

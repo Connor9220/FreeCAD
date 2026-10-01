@@ -382,6 +382,7 @@ class CAMSimulation:
         indexRate = IndexRate(machine)
         positions = None
         for op in self.activeOps:
+            self.millSim.BeginOperation(op.Label)
             tc = PathDressup.toolController(op)
             tool = tc.Tool
             toolNumber = tc.ToolNumber

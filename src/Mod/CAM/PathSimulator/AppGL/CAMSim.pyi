@@ -62,6 +62,13 @@ class CAMSim(BaseClass):
         """
         ...
 
+    def BeginOperation(self, name: str, /) -> None:
+        """
+        Mark where an operation starts: the commands added after it belong to the operation
+        with the given name, until the next one starts.
+        """
+        ...
+
     def SetFrame(
         self, placement: Placement, pose: Rotation = ..., indexRate: float = ..., /
     ) -> None:

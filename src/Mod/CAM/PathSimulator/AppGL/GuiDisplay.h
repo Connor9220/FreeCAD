@@ -25,10 +25,12 @@
 #pragma once
 
 #include <QWidget>
+#include <vector>
 
 namespace CAMSimulator
 {
 class Ui_GuiDisplay;
+class OperationMarkers;
 
 class GuiDisplay: public QWidget
 {
@@ -43,6 +45,8 @@ public:
     void setStage(float f, int total);
     void setTime(float seconds, float totalSeconds);
     void setFeed(float feed, bool rapid);
+    void setOperationStarts(const std::vector<float>& starts);
+    void setOperation(const QString& name);
 
     void setStockVisible(bool b);
     void setBaseVisible(bool b);
@@ -54,6 +58,7 @@ public:
 Q_SIGNALS:
     void play(bool b);
     void singleStep();
+    void nextOperation();
     void speedChanged(int s);
     void stageChanged(float f);
 
@@ -67,10 +72,12 @@ Q_SIGNALS:
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private Q_SLOTS:
     void on_playButton_clicked();
     void on_singleStepButton_clicked();
+    void on_nextOpButton_clicked();
 
     void onSlowerFasterButtonClicked();
     void on_stageSlider_sliderMoved(int value);
@@ -79,6 +86,7 @@ private Q_SLOTS:
 
 private:
     Ui_GuiDisplay* ui;
+    OperationMarkers* opMarkers;
 
     bool playing = true;
     int speed = 1;

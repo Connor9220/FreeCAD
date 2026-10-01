@@ -173,6 +173,18 @@ PyObject* CAMSimPy::AddCommand(PyObject* args)
     return Py_None;
 }
 
+PyObject* CAMSimPy::BeginOperation(PyObject* args)
+{
+    const char* name;
+    if (!PyArg_ParseTuple(args, "s", &name)) {
+        return nullptr;
+    }
+    getCAMSimPtr()->BeginOperation(name);
+
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
 PyObject* CAMSimPy::SetFrame(PyObject* args)
 {
     PyObject* pObjPlacement;

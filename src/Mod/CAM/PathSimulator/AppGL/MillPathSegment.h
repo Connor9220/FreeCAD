@@ -77,6 +77,7 @@ public:
     float duration = 0;   // seconds the machine takes over the segment
     float startTime = 0;  // seconds into the program the segment starts
     int firstStep = 0;    // the simulation step the segment starts at
+    int op = -1;          // the operation the segment's move belongs to
     int numSimSteps;
     int indexInArray = -1;
     int segmentIndex = -1;

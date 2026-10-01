@@ -25,6 +25,8 @@
 #include "GuiDisplay.h"
 
 #include "ui_GuiDisplay.h"
+#include <QPainter>
+#include <QStyleOptionSlider>
 #include <Base/Quantity.h>
 #include <Base/Unit.h>
 #include <cmath>
@@ -36,11 +38,76 @@
 namespace CAMSimulator
 {
 
+// Lines across the stage slider where each operation starts, drawn over it and letting the mouse
+// through to it
+class OperationMarkers: public QWidget
+{
+public:
+    explicit OperationMarkers(QSlider* slider)
+        : QWidget(slider)
+        , slider(slider)
+    {
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        // a theme's style sheet may give every widget a background, which would hide the slider
+        setStyleSheet(QStringLiteral("background: transparent;"));
+        setGeometry(slider->rect());
+    }
+
+    void setStarts(const std::vector<float>& s)
+    {
+        if (s == starts) {
+            return;
+        }
+        starts = s;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent* /*event*/) override
+    {
+        if (starts.empty()) {
+            return;
+        }
+        // where the slider puts its handle's middle for a value, so the lines meet the handle
+        QStyleOptionSlider opt;
+        opt.initFrom(slider);
+        opt.orientation = slider->orientation();
+        opt.minimum = slider->minimum();
+        opt.maximum = slider->maximum();
+        opt.sliderPosition = slider->sliderPosition();
+        opt.sliderValue = slider->value();
+        opt.subControls = QStyle::SC_SliderGroove | QStyle::SC_SliderHandle;
+        QStyle* style = slider->style();
+        const QRect groove
+            = style->subControlRect(QStyle::CC_Slider, &opt, QStyle::SC_SliderGroove, slider);
+        const QRect handle
+            = style->subControlRect(QStyle::CC_Slider, &opt, QStyle::SC_SliderHandle, slider);
+        const int span = groove.width() - handle.width();
+        const int x0 = groove.x() + handle.width() / 2;
+
+        QPainter painter(this);
+        painter.setPen(QPen(QColor(255, 255, 255, 200), 2));
+        for (float f : starts) {
+            const int x = x0 + (int)std::lround(f * (float)span);
+            painter.drawLine(x, 1, x, height() - 2);
+        }
+        // and where the last one stops
+        painter.drawLine(x0 + span, 1, x0 + span, height() - 2);
+    }
+
+private:
+    QSlider* slider;
+    std::vector<float> starts;
+};
+
 GuiDisplay::GuiDisplay(QWidget* parent)
     : QWidget(parent)
     , ui(new Ui_GuiDisplay)
 {
     ui->setupUi(this);
+
+    opMarkers = new OperationMarkers(ui->stageSlider);
+    ui->stageSlider->installEventFilter(this);
 
     playing = true;
     setPlaying(false);
@@ -60,6 +127,15 @@ GuiDisplay::GuiDisplay(QWidget* parent)
 GuiDisplay::~GuiDisplay()
 {
     delete ui;
+}
+
+bool GuiDisplay::eventFilter(QObject* watched, QEvent* event)
+{
+    // the markers cover the slider whatever its size
+    if (watched == ui->stageSlider && event->type() == QEvent::Resize) {
+        opMarkers->setGeometry(ui->stageSlider->rect());
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 void GuiDisplay::resizeEvent(QResizeEvent* event)
@@ -90,6 +166,23 @@ void GuiDisplay::on_singleStepButton_clicked()
 {
     setPlaying(false);
     Q_EMIT singleStep();
+}
+
+void GuiDisplay::on_nextOpButton_clicked()
+{
+    Q_EMIT nextOperation();
+}
+
+void GuiDisplay::setOperationStarts(const std::vector<float>& starts)
+{
+    opMarkers->setStarts(starts);
+}
+
+void GuiDisplay::setOperation(const QString& name)
+{
+    if (ui->opLabel->text() != name) {
+        ui->opLabel->setText(name);
+    }
 }
 
 void GuiDisplay::setSpeed(int s)

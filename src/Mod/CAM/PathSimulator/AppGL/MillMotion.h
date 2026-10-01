@@ -61,6 +61,7 @@ struct MillMotion
     int frame = 0;       // index into the parser's frame table, 0 is the world
     float feed = 0;      // feed rate the motion is made at, in mm/s; 0 when not known
     bool rapid = false;  // a G0, or a canned cycle's rapid part
+    int op = -1;         // index into the parser's operation names, -1 before the first
 };
 
 // A work plane frame: an operation's path is stored in its frame, with the tool along the frame's

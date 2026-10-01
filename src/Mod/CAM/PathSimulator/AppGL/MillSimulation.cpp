@@ -58,6 +58,7 @@ void MillSimulation::Clear()
     mCodeParser.Clear();
 
     ClearMillPathSegments();
+    mOpStarts.clear();
 
     for (unsigned int i = 0; i < mToolTable.size(); i++) {
         delete mToolTable[i];
@@ -77,6 +78,7 @@ void MillSimulation::Clear()
 void MillSimulation::InitSimulation(float quality, float maxStockDimension)
 {
     ClearMillPathSegments();
+    mOpStarts.clear();
     millPathLine.Clear();
     // mViewSSAO = guiDisplay.IsChecked(eGuiItemAmbientOclusion);
 
@@ -135,6 +137,7 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
             // The machine's time over the segment: its length at its feed, as the cycle time
             // estimate counts it. A move with no feed known keeps the old pace, 60 steps a
             // second. An index takes at least as long as the rotaries take to turn.
+            segment->op = curMotion.op;
             segment->feed = curMotion.feed;
             segment->isRapid = curMotion.rapid;
             float duration = curMotion.feed > 0 ? segment->Length() / curMotion.feed
@@ -158,6 +161,16 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
     }
 
     assert(mNTotalSteps >= 0);
+
+    // the time each operation's first move starts
+    mOpStarts.clear();
+    int op = -1;
+    for (const MillPathSegment* p : MillPathSegments) {
+        if (p->op != op) {
+            op = p->op;
+            mOpStarts.push_back(mTotalTime > 0 ? p->startTime / mTotalTime : 0.f);
+        }
+    }
 
     mNPathSteps = (int)MillPathSegments.size();
     millPathLine.GenerateModel();
@@ -730,6 +743,51 @@ bool MillSimulation::AddGcodeLine(const char* line)
 void MillSimulation::SetFrame(const MillFrame& frame)
 {
     mCodeParser.SetFrame(frame);
+}
+
+void MillSimulation::BeginOperation(const std::string& name)
+{
+    mCodeParser.BeginOperation(name);
+}
+
+const std::vector<float>& MillSimulation::GetOperationStarts() const
+{
+    return mOpStarts;
+}
+
+std::string MillSimulation::GetCurrentOperation() const
+{
+    if (mPathStep < 0 || mPathStep >= (int)MillPathSegments.size()) {
+        return {};
+    }
+    const int op = MillPathSegments[mPathStep]->op;
+    if (op < 0 || op >= (int)mCodeParser.OpNames.size()) {
+        return {};
+    }
+    return mCodeParser.OpNames[op];
+}
+
+void MillSimulation::SkipToNextOperation()
+{
+    // to the first move of the next operation, or the end of the program after the last
+    float next = mTotalTime;
+    int op = MillPathSegments.empty() ? -1 : MillPathSegments.front()->op;
+    for (const MillPathSegment* p : MillPathSegments) {
+        if (p->op != op) {
+            op = p->op;
+            if (p->startTime > mSimTime + 1e-4f) {
+                next = p->startTime;
+                break;
+            }
+        }
+    }
+    if (next == mSimTime) {
+        return;
+    }
+    mSimTime = next;
+    StepFromTime();
+    CalcSegmentPositions();
+    simDisplay.updateDisplay = true;
 }
 
 void MillSimulation::SetPlaying(bool b)

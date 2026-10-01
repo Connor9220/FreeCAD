@@ -104,6 +104,8 @@ void DlgCAMSimulator::connectTo(GuiDisplay& gui, Dummy3DViewer& dv)
 
     connect(&gui, &GuiDisplay::singleStep, this, [this] { mMillSimulator->SingleStep(); });
 
+    connect(&gui, &GuiDisplay::nextOperation, this, [this] { mMillSimulator->SkipToNextOperation(); });
+
     connect(&gui, &GuiDisplay::speedChanged, this, [this](int speed) {
         mMillSimulator->SetSpeed(speed);
     });
@@ -161,6 +163,8 @@ void DlgCAMSimulator::updateGui()
     mGui->setStage(stage, state.mNTotalSteps);
     mGui->setTime(state.mSimTime, state.mTotalTime);
     mGui->setFeed(state.mCurFeed, state.mCurRapid);
+    mGui->setOperationStarts(mMillSimulator->GetOperationStarts());
+    mGui->setOperation(QString::fromStdString(mMillSimulator->GetCurrentOperation()));
 
     mGui->setStockVisible(state.mViewItems & VIEWITEM_SIMULATION);
     mGui->setBaseVisible(state.mViewItems & VIEWITEM_BASE_SHAPE);
@@ -242,6 +246,14 @@ void DlgCAMSimulator::addGcodeCommand(const char* cmd)
 {
     SimGCode gcode;
     gcode.line = cmd;
+    mGCode.push_back(gcode);
+}
+
+void DlgCAMSimulator::beginOperation(const std::string& name)
+{
+    SimGCode gcode;
+    gcode.line = name;
+    gcode.isOpStart = true;
     mGCode.push_back(gcode);
 }
 
@@ -457,6 +469,9 @@ void DlgCAMSimulator::updateResources()
         const SimGCode& cmd = mGCode[i];
         if (cmd.isFrame) {
             mMillSimulator->SetFrame(cmd.frame);
+        }
+        else if (cmd.isOpStart) {
+            mMillSimulator->BeginOperation(cmd.line);
         }
         else {
             mMillSimulator->AddGcodeLine(cmd.line.c_str());

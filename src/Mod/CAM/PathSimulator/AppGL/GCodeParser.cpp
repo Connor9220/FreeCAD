@@ -45,6 +45,7 @@ GCodeParser::~GCodeParser()
 void GCodeParser::Clear()
 {
     Operations.clear();
+    OpNames.clear();
     Frames.assign(1, MillFrame {});
     mat4x4_identity(Frames[0].mat);
     quat_identity(Frames[0].rot);
@@ -81,6 +82,13 @@ void GCodeParser::SetFrame(const MillFrame& frame)
     // the tool does not jump when the frame changes: words the next line leaves out keep their
     // place in the world
     MotionToFrame(lastState, Frames, index);
+}
+
+void GCodeParser::BeginOperation(const std::string& name)
+{
+    // the motions after this belong to the operation
+    OpNames.push_back(name);
+    lastState.op = (int)OpNames.size() - 1;
 }
 
 bool GCodeParser::Parse(const char* filename)
@@ -206,6 +214,7 @@ bool GCodeParser::ParseLine(const char* ptr)
 
     newState.tool = lastState.tool;
     newState.frame = lastState.frame;
+    newState.op = lastState.op;
 
     newState.retract_mode = lastState.retract_mode;
     newState.retract_z = lastState.retract_z;

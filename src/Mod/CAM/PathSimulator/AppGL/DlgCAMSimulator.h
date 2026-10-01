@@ -86,8 +86,9 @@ public:
 struct SimGCode
 {
 public:
-    std::string line;
+    std::string line;  // the G-code, or the name of the operation that starts here
     bool isFrame = false;
+    bool isOpStart = false;
     MillFrame frame;
 };
 
@@ -120,6 +121,7 @@ public:
     void resetSimulation();
 
     void addGcodeCommand(const char* cmd);
+    void beginOperation(const std::string& name);
     void setFrame(const Base::Placement& placement, const Base::Rotation& pose, float indexRate);
     void addTool(
         const std::vector<float>& toolProfilePoints,
