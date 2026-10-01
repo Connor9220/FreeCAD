@@ -28,6 +28,7 @@
 #include "GCodeParser.h"
 
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <string>
 
@@ -44,8 +45,40 @@ GCodeParser::~GCodeParser()
 void GCodeParser::Clear()
 {
     Operations.clear();
+    Frames.assign(1, MillFrame {});
+    mat4x4_identity(Frames[0].mat);
+    quat_identity(Frames[0].rot);
+    quat_identity(Frames[0].pose);
     lastState = {};
     lastTool = -1;
+}
+
+void GCodeParser::SetFrame(const MillFrame& frame)
+{
+    // reuse an equal frame, so operations sharing a frame stay in one
+    int index = -1;
+    for (int i = 0; i < (int)Frames.size() && index < 0; i++) {
+        bool same = true;
+        for (int c = 0; c < 4 && same; c++) {
+            for (int r = 0; r < 4 && same; r++) {
+                same = std::fabs(Frames[i].mat[c][r] - frame.mat[c][r]) < 1e-5f;
+            }
+        }
+        for (int q = 0; q < 4 && same; q++) {
+            same = std::fabs(Frames[i].pose[q] - frame.pose[q]) < 1e-5f;
+        }
+        if (same) {
+            index = i;
+        }
+    }
+    if (index < 0) {
+        Frames.push_back(frame);
+        index = (int)Frames.size() - 1;
+    }
+
+    // the tool does not jump when the frame changes: words the next line leaves out keep their
+    // place in the world
+    MotionToFrame(lastState, Frames, index);
 }
 
 bool GCodeParser::Parse(const char* filename)
@@ -169,6 +202,7 @@ bool GCodeParser::ParseLine(const char* ptr)
     newState.z = lastState.z;
 
     newState.tool = lastState.tool;
+    newState.frame = lastState.frame;
 
     newState.retract_mode = lastState.retract_mode;
     newState.retract_z = lastState.retract_z;

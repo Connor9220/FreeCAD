@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from Base.BaseClass import BaseClass
+from Base.Placement import Placement
+from Base.Rotation import Rotation
 from Base.Metadata import export, no_args
 
 from Gui import Document
@@ -57,5 +59,14 @@ class CAMSim(BaseClass):
     def AddCommand(self, command: Command, /) -> Any:
         """
         Add a path command to the simulation.
+        """
+        ...
+
+    def SetFrame(self, placement: Placement, pose: Rotation = ..., /) -> None:
+        """
+        Set the work plane frame the commands added after it are given in: the tool stands along
+        the frame's Z and the placement moves the cuts into the world. The optional pose is the
+        rotation the machine's rotary table gives the part while it cuts in the frame; the
+        simulation turns the part by it.
         """
         ...

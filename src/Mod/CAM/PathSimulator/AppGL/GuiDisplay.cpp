@@ -52,6 +52,7 @@ GuiDisplay::GuiDisplay(QWidget* parent)
     connect(ui->rotateButton, &QToolButton::toggled, this, &GuiDisplay::rotateEnableChanged);
     connect(ui->pathButton, &QToolButton::toggled, this, &GuiDisplay::pathVisibleChanged);
     connect(ui->ssaoButton, &QToolButton::toggled, this, &GuiDisplay::ssaoEnableChanged);
+    connect(ui->tablePoseButton, &QToolButton::toggled, this, &GuiDisplay::tablePoseEnableChanged);
 }
 
 GuiDisplay::~GuiDisplay()
@@ -210,6 +211,12 @@ void GuiDisplay::setSsaoEnabled(bool b)
 {
     QSignalBlocker blocker(ui->ssaoButton);
     ui->ssaoButton->setChecked(b);
+}
+
+void GuiDisplay::setTablePoseEnabled(bool b)
+{
+    QSignalBlocker blocker(ui->tablePoseButton);
+    ui->tablePoseButton->setChecked(b);
 }
 
 }  // namespace CAMSimulator

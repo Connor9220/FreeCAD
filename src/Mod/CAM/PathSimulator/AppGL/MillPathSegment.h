@@ -49,23 +49,36 @@ public:
     /// <param name="endmill">Mill object</param>
     /// <param name="from">Start point</param>
     /// <param name="to">End point</param>
-    MillPathSegment(const EndMill& endmill, const MillMotion& from, const MillMotion& to);
+    /// <param name="frame">Frame both points are given in, placing the segment in the world</param>
+    MillPathSegment(
+        const EndMill& endmill,
+        const MillMotion& from,
+        const MillMotion& to,
+        const mat4x4 frame
+    );
     virtual ~MillPathSegment();
 
     virtual void AppendPathPoints(std::vector<MillPathPosition>& pointsBuffer);
     virtual void render(int substep);
     virtual void GetHeadPosition(vec3 headPos);
+    void GetToolRotation(mat4x4 rot) const;
+    void SetMinSimSteps(int steps);
     static float SetQuality(float quality, float maxStockDimension);  // 1 minimum, 10 maximum
 
 public:
     const EndMill* endmill = nullptr;
     bool isMultyPart;
+    bool isCutting = true;  // false for a move that changes the tool axis between frames
+    int frameFrom = 0;      // frame of the motion the segment starts from
+    int frameTo = 0;        // frame the segment is given and drawn in
     int numSimSteps;
     int indexInArray = -1;
     int segmentIndex = -1;
 
 protected:
     mat4x4 mShearMat;
+    mat4x4 mFrame;
+    mat4x4 mFrameRot;
     Shape mShape;
     float mXYDistance;
     float mXYZDistance;

@@ -181,6 +181,26 @@
        </property>
       </widget>
      </item>
+     <item>
+      <widget class="QToolButton" name="tablePoseButton">
+       <property name="toolTip">
+        <string>Turn the part with the machine's rotary table, keeping the tool vertical. Off: the part stays put and the tool tilts.</string>
+       </property>
+       <property name="icon">
+        <iconset resource="../../Gui/Resources/Path.qrc">
+         <normaloff>:/gl_simulator/TablePose.png</normaloff>:/gl_simulator/TablePose.png</iconset>
+       </property>
+       <property name="checkable">
+        <bool>true</bool>
+       </property>
+       <property name="checked">
+        <bool>true</bool>
+       </property>
+       <property name="autoRaise">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
     </layout>
    </item>
   </layout>

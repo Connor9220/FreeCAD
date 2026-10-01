@@ -71,4 +71,9 @@ void CAMSim::AddCommand(Command* cmd)
     DlgCAMSimulator::instance()->addGcodeCommand(gline.c_str());
 }
 
+void CAMSim::SetFrame(const Base::Placement& placement, const Base::Rotation& pose)
+{
+    DlgCAMSimulator::instance()->setFrame(placement, pose);
+}
+
 }  // namespace CAMSimulator

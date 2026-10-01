@@ -29,6 +29,9 @@
 #include "GuiDisplay.h"
 #include "MillSimulation.h"
 #include "ViewCAMSimulator.h"
+#include <Base/Matrix.h>
+#include <Base/Placement.h>
+#include <Base/Rotation.h>
 #include <Gui/View3DInventorViewer.h>
 #include <Inventor/nodes/SoCamera.h>
 #include <QSurfaceFormat>
@@ -119,6 +122,10 @@ void DlgCAMSimulator::connectTo(GuiDisplay& gui, Dummy3DViewer& dv)
         mMillSimulator->EnableSsao(b);
     });
 
+    connect(&gui, &GuiDisplay::tablePoseEnableChanged, this, [this](bool b) {
+        mMillSimulator->EnableTablePose(b);
+    });
+
     connect(&gui, &GuiDisplay::stockVisibleChanged, this, &DlgCAMSimulator::setStockVisible);
     connect(&gui, &GuiDisplay::baseVisibleChanged, this, &DlgCAMSimulator::setBaseVisible);
 
@@ -158,6 +165,7 @@ void DlgCAMSimulator::updateGui()
 
     mGui->setPathVisible(state.mViewPath);
     mGui->setSsaoEnabled(state.mViewSSAO);
+    mGui->setTablePoseEnabled(state.mViewTablePose);
 
     if (mDummyViewer && !mDummyViewer->isAnimating()) {
         mGui->setRotateEnabled(false);
@@ -230,7 +238,33 @@ void DlgCAMSimulator::resetSimulation()
 
 void DlgCAMSimulator::addGcodeCommand(const char* cmd)
 {
-    mGCode.push_back(cmd);
+    SimGCode gcode;
+    gcode.line = cmd;
+    mGCode.push_back(gcode);
+}
+
+void DlgCAMSimulator::setFrame(const Base::Placement& placement, const Base::Rotation& pose)
+{
+    // Matrix4D is row-major, linmath column-major
+    const Base::Matrix4D mat = placement.toMatrix();
+    SimGCode gcode;
+    gcode.isFrame = true;
+    for (int c = 0; c < 4; c++) {
+        for (int r = 0; r < 4; r++) {
+            gcode.frame.mat[c][r] = (float)mat[r][c];
+        }
+    }
+    // Base::Rotation's quaternion is x, y, z, w, as linmath's
+    double q[4];
+    placement.getRotation().getValue(q[0], q[1], q[2], q[3]);
+    for (int i = 0; i < 4; i++) {
+        gcode.frame.rot[i] = (float)q[i];
+    }
+    pose.getValue(q[0], q[1], q[2], q[3]);
+    for (int i = 0; i < 4; i++) {
+        gcode.frame.pose[i] = (float)q[i];
+    }
+    mGCode.push_back(gcode);
 }
 
 void DlgCAMSimulator::addTool(
@@ -417,8 +451,13 @@ void DlgCAMSimulator::updateResources()
     // update gcode
 
     for (int i = mLastGCode; i < (int)mGCode.size(); i++) {
-        const std::string& cmd = mGCode[i];
-        mMillSimulator->AddGcodeLine(cmd.c_str());
+        const SimGCode& cmd = mGCode[i];
+        if (cmd.isFrame) {
+            mMillSimulator->SetFrame(cmd.frame);
+        }
+        else {
+            mMillSimulator->AddGcodeLine(cmd.line.c_str());
+        }
     }
 
     mLastGCode = mGCode.size();

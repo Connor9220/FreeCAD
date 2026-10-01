@@ -27,6 +27,7 @@
 #include "GlUtils.h"
 #include <algorithm>
 #include <iostream>
+#include <numbers>
 
 // include this last as the defines can mess up other includes
 #include "OpenGlWrapper.h"
@@ -97,10 +98,14 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
     MillMotion prevMotion = !mCodeParser.Operations.empty() ? mCodeParser.Operations.front()
                                                             : MillMotion();
 
+    const std::vector<MillFrame>& frames = mCodeParser.Frames;
+
+    vec3 startPos;
+    FramePosToWorld(startPos, frames[prevMotion.frame].mat, prevMotion.x, prevMotion.y, prevMotion.z);
     MillPathPosition mpPos;
-    mpPos.X = prevMotion.x;
-    mpPos.Y = prevMotion.y;
-    mpPos.Z = prevMotion.z;
+    mpPos.X = startPos[0];
+    mpPos.Y = startPos[1];
+    mpPos.Z = startPos[2];
     mpPos.SegmentId = segId++;
     millPathLine.MillPathPointsBuffer.push_back(mpPos);
 
@@ -108,7 +113,24 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
         const MillMotion curMotion = mCodeParser.Operations[i];
         const EndMill* tool = GetTool(curMotion.tool);
         if (tool != nullptr) {
-            auto segment = new MillPathSegment(*tool, prevMotion, curMotion);
+            // a move into another work plane frame starts where the last one ended, in the
+            // world, and is drawn in the new frame. If it changes the tool axis the machine
+            // indexes its rotary axes, which a straight sweep does not show: it cuts nothing.
+            MillMotion fromMotion = prevMotion;
+            bool isCutting = true;
+            if (fromMotion.frame != curMotion.frame) {
+                isCutting
+                    = FramesShareToolAxis(frames[fromMotion.frame].mat, frames[curMotion.frame].mat);
+                MotionToFrame(fromMotion, frames, curMotion.frame);
+            }
+            auto segment
+                = new MillPathSegment(*tool, fromMotion, curMotion, frames[curMotion.frame].mat);
+            segment->isCutting = isCutting;
+            segment->frameFrom = prevMotion.frame;
+            segment->frameTo = curMotion.frame;
+            // give the table time to turn: a step for every 1.5 degrees
+            const float turn = QuatAngle(frames[prevMotion.frame].pose, frames[curMotion.frame].pose);
+            segment->SetMinSimSteps((int)(turn * 180.f / std::numbers::pi_v<float> / 1.5f));
             segment->indexInArray = i;
             segment->segmentIndex = segId++;
             mNTotalSteps += segment->numSimSteps;
@@ -237,6 +259,9 @@ void MillSimulation::GlsimEnd(void)
 void MillSimulation::renderSegmentForward(int iSeg)
 {
     MillPathSegment* p = MillPathSegments.at(iSeg);
+    if (!p->isCutting) {
+        return;
+    }
     int step = iSeg == mPathStep ? mSubStep : p->numSimSteps;
     int start = p->isMultyPart ? 1 : step;
     for (int i = start; i <= step; i++) {
@@ -250,6 +275,9 @@ void MillSimulation::renderSegmentForward(int iSeg)
 void MillSimulation::renderSegmentReversed(int iSeg)
 {
     MillPathSegment* p = MillPathSegments.at(iSeg);
+    if (!p->isCutting) {
+        return;
+    }
     int step = iSeg == mPathStep ? mSubStep : p->numSimSteps;
     int end = p->isMultyPart ? 1 : step;
     for (int i = step; i >= end; i--) {
@@ -277,6 +305,51 @@ void MillSimulation::CalcSegmentPositions()
     else {
         mSubStep++;
     }
+}
+
+void MillSimulation::GetFramePose(quat pose, const MillFrame& frame) const
+{
+    // with the table pose off the part stays put and the tool tilts instead
+    if (mViewTablePose) {
+        vec4_dup(pose, frame.pose);
+    }
+    else {
+        quat_identity(pose);
+    }
+}
+
+void MillSimulation::GetScenePose(quat pose)
+{
+    quat_identity(pose);
+    if (MillPathSegments.empty()) {
+        return;
+    }
+    const std::vector<MillFrame>& frames = mCodeParser.Frames;
+    if (mPathStep < 0) {
+        GetFramePose(pose, frames[MillPathSegments[0]->frameFrom]);
+        return;
+    }
+    // the table turns over a move between frames, and holds its pose otherwise
+    const MillPathSegment* p = MillPathSegments.at(mPathStep);
+    const float t = std::clamp((float)mSubStep / (float)p->numSimSteps, 0.f, 1.f);
+    quat from, to;
+    GetFramePose(from, frames[p->frameFrom]);
+    GetFramePose(to, frames[p->frameTo]);
+    QuatSlerp(pose, from, to, t);
+}
+
+void MillSimulation::UpdateScene()
+{
+    // the scene turns with the table, about the middle of the stock so it stays in view
+    quat pose;
+    GetScenePose(pose);
+    const vec3& c = mStockObject.center;
+    mat4x4 scene, rot;
+    mat4x4_from_quat(rot, pose);
+    mat4x4_translate(scene, c[0], c[1], c[2]);
+    mat4x4_mul(scene, scene, rot);
+    mat4x4_translate_in_place(scene, -c[0], -c[1], -c[2]);
+    simDisplay.SetSceneMatrix(scene);
 }
 
 void MillSimulation::RenderSimulation()
@@ -321,6 +394,9 @@ void MillSimulation::RenderSimulation()
     GlsimRenderTools();
     for (int i = 0; i <= mPathStep; i++) {
         MillPathSegment* p = MillPathSegments.at(i);
+        if (!p->isCutting) {
+            continue;
+        }
         int step = (i == mPathStep) ? mSubStep : p->numSimSteps;
         int start = p->isMultyPart ? 1 : step;
         for (int j = start; j <= step; j++) {
@@ -340,11 +416,31 @@ void MillSimulation::RenderTool()
     MillPathSegment* p = MillPathSegments.at(mPathStep);
     vec3 toolPos;
     p->GetHeadPosition(toolPos);
-    mat4x4 tmat;
+    mat4x4 tmat, rmat;
+    p->GetToolRotation(rmat);
+    if (p->frameFrom != p->frameTo && !p->isCutting) {
+        // While the table turns, the tool turns from its orientation in the old frame to the
+        // one in the new, as seen on the machine; the scene's pose takes back the table's part.
+        const std::vector<MillFrame>& frames = mCodeParser.Frames;
+        const MillFrame& from = frames[p->frameFrom];
+        const MillFrame& to = frames[p->frameTo];
+        quat poseFrom, poseTo, seenFrom, seenTo, seen, pose, unposed;
+        GetFramePose(poseFrom, from);
+        GetFramePose(poseTo, to);
+        quat_mul(seenFrom, poseFrom, from.rot);
+        quat_mul(seenTo, poseTo, to.rot);
+        const float t = std::clamp((float)mSubStep / (float)p->numSimSteps, 0.f, 1.f);
+        QuatSlerp(seen, seenFrom, seenTo, t);
+        GetScenePose(pose);
+        quat_conj(pose, pose);
+        quat_mul(unposed, pose, seen);
+        mat4x4_from_quat(rmat, unposed);
+    }
     mat4x4_translate(tmat, toolPos[0], toolPos[1], toolPos[2]);
+    mat4x4_mul(tmat, tmat, rmat);
     // mat4x4_translate(tmat, toolPos.x, toolPos.y, toolPos.z);
     simDisplay.StartGeometryPass(toolColor, false);
-    p->endmill->toolShape.Render(tmat, identityMat);
+    p->endmill->toolShape.Render(tmat, rmat);
 }
 
 void MillSimulation::RenderPath()
@@ -385,6 +481,7 @@ void MillSimulation::Render()
     // render the simulation offscreen in an FBO
 
     if (simDisplay.updateDisplay) {
+        UpdateScene();
         simDisplay.PrepareFrameBuffer();
         RenderSimulation();
         RenderTool();
@@ -560,6 +657,16 @@ void MillSimulation::EnableSsao(bool b)
     simDisplay.updateDisplay = true;
 }
 
+void MillSimulation::EnableTablePose(bool b)
+{
+    if (b == mViewTablePose) {
+        return;
+    }
+
+    mViewTablePose = b;
+    simDisplay.updateDisplay = true;
+}
+
 void MillSimulation::UpdateCamera(const SoCamera& camera)
 {
     simDisplay.UpdateCamera(camera);
@@ -577,6 +684,11 @@ bool MillSimulation::LoadGCodeFile(const char* fileName)
 bool MillSimulation::AddGcodeLine(const char* line)
 {
     return mCodeParser.AddLine(line);
+}
+
+void MillSimulation::SetFrame(const MillFrame& frame)
+{
+    mCodeParser.SetFrame(frame);
 }
 
 void MillSimulation::SetPlaying(bool b)

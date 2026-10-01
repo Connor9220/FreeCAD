@@ -318,7 +318,7 @@ void SimDisplay::StartDepthPass()
     glDepthFunc(GL_LESS);
     glDepthMask(GL_TRUE);
     shaderFlat.Activate();
-    shaderFlat.UpdateViewMat(mMatLookAt);
+    shaderFlat.UpdateViewMat(mMatView);
 }
 
 void SimDisplay::StartGeometryPass(const vec3& objColor, bool invertNormals)
@@ -326,7 +326,7 @@ void SimDisplay::StartGeometryPass(const vec3& objColor, bool invertNormals)
     glBindFramebuffer(GL_FRAMEBUFFER, mFbo);
     shaderGeom.Activate();
     shaderGeom.UpdateNormalState(invertNormals);
-    shaderGeom.UpdateViewMat(mMatLookAt);
+    shaderGeom.UpdateViewMat(mMatView);
     shaderGeom.UpdateObjColor(objColor);
     glEnable(GL_CULL_FACE);
     glDisable(GL_BLEND);
@@ -339,7 +339,7 @@ void SimDisplay::StartCloserGeometryPass(const vec3& objColor)
     glBindFramebuffer(GL_FRAMEBUFFER, mFbo);
     shaderGeomCloser.Activate();
     shaderGeomCloser.UpdateNormalState(false);
-    shaderGeomCloser.UpdateViewMat(mMatLookAt);
+    shaderGeomCloser.UpdateViewMat(mMatView);
     shaderGeomCloser.UpdateObjColor(objColor);
     glEnable(GL_CULL_FACE);
     glDisable(GL_BLEND);
@@ -481,7 +481,7 @@ void SimDisplay::SetupLinePathPass(int curSegment, bool isHidden)
     shaderLinePath.UpdateObjColorAlpha(pathLineColor);
     shaderLinePath.UpdateObjColor(pathLineColorPassed);
     shaderLinePath.UpdateCurSegment(curSegment);
-    shaderLinePath.UpdateViewMat(mMatLookAt);
+    shaderLinePath.UpdateViewMat(mMatView);
 }
 
 void SimDisplay::UpdateWindowScale(int width, int height)
@@ -591,8 +591,15 @@ void SimDisplay::UpdateViewMatrix()
 
     const auto target = mCameraPosition + dir;
     mat4x4_look_at(mMatLookAt, mCameraPosition.getValue(), target.getValue(), up.getValue());
+    mat4x4_mul(mMatView, mMatLookAt, mMatScene);
 
     updateDisplay = true;
+}
+
+void SimDisplay::SetSceneMatrix(const mat4x4 scene)
+{
+    mat4x4_dup(mMatScene, scene);
+    mat4x4_mul(mMatView, mMatLookAt, mMatScene);
 }
 
 void SimDisplay::UpdateProjectionMatrix()

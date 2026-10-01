@@ -52,6 +52,7 @@ struct MillSimulationState
     int mViewItems = VIEWITEM_SIMULATION;
     bool mViewPath = false;
     bool mViewSSAO = false;
+    bool mViewTablePose = true;  // the part turns with the rotary table; else the tool tilts
 
     bool mSimPlaying = false;
     bool mSingleStep = false;
@@ -80,6 +81,7 @@ public:
 
     bool LoadGCodeFile(const char* fileName);
     bool AddGcodeLine(const char* line);
+    void SetFrame(const MillFrame& frame);
 
     void SetPlaying(bool b);
     void SingleStep();
@@ -100,6 +102,7 @@ public:
 
     void SetPathVisible(bool b);
     void EnableSsao(bool b);
+    void EnableTablePose(bool b);
 
     void UpdateWindowScale(int width, int height);
     void UpdateCamera(const SoCamera& camera);
@@ -119,6 +122,9 @@ protected:
     void renderSegmentForward(int iSeg);
     void renderSegmentReversed(int iSeg);
     void CalcSegmentPositions();
+    void GetScenePose(quat pose);
+    void GetFramePose(quat pose, const MillFrame& frame) const;
+    void UpdateScene();
     EndMill* GetTool(int tool);
     void RemoveTool(int toolId);
 

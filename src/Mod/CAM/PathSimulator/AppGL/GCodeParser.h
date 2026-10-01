@@ -41,16 +41,20 @@ class GCodeParser
 {
 public:
     GCodeParser()
-    {}
+    {
+        Clear();
+    }
     virtual ~GCodeParser();
 
     void Clear();
 
     bool Parse(const char* filename);
     bool AddLine(const char* ptr);
+    void SetFrame(const MillFrame& frame);
 
 public:
     std::vector<MillMotion> Operations;
+    std::vector<MillFrame> Frames;
     MillMotion lastState;
 
 protected:

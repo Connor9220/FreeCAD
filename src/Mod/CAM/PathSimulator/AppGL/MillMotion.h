@@ -25,6 +25,8 @@
 #pragma once
 
 #include "linmath.h"
+#include <cmath>
+#include <vector>
 
 namespace CAMSimulator
 {
@@ -56,6 +58,17 @@ struct MillMotion
     float r = 0.0f;
     char retract_mode = '\0';
     float retract_z = 0;
+    int frame = 0;  // index into the parser's frame table, 0 is the world
+};
+
+// A work plane frame: an operation's path is stored in its frame, with the tool along the frame's
+// Z, and the frame places it in the world. Column-major, as linmath. The pose is the rotation the
+// machine's rotary table gives the part while it cuts in the frame. Quaternions are x, y, z, w.
+struct MillFrame
+{
+    mat4x4 mat;
+    quat rot;
+    quat pose;
 };
 
 static inline void MotionPosToVec(vec3 vec, const MillMotion& motion)
@@ -63,6 +76,84 @@ static inline void MotionPosToVec(vec3 vec, const MillMotion& motion)
     vec[0] = motion.x;
     vec[1] = motion.y;
     vec[2] = motion.z;
+}
+
+// A point given in a frame, moved into the world
+static inline void FramePosToWorld(vec3 out, const mat4x4 frame, float x, float y, float z)
+{
+    vec4 local = {x, y, z, 1.f};
+    vec4 world;
+    mat4x4_mul_vec4(world, frame, local);
+    vec3_set(out, world[0], world[1], world[2]);
+}
+
+// The rotation of a frame alone, as the normal matrix of anything rendered in it
+static inline void FrameRotation(mat4x4 rot, const mat4x4 frame)
+{
+    mat4x4_dup(rot, frame);
+    rot[3][0] = rot[3][1] = rot[3][2] = 0.f;
+}
+
+// Whether two frames share the tool axis (their Z), so a straight move between them keeps the
+// tool's orientation
+static inline bool FramesShareToolAxis(const mat4x4 a, const mat4x4 b)
+{
+    const float eps = 1e-5f;
+    return std::fabs(a[2][0] - b[2][0]) < eps && std::fabs(a[2][1] - b[2][1]) < eps
+        && std::fabs(a[2][2] - b[2][2]) < eps;
+}
+
+static inline float QuatDot(const quat a, const quat b)
+{
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+}
+
+// The angle in radians of the rotation from one orientation to another
+static inline float QuatAngle(const quat a, const quat b)
+{
+    return 2.f * std::acos(std::fmin(1.f, std::fabs(QuatDot(a, b))));
+}
+
+static inline void QuatSlerp(quat r, const quat a, const quat b, float t)
+{
+    float dot = QuatDot(a, b);
+    float sign = 1.f;
+    if (dot < 0.f) {
+        dot = -dot;
+        sign = -1.f;
+    }
+    float wa = 1.f - t;
+    float wb = t;
+    if (dot < 0.9995f) {
+        const float theta = std::acos(dot);
+        wa = std::sin(wa * theta) / std::sin(theta);
+        wb = std::sin(wb * theta) / std::sin(theta);
+    }
+    for (int i = 0; i < 4; i++) {
+        r[i] = wa * a[i] + sign * wb * b[i];
+    }
+    const float len = std::sqrt(QuatDot(r, r));
+    for (int i = 0; i < 4; i++) {
+        r[i] /= len;
+    }
+}
+
+// Express a motion's position in another frame, keeping its place in the world
+static inline void MotionToFrame(MillMotion& motion, const std::vector<MillFrame>& frames, int frame)
+{
+    if (motion.frame == frame) {
+        return;
+    }
+    vec3 world;
+    FramePosToWorld(world, frames[motion.frame].mat, motion.x, motion.y, motion.z);
+    mat4x4 inv;
+    mat4x4_invert(inv, frames[frame].mat);
+    vec3 local;
+    FramePosToWorld(local, inv, world[0], world[1], world[2]);
+    motion.x = local[0];
+    motion.y = local[1];
+    motion.z = local[2];
+    motion.frame = frame;
 }
 
 }  // namespace CAMSimulator

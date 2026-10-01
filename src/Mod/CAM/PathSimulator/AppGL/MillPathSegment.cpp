@@ -58,9 +58,16 @@ bool IsArcMotion(const MillMotion& m)
 float MillPathSegment::mResolution = 1;
 float MillPathSegment::mSmallRadStep = (pi / 8);
 
-MillPathSegment::MillPathSegment(const EndMill& _endmill, const MillMotion& from, const MillMotion& to)
+MillPathSegment::MillPathSegment(
+    const EndMill& _endmill,
+    const MillMotion& from,
+    const MillMotion& to,
+    const mat4x4 frame
+)
 {
     mat4x4_identity(mShearMat);
+    mat4x4_dup(mFrame, frame);
+    FrameRotation(mFrameRot, frame);
     MotionPosToVec(mStartPos, from);
     MotionPosToVec(mDiff, to);
     vec3_sub(mDiff, mDiff, mStartPos);
@@ -150,17 +157,33 @@ void MillPathSegment::AppendPathPoints(std::vector<MillPathPosition>& pointsBuff
         for (int i = 1; i < numSimSteps; i++) {
             ang -= mStepAngRad;
             z += zStep;
-            mpPos.X = mCenter[PX] - sinf(ang) * mRadius;
-            mpPos.Y = mCenter[PY] + cosf(ang) * mRadius;
-            mpPos.Z = z;
+            vec3 world;
+            FramePosToWorld(
+                world,
+                mFrame,
+                mCenter[PX] - sinf(ang) * mRadius,
+                mCenter[PY] + cosf(ang) * mRadius,
+                z
+            );
+            mpPos.X = world[PX];
+            mpPos.Y = world[PY];
+            mpPos.Z = world[PZ];
             mpPos.SegmentId = segmentIndex;
             pointsBuffer.push_back(mpPos);
         }
     }
     else {
-        mpPos.X = mStartPos[PX] + mDiff[PX];
-        mpPos.Y = mStartPos[PY] + mDiff[PY];
-        mpPos.Z = mStartPos[PZ] + mDiff[PZ];
+        vec3 world;
+        FramePosToWorld(
+            world,
+            mFrame,
+            mStartPos[PX] + mDiff[PX],
+            mStartPos[PY] + mDiff[PY],
+            mStartPos[PZ] + mDiff[PZ]
+        );
+        mpPos.X = world[PX];
+        mpPos.Y = world[PY];
+        mpPos.Z = world[PZ];
         mpPos.SegmentId = segmentIndex;
         pointsBuffer.push_back(mpPos);
     }
@@ -170,8 +193,8 @@ void MillPathSegment::render(int step)
 {
     mStepNumber = step;
     mat4x4 mat, mat2, rmat;
-    mat4x4_identity(mat);
-    mat4x4_identity(rmat);
+    mat4x4_dup(mat, mFrame);
+    mat4x4_dup(rmat, mFrameRot);
     if (mMotionType == MTCurved) {
         mat4x4_translate_in_place(
             mat,
@@ -234,7 +257,22 @@ void MillPathSegment::GetHeadPosition(vec3 headPos)
         vec3_scale(mHeadPos, mHeadPos, (float)mStepNumber);
         vec3_add(mHeadPos, mHeadPos, mStartPos);
     }
-    vec3_dup(headPos, mHeadPos);
+    FramePosToWorld(headPos, mFrame, mHeadPos[PX], mHeadPos[PY], mHeadPos[PZ]);
+}
+
+void MillPathSegment::GetToolRotation(mat4x4 rot) const
+{
+    mat4x4_dup(rot, mFrameRot);
+}
+
+void MillPathSegment::SetMinSimSteps(int steps)
+{
+    if (mMotionType == MTCurved || numSimSteps >= steps) {
+        return;
+    }
+    numSimSteps = steps;
+    mStepDistance = mXYDistance / numSimSteps;
+    vec3_scale(mStepLength, mDiff, 1.f / (float)numSimSteps);
 }
 
 float MillPathSegment::SetQuality(float quality, float maxStockDimension)

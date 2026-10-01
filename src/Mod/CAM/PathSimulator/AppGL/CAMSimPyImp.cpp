@@ -24,6 +24,7 @@
 
 
 #include <Base/PlacementPy.h>
+#include <Base/RotationPy.h>
 #include <Base/PyWrapParseTupleAndKeywords.h>
 
 #include <Gui/Document.h>
@@ -167,6 +168,31 @@ PyObject* CAMSimPy::AddCommand(PyObject* args)
     CAMSim* sim = getCAMSimPtr();
     Path::Command* cmd = static_cast<Path::CommandPy*>(pObjCmd)->getCommandPtr();
     sim->AddCommand(cmd);
+
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+PyObject* CAMSimPy::SetFrame(PyObject* args)
+{
+    PyObject* pObjPlacement;
+    PyObject* pObjPose = nullptr;
+    if (!PyArg_ParseTuple(
+            args,
+            "O!|O!",
+            &(Base::PlacementPy::Type),
+            &pObjPlacement,
+            &(Base::RotationPy::Type),
+            &pObjPose
+        )) {
+        return nullptr;
+    }
+    Base::Rotation pose;
+    if (pObjPose) {
+        pose = *static_cast<Base::RotationPy*>(pObjPose)->getRotationPtr();
+    }
+    CAMSim* sim = getCAMSimPtr();
+    sim->SetFrame(*static_cast<Base::PlacementPy*>(pObjPlacement)->getPlacementPtr(), pose);
 
     Py_INCREF(Py_None);
     return Py_None;

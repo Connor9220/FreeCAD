@@ -63,6 +63,7 @@ public:
     void SetupLinePathPass(int curSegment, bool isHidden);
     void UpdateWindowScale(int width, int height);
     void UpdateCamera(const SoCamera& camera);
+    void SetSceneMatrix(const mat4x4 scene);
 
     void SetPathColor(const vec3& normal, const vec3& rapid);
 
@@ -101,6 +102,11 @@ protected:
     vec3 pathLineColorPassed = {0.9f, 0.3f, 0.3f};
 
     mat4x4 mMatLookAt;
+    mat4x4 mMatScene = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
+    mat4x4 mMatView = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};  // the camera's view
+                                                                                 // of the scene, as
+                                                                                 // the scene matrix
+                                                                                 // places it
     StockObject mlightObject;
 
     int mWidth = -1;

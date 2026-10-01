@@ -78,6 +78,36 @@ class CAMSimTaskUi:
         FreeCADGui.Control.closeDialog()
 
 
+def TablePose(machine, placement, current=None):
+    """TablePose(machine, placement, current=None) ... (rotation, positions):
+    the rotation the machine's rotary table gives the part to cut on
+    placement's work plane, and the rotary positions it comes from, solved as
+    the post solves them. current is the previous operation's positions,
+    which the solver stays nearest to, as the post does. The simulator turns
+    the part by the rotation, so on a trunnion the tool stays vertical and
+    the part tilts under it. A head that tilts the tool leaves the part where
+    it is. Without a machine that reaches the plane, the part is turned the
+    shortest way that brings the tool axis vertical, and positions is None."""
+    import Path.Base.Generator.rotation as rotation
+    from Machine.models.machine import AxisRole
+
+    z = Vector(0, 0, 1)
+    axis = placement.Rotation.multVec(z)
+    rotary = machine is not None and machine.has_rotary_axes
+    if axis.isEqual(z, 1e-6):
+        if rotary:
+            chain = rotation.build_kinematic_chain(machine)
+            return Rotation(), {ax.name: 0.0 for ax in chain}
+        return Rotation(), None
+    if rotary:
+        result = rotation.solve_orientation(machine, axis, current_state=current)
+        if result.success:
+            chain = rotation.build_kinematic_chain(machine)
+            table = [ax for ax in chain if ax.role == AxisRole.TABLE_ROTARY]
+            return rotation.compute_rotation_matrix(table, result.angles), result.angles
+    return Rotation(axis, z), None
+
+
 def TSError(msg):
     """Display error message"""
     QtGui.QMessageBox.information(None, "Path Simulation", msg)
@@ -338,12 +368,23 @@ class CAMSimulation:
         """Activate the simulation"""
         self.SetupSimulation()
         self.millSim.ResetSimulation(FreeCADGui.getDocument(self.job.Document))
+        machine = self.job.Proxy.getMachine()
+        positions = None
         for op in self.activeOps:
             tool = PathDressup.toolController(op).Tool
             toolNumber = PathDressup.toolController(op).ToolNumber
             toolProfile = self.GetToolProfile(tool, 0.5)
             self.millSim.AddTool(toolProfile, toolNumber, tool.Diameter, 1)
-            opCommands = PathUtils.getPathWithPlacement(op).Commands
+            # An operation's path is stored in its work plane's frame, with the
+            # tool along the frame's Z, and its Placement positions it. The
+            # simulator takes the path and the frame as they are, so a tilted
+            # operation cuts with a tilted tool and its arcs stay arcs. The
+            # table pose turns the part the way the machine does.
+            frame = getattr(op, "Placement", Placement())
+            pose, solved = TablePose(machine, frame, positions)
+            positions = solved or positions
+            self.millSim.SetFrame(frame, pose)
+            opCommands = op.Path.Commands
             for cmd in opCommands:
                 self.millSim.AddCommand(cmd)
         self.millSim.BeginSimulation(self.stock, self.quality)

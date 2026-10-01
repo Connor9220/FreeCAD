@@ -31,6 +31,8 @@
 #include <queue>
 #include <functional>
 #include <chrono>
+#include <string>
+#include <vector>
 
 #include <QOpenGLWidget>
 #include <QPainter>
@@ -42,7 +44,15 @@
 
 #include <Mod/Part/App/TopoShape.h>
 
+#include "MillMotion.h"
+
 class SoCamera;
+
+namespace Base
+{
+class Placement;
+class Rotation;
+}  // namespace Base
 
 namespace Gui
 {
@@ -70,6 +80,15 @@ public:
     std::vector<Vertex> verts;
     std::vector<GLushort> indices;
     bool needsUpdate = false;
+};
+
+// A G-code line, or a change of the work plane frame the lines after it are given in
+struct SimGCode
+{
+public:
+    std::string line;
+    bool isFrame = false;
+    MillFrame frame;
 };
 
 struct SimTool
@@ -101,6 +120,7 @@ public:
     void resetSimulation();
 
     void addGcodeCommand(const char* cmd);
+    void setFrame(const Base::Placement& placement, const Base::Rotation& pose);
     void addTool(
         const std::vector<float>& toolProfilePoints,
         int toolNumber,
@@ -143,7 +163,7 @@ private:
     std::unique_ptr<MillSimulation> mMillSimulator;
     float mQuality = 10;
 
-    std::vector<std::string> mGCode;
+    std::vector<SimGCode> mGCode;
     std::size_t mLastGCode = 0;
 
     std::vector<SimTool> mTools;
