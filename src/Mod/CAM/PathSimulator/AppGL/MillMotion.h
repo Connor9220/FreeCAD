@@ -86,14 +86,15 @@ struct SimTimeSpan
     int axis = -1;
 };
 
-// A rotary axis of the machine's table. The simulation's list of them is in the order their
-// rotations apply to the part, the first applied first.
+// A rotary axis of the machine: the table's turn the part, the head's tilt the tool. The
+// simulation's list of them is in the order their rotations apply, the first applied first.
 struct SimRotaryAxis
 {
     std::string name;
     vec3 axis = {0, 0, 1};
-    float rate = 0;    // degrees per second
-    int sequence = 0;  // the order the axes move in; axes with one value move together
+    float rate = 0;     // degrees per second
+    int sequence = 0;   // the order the axes move in; axes with one value move together
+    bool head = false;  // tilts the tool rather than turning the part
 };
 
 static inline void MotionPosToVec(vec3 vec, const MillMotion& motion)

@@ -126,6 +126,19 @@ def TableAxes(machine):
     return table
 
 
+def HeadAxes(machine):
+    """HeadAxes(machine) ... the machine's head rotary axes, which tilt the
+    tool, in chain order: the order rotation.compute_rotation_matrix applies
+    them to the tool's axis."""
+    if machine is None or not machine.has_rotary_axes:
+        return []
+    import Path.Base.Generator.rotation as rotation
+    from Machine.models.machine import AxisRole
+
+    chain = rotation.build_kinematic_chain(machine)
+    return [ax for ax in chain if ax.role == AxisRole.HEAD_ROTARY]
+
+
 def IndexRate(machine):
     """IndexRate(machine) ... how fast, in degrees per second, the machine's
     rotaries turn into a new pose: the slowest axis sets the pace. 0 when
@@ -399,9 +412,19 @@ class CAMSimulation:
         indexRate = IndexRate(machine)
         # The table's axes, so an index turns axis by axis at each one's
         # rate and in the machine's sequence.
-        axes = TableAxes(machine)
+        # The table's axes turn the part and the head's tilt the tool.
+        table = TableAxes(machine)
+        head = HeadAxes(machine)
+        axes = table + head
         self.millSim.SetRotaryAxes(
-            [(ax.name, ax.rotation_vector, ax.max_velocity / 60.0, ax.sequence) for ax in axes]
+            [
+                (ax.name, ax.rotation_vector, ax.max_velocity / 60.0, ax.sequence, False)
+                for ax in table
+            ]
+            + [
+                (ax.name, ax.rotation_vector, ax.max_velocity / 60.0, ax.sequence, True)
+                for ax in head
+            ]
         )
         positions = None
         for op in self.activeOps:

@@ -474,16 +474,32 @@ float MillSimulation::IndexAngles(const MillPathSegment* p, float s, std::vector
     return total;
 }
 
-void MillSimulation::PoseFromAngles(quat pose, const std::vector<float>& angles) const
+void MillSimulation::AxesRotation(quat rot, const std::vector<float>& angles, bool head) const
 {
-    // the table's rotations, the first axis's applied first, as the post composes them
-    quat_identity(pose);
+    // the table's or the head's rotations, the first axis's applied first, as the post
+    // composes them
+    quat_identity(rot);
     for (size_t k = 0; k < mRotaryAxes.size() && k < angles.size(); k++) {
+        if (mRotaryAxes[k].head != head) {
+            continue;
+        }
         quat r, total;
         quat_rotate(r, angles[k] * std::numbers::pi_v<float> / 180.f, mRotaryAxes[k].axis);
-        quat_mul(total, r, pose);
-        vec4_dup(pose, total);
+        quat_mul(total, r, rot);
+        vec4_dup(rot, total);
     }
+}
+
+void MillSimulation::PoseFromAngles(quat pose, const std::vector<float>& angles) const
+{
+    // how the table turns the part
+    AxesRotation(pose, angles, false);
+}
+
+void MillSimulation::HeadFromAngles(quat tilt, const std::vector<float>& angles) const
+{
+    // how the head tilts the tool, on the machine
+    AxesRotation(tilt, angles, true);
 }
 
 void MillSimulation::SetRotaryAxes(const std::vector<SimRotaryAxis>& axes)
@@ -718,7 +734,21 @@ void MillSimulation::RenderTool()
     p->GetHeadPosition(toolPos);
     mat4x4 tmat, rmat;
     p->GetToolRotation(rmat);
-    if (p->frameFrom != p->frameTo && !p->isCutting) {
+    if (UsesAxisAngles(p)) {
+        // Axis by axis: the head tilts the tool on the machine, and the part, which the tool is
+        // drawn on, has turned with the table; the tool stands on the part as the one tilt
+        // with the other taken back.
+        std::vector<float> angles;
+        const float t = std::clamp((float)mSubStep / (float)p->numSimSteps, 0.f, 1.f);
+        IndexAngles(p, t * p->duration, &angles);
+        quat table, head, onPart;
+        PoseFromAngles(table, angles);
+        HeadFromAngles(head, angles);
+        quat_conj(table, table);
+        quat_mul(onPart, table, head);
+        mat4x4_from_quat(rmat, onPart);
+    }
+    else if (p->frameFrom != p->frameTo && !p->isCutting) {
         // While the table turns, the tool turns from its orientation in the old frame to the
         // one in the new, as seen on the machine; the scene's pose takes back the table's part.
         const std::vector<MillFrame>& frames = mCodeParser.Frames;

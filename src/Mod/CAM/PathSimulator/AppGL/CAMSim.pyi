@@ -71,10 +71,11 @@ class CAMSim(BaseClass):
 
     def SetRotaryAxes(self, axes: list, /) -> None:
         """
-        Set the rotary axes of the machine's table, as (name: str, direction: Vector, rate: float,
-        sequence: int) in the order their rotations apply to the part, the first applied first.
-        rate is in degrees per second; sequence is the order the axes move in, axes with one value
-        moving together. SetFrame's angles give each axis's position, in this order.
+        Set the rotary axes of the machine, as (name: str, direction: Vector, rate: float,
+        sequence: int, head: bool = False) in the order their rotations apply, the first applied
+        first. A table axis turns the part, a head axis tilts the tool. rate is in degrees per
+        second; sequence is the order the axes move in, axes with one value moving together.
+        SetFrame's angles give each axis's position, in this order.
         """
         ...
 

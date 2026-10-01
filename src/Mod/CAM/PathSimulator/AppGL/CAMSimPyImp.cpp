@@ -240,8 +240,10 @@ PyObject* CAMSimPy::SetRotaryAxes(PyObject* args)
     if (!PyArg_ParseTuple(args, "O", &pObjAxes)) {
         return nullptr;
     }
-    PyObject* seq
-        = PySequence_Fast(pObjAxes, "axes must be a sequence of (name, direction, rate, sequence)");
+    PyObject* seq = PySequence_Fast(
+        pObjAxes,
+        "axes must be a sequence of (name, direction, rate, sequence, head)"
+    );
     if (!seq) {
         return nullptr;
     }
@@ -249,15 +251,17 @@ PyObject* CAMSimPy::SetRotaryAxes(PyObject* args)
     for (Py_ssize_t i = 0; i < PySequence_Fast_GET_SIZE(seq); i++) {
         const char* name;
         PyObject* pObjDir;
+        int head = 0;
         SimRotaryAxis axis;
         if (!PyArg_ParseTuple(
                 PySequence_Fast_GET_ITEM(seq, i),
-                "sO!fi",
+                "sO!fi|p",
                 &name,
                 &(Base::VectorPy::Type),
                 &pObjDir,
                 &axis.rate,
-                &axis.sequence
+                &axis.sequence,
+                &head
             )) {
             Py_DECREF(seq);
             return nullptr;
@@ -265,6 +269,7 @@ PyObject* CAMSimPy::SetRotaryAxes(PyObject* args)
         const Base::Vector3d dir = *static_cast<Base::VectorPy*>(pObjDir)->getVectorPtr();
         vec3_set(axis.axis, (float)dir.x, (float)dir.y, (float)dir.z);
         axis.name = name;
+        axis.head = head != 0;
         axes.push_back(axis);
     }
     Py_DECREF(seq);

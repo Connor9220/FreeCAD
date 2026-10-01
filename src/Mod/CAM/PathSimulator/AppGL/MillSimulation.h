@@ -155,6 +155,8 @@ protected:
     float IndexAngles(const MillPathSegment* p, float s, std::vector<float>* angles) const;
     float IndexSchedule(const MillPathSegment* p, std::vector<float>& begin, std::vector<float>& span) const;
     void PoseFromAngles(quat pose, const std::vector<float>& angles) const;
+    void HeadFromAngles(quat tilt, const std::vector<float>& angles) const;
+    void AxesRotation(quat rot, const std::vector<float>& angles, bool head) const;
     float TimeOfStep(int step) const;
     void GetScenePose(quat pose);
     void GetFramePose(quat pose, const MillFrame& frame) const;
