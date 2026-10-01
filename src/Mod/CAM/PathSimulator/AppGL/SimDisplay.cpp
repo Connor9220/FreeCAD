@@ -474,7 +474,10 @@ void SimDisplay::RenderLightObject()
 void SimDisplay::ScaleViewToStock(StockObject* obj)
 {
     mMaxStockDimension = std::max(std::max(obj->size[0], obj->size[1]), obj->size[2]);
+    vec3_dup(mStockCenter, obj->center);
+    mStockRadius = 0.5f * vec3_len(obj->size);
     UpdateProjectionMatrix();
+    UpdateViewMatrix();
 }
 
 void SimDisplay::RenderResult(bool recalculate, bool ssao)
@@ -628,8 +631,9 @@ void SimDisplay::UpdateCamera(const SoCamera& camera)
         return;
     }
 
-    UpdateCameraView(camera);
+    // the projection first: the view depends on the camera's kind
     UpdateCameraProjection(camera);
+    UpdateCameraView(camera);
 }
 
 void SimDisplay::UpdateCameraView(const SoCamera& camera)
@@ -638,7 +642,8 @@ void SimDisplay::UpdateCameraView(const SoCamera& camera)
     const SbVec3f position = camera.position.getValue();
     const SbRotation orientation = camera.orientation.getValue();
 
-    if (position == mCameraPosition && orientation == mCameraOrientation) {
+    if (position == mCameraPosition && orientation == mCameraOrientation
+        && mViewPerspective == mCameraPerspective) {
         return;
     }
 
@@ -708,8 +713,19 @@ void SimDisplay::UpdateViewMatrix()
     SbVec3f dir(0, 0, -1);
     mCameraOrientation.multVec(dir, dir);
 
-    const auto target = mCameraPosition + dir;
-    mat4x4_look_at(mMatLookAt, mCameraPosition.getValue(), target.getValue(), up.getValue());
+    // An orthographic camera shows the same anywhere along its view, and turning it can leave it
+    // close to the stock or past it. The light stands by the camera, so it would come to light
+    // the faces from behind, leaving them dark until the view is fitted again. Stand the eye
+    // back from the stock's middle as fitting does; the picture is the same.
+    SbVec3f eye = mCameraPosition;
+    mViewPerspective = mCameraPerspective;
+    if (!mCameraPerspective) {
+        const SbVec3f center(mStockCenter[0], mStockCenter[1], mStockCenter[2]);
+        eye += dir * ((center - eye).dot(dir) - mStockRadius);
+    }
+
+    const auto target = eye + dir;
+    mat4x4_look_at(mMatLookAt, eye.getValue(), target.getValue(), up.getValue());
     mat4x4_mul(mMatView, mMatLookAt, mMatScene);
     mViewVersion++;
 

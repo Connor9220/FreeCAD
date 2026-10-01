@@ -625,7 +625,13 @@ const char* FragShaderSSAOLighting = R"(
         vec3 ambient = lightAmbient * diff * ao;
         vec3 s = normalize( lightPos - pos);
         float sDotN = max( dot(s,norm), 0.0 );
-        return ambient + lightColor * diff * sDotN;
+        // and a highlight, Blinn-Phong, where there is a surface
+        float spec = 0.0;
+        if (dot(norm, norm) > 0.5 && sDotN > 0.0) {
+            vec3 h = normalize(s + normalize(-pos));
+            spec = pow(max(dot(h, norm), 0.0), 48.0);
+        }
+        return ambient + lightColor * diff * sDotN + lightColor * spec * 0.35;
     }
 
     void main()

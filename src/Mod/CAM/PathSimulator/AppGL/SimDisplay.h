@@ -139,6 +139,9 @@ protected:
     float mCameraNearDistance = 1.0f;
     float mCameraFarDistance = 100.0f;
     float mMaxStockDimension = 100.0f;
+    vec3 mStockCenter = {0, 0, 0};
+    float mStockRadius = 50.0f;
+    bool mViewPerspective = true;  // the camera kind the view matrix was made for
 
     SbVec3f mCameraPosition;
     SbRotation mCameraOrientation;
