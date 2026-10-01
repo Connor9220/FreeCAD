@@ -383,6 +383,14 @@ void SimDisplay::GetDexelView(mat4x4 view, mat4x4 projection, float& pointScale,
     perspective = mCameraPerspective;
 }
 
+void SimDisplay::GetOverlayView(mat4x4 machineClip, mat4x4 partClip, mat4x4 cameraRot, mat4x4 scene) const
+{
+    mat4x4_mul(machineClip, mMatProjection, mMatLookAt);
+    mat4x4_mul(partClip, mMatProjection, mMatView);
+    mat4x4_dup(cameraRot, mMatLookAt);
+    mat4x4_dup(scene, mMatScene);
+}
+
 void SimDisplay::RestoreViewport() const
 {
     glViewport(0, 0, mWidth, mHeight);

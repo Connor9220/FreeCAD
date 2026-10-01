@@ -603,6 +603,18 @@ void MillSimulation::ComputeTimes()
     mOpStarts.clear();
     mIndexSpans.clear();
     mMarks.clear();
+    mOpTurns.clear();
+    for (const MillPathSegment* p : MillPathSegments) {
+        // the operations that turn the rotaries as they cut
+        if (p->op >= 0) {
+            if ((int)mOpTurns.size() <= p->op) {
+                mOpTurns.resize(p->op + 1, 0);
+            }
+            if (p->continuous && p->isCutting) {
+                mOpTurns[p->op] = 1;
+            }
+        }
+    }
     const float total = mTotalTime > 0 ? mTotalTime : 1.f;
     int op = -1;
     for (const MillPathSegment* p : MillPathSegments) {
@@ -1050,6 +1062,7 @@ void MillSimulation::RenderSweeps(int first, bool fromScratch)
 
 void MillSimulation::RenderTool()
 {
+    mToolShown = false;
     if (mPathStep < 0) {
         return;
     }
@@ -1111,6 +1124,9 @@ void MillSimulation::RenderTool()
     }
     mat4x4_translate(tmat, toolPos[0], toolPos[1], toolPos[2]);
     mat4x4_mul(tmat, tmat, rmat);
+    vec3_dup(mToolPos, toolPos);
+    mat4x4_dup(mToolRot, rmat);
+    mToolShown = true;
     // mat4x4_translate(tmat, toolPos.x, toolPos.y, toolPos.z);
     simDisplay.StartGeometryPass(toolColor, false);
     p->endmill->toolShape.Render(tmat, rmat);
@@ -1188,6 +1204,7 @@ void MillSimulation::Render()
     else {
         simDisplay.RenderResult(false, mViewSSAO);
     }
+    RenderAxes();
 
     /*   if (mDebug > 0) {
            mat4x4 test;
@@ -1496,6 +1513,161 @@ void MillSimulation::RenderDexel()
     }
 }
 
+void MillSimulation::EnableAxes(bool b)
+{
+    mViewAxes = b;
+}
+
+void MillSimulation::SetAxisColors(unsigned long x, unsigned long y, unsigned long z, unsigned long origin)
+{
+    mAxisOverlay.SetColors(x, y, z, origin);
+}
+
+void MillSimulation::SetPixelRatio(float ratio)
+{
+    mPixelRatio = ratio;
+}
+
+bool MillSimulation::CurrentAngles(std::vector<float>& angles) const
+{
+    // where the rotaries are at the current step
+    if (mRotaryAxes.empty() || MillPathSegments.empty()) {
+        return false;
+    }
+    const int step = std::clamp(mPathStep, 0, (int)MillPathSegments.size() - 1);
+    const MillPathSegment* p = MillPathSegments[step];
+    const size_t n = mRotaryAxes.size();
+    const float t = mPathStep < 0 ? 0.f : std::clamp((float)mSubStep / (float)p->numSimSteps, 0.f, 1.f);
+    if (UsesAxisAngles(p)) {
+        IndexAngles(p, t * p->duration, &angles);
+        return angles.size() == n;
+    }
+    if (p->angFrom.size() == n && p->angTo.size() == n) {
+        angles.resize(n);
+        for (size_t k = 0; k < n; k++) {
+            angles[k] = p->angFrom[k] + (p->angTo[k] - p->angFrom[k]) * t;
+        }
+        return true;
+    }
+    angles = mCodeParser.Frames[p->frameTo].angles;
+    return angles.size() == n;
+}
+
+void MillSimulation::RenderAxes()
+{
+    // The axis indicators over the result: the machine's axes in a corner always, and when
+    // shown the work coordinates at the program's origin, the current operation's work plane
+    // when it has one of its own, and the rotary axes with the way each turns.
+    mat4x4 machineClip, partClip, cameraRot, scene;
+    simDisplay.GetOverlayView(machineClip, partClip, cameraRot, scene);
+    mAxisOverlay.Begin(simDisplay.Width(), simDisplay.Height(), mPixelRatio);
+    mAxisOverlay.CornerTriad(cameraRot);
+
+    if (mViewAxes && simulationInitiated) {
+        const vec3& size = mStockObject.size;
+        const float maxDim = std::max({size[0], size[1], size[2], 1.f});
+        // An operation that turns the rotaries as it cuts, a 4th-axis surface say, spins the part
+        // and the work coordinates' arrows with it, whatever the machine: only their origin is
+        // shown for it, where zero lies on the rotary axis. Other operations, indexing ones on
+        // the same machine and job included, show the arrows.
+        const MillPathSegment* current = nullptr;
+        if (!MillPathSegments.empty()) {
+            current = MillPathSegments[std::clamp(mPathStep, 0, (int)MillPathSegments.size() - 1)];
+        }
+        const bool turning = current && current->op >= 0 && current->op < (int)mOpTurns.size()
+            && mOpTurns[current->op];
+        const vec3 zero = {0, 0, 0};
+        const vec3 unit[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+        if (turning) {
+            mAxisOverlay.Origin(partClip, zero);
+        }
+        else {
+            mAxisOverlay.Triad(partClip, zero, unit, 0.15f * maxDim, false);
+        }
+
+        if (current) {
+            const MillPathSegment* p = current;
+            if (!p->continuous) {
+                const mat4x4& f = mCodeParser.Frames[p->frameTo].mat;
+                bool identity = true;
+                for (int c = 0; c < 4; c++) {
+                    for (int r = 0; r < 4; r++) {
+                        identity = identity && std::fabs(f[c][r] - (c == r ? 1.f : 0.f)) < 1e-6f;
+                    }
+                }
+                if (!identity) {
+                    const vec3 origin = {f[3][0], f[3][1], f[3][2]};
+                    const vec3 axes[3] = {
+                        {f[0][0], f[0][1], f[0][2]},
+                        {f[1][0], f[1][1], f[1][2]},
+                        {f[2][0], f[2][1], f[2][2]},
+                    };
+                    mAxisOverlay.Triad(partClip, origin, axes, 0.12f * maxDim, true);
+                }
+            }
+        }
+
+        // each rotary axis as it lies now, turned by the axes after it in its chain
+        std::vector<float> angles(mRotaryAxes.size(), 0.f);
+        if (mViewTablePose) {
+            std::vector<float> now;
+            if (CurrentAngles(now)) {
+                angles = now;
+            }
+        }
+        const vec3& center = mStockObject.center;
+        for (size_t k = 0; k < mRotaryAxes.size(); k++) {
+            const SimRotaryAxis& axis = mRotaryAxes[k];
+            quat rot;
+            quat_identity(rot);
+            for (size_t j = k + 1; j < mRotaryAxes.size(); j++) {
+                if (mRotaryAxes[j].head != axis.head) {
+                    continue;
+                }
+                quat r, total;
+                quat_rotate(r, angles[j] * std::numbers::pi_v<float> / 180.f, mRotaryAxes[j].axis);
+                quat_mul(total, r, rot);
+                vec4_dup(rot, total);
+            }
+            vec3 dir;
+            quat_mul_vec3(dir, rot, axis.axis);
+            // in the colour of the linear axis it turns about
+            int color = 0;
+            for (int c = 1; c < 3; c++) {
+                if (std::fabs(axis.axis[c]) > std::fabs(axis.axis[color])) {
+                    color = c;
+                }
+            }
+            const char name = axis.name.empty() ? '?' : (char)std::toupper(axis.name[0]);
+            const float radius = 0.06f * maxDim;
+            if (!axis.head) {
+                // through the middle of the stock, which the table turns about, and past its ends
+                const float half = 0.5f
+                        * (std::fabs(dir[0]) * size[0] + std::fabs(dir[1]) * size[1]
+                           + std::fabs(dir[2]) * size[2])
+                    + 0.12f * maxDim;
+                mAxisOverlay.Rotary(machineClip, center, dir, half, radius, color, name, true);
+            }
+            else if (mToolShown) {
+                // round the tool, a way up from its tip; the part's space, which the tool is in
+                vec3 toolAxis = {mToolRot[2][0], mToolRot[2][1], mToolRot[2][2]};
+                vec3 at;
+                for (int c = 0; c < 3; c++) {
+                    at[c] = mToolPos[c] + toolAxis[c] * 0.25f * maxDim;
+                }
+                // the head's axis is the machine's: taken back by the table's pose
+                vec3 onPart;
+                for (int r = 0; r < 3; r++) {
+                    onPart[r] = scene[r][0] * dir[0] + scene[r][1] * dir[1] + scene[r][2] * dir[2];
+                }
+                // a short stretch of its axis through the tool, so the way it lies reads
+                mAxisOverlay.Rotary(partClip, at, onPart, 1.6f * radius, radius, color, name, true);
+            }
+        }
+    }
+    mAxisOverlay.Draw();
+}
+
 void MillSimulation::EnableIncremental(bool b)
 {
     if (b == mIncremental) {
@@ -1655,6 +1827,7 @@ void MillSimulation::SetState(const MillSimulationState& state)
     mViewSSAO = state.mViewSSAO;
     mViewTablePose = state.mViewTablePose;
     EnableDexel(state.mDexelEngine);
+    EnableAxes(state.mViewAxes);
     EnableIncremental(state.mIncremental);
     SetIndexMode(state.mIndexMode);
 }

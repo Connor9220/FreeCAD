@@ -64,6 +64,7 @@ public:
     void setIndexMode(int mode);
     void setIncrementalEnabled(bool b);
     void setDexelEnabled(bool b);
+    void setAxesEnabled(bool b);
     void setFps(float fps);
 
 Q_SIGNALS:
@@ -84,6 +85,7 @@ Q_SIGNALS:
     void indexModeChanged(int mode);
     void incrementalEnableChanged(bool b);
     void dexelEnableChanged(bool b);
+    void axesEnableChanged(bool b);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;

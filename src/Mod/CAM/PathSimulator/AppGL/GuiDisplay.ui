@@ -326,6 +326,26 @@
        </property>
       </widget>
      </item>
+     <item>
+      <widget class="QToolButton" name="axesButton">
+       <property name="toolTip">
+        <string>Show the work coordinates at the program's origin, the current operation's work plane when it has one of its own, and the rotary axes with the way each turns. The machine's axes stay in the corner.</string>
+       </property>
+       <property name="icon">
+        <iconset resource="../../Gui/Resources/Path.qrc">
+         <normaloff>:/gl_simulator/Axes.png</normaloff>:/gl_simulator/Axes.png</iconset>
+       </property>
+       <property name="checkable">
+        <bool>true</bool>
+       </property>
+       <property name="checked">
+        <bool>true</bool>
+       </property>
+       <property name="autoRaise">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
     </layout>
    </item>
   </layout>

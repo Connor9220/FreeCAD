@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include "AxisOverlay.h"
 #include "DexelStock.h"
 #include "GCodeParser.h"
 #include "MillPathLine.h"
@@ -70,6 +71,7 @@ struct MillSimulationState
     int mIndexMode = 0;          // how an index turns the table: an IndexMode
     bool mIncremental = false;   // keep the cut stock between frames and draw only new moves
     bool mDexelEngine = false;   // the stock as dexels, cut once, rather than CSG every frame
+    bool mViewAxes = true;       // the work coordinates, work plane and rotary axes over the view
 
     bool mSimPlaying = false;
     bool mSingleStep = false;
@@ -129,6 +131,11 @@ public:
     void EnableSsao(bool b);
     void EnableIncremental(bool b);
     void EnableDexel(bool b);
+    void EnableAxes(bool b);
+    // FreeCAD's axis colours and the origin's, 0xRRGGBBAA
+    void SetAxisColors(unsigned long x, unsigned long y, unsigned long z, unsigned long origin);
+    // pixels a screen point, for the indicators' sizes
+    void SetPixelRatio(float ratio);
     void EnableTablePose(bool b);
     void SetIndexMode(int mode);
     void SetRotaryAxes(const std::vector<SimRotaryAxis>& axes);
@@ -152,6 +159,8 @@ protected:
     bool PrepareDexel();
     bool CutDexel();
     void RenderDexel();
+    void RenderAxes();
+    bool CurrentAngles(std::vector<float>& angles) const;
     void RenderSimulationCached();
     void renderSegmentForward(int iSeg);
     void renderSegmentReversed(int iSeg);
@@ -196,12 +205,18 @@ public:
     SimDisplay simDisplay;
     MillPathLine millPathLine;
     std::vector<MillPathSegment*> MillPathSegments;
+    std::vector<char> mOpTurns;    // for each operation, whether it turns the rotaries as it cuts
     std::vector<float> mOpStarts;  // when each operation starts, as a share of the program's time
     std::vector<SimRotaryAxis> mRotaryAxes;
     std::vector<Point3D> mStockPoints;  // the stock's vertices, for how far it reaches from an axis
 
     // the stock as dexels: set up from the stock's mesh, cut up to this step
     DexelStock mDexel;
+    AxisOverlay mAxisOverlay;
+    float mPixelRatio = 1;
+    bool mToolShown = false;  // where the tool was last drawn, on the part, and its tilt
+    vec3 mToolPos = {0, 0, 0};
+    mat4x4 mToolRot = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
     bool mDexelTried = false;
     bool mDexelBehind = false;
     int mDexelFramesBehind = 0;

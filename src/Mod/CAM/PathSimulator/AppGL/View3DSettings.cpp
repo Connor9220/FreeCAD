@@ -36,11 +36,24 @@ using namespace Gui;
 namespace CAMSimulator
 {
 
+// the colours FreeCAD gives its axes and its origin, as the view preferences keep them
+static void applyAxisColors(const ParameterGrp& rGrp, DlgCAMSimulator& dlg)
+{
+    dlg.setAxisColors(
+        rGrp.GetUnsigned("AxisXColor", 0xCC3333FF),
+        rGrp.GetUnsigned("AxisYColor", 0x33CC33FF),
+        rGrp.GetUnsigned("AxisZColor", 0x3333CCFF),
+        rGrp.GetUnsigned("OriginColor", 0xFBD629FF)
+    );
+}
+
 View3DSettings::View3DSettings(ParameterGrp::handle hGrp, Dummy3DViewer& view, DlgCAMSimulator& dlg)
     : Gui::View3DSettings(hGrp, &view)
     , mView(view)
     , mDlg(dlg)
-{}
+{
+    applyAxisColors(*hGrp, mDlg);
+}
 
 static View3DInventorViewer::Background backgroundType(const ParameterGrp& rGrp)
 {
@@ -118,6 +131,10 @@ void View3DSettings::OnChange(ParameterGrp::SubjectType& rCaller, ParameterGrp::
 
         const QColor bg = backgroundColor(rGrp);
         mDlg.setBackgroundColor(bg);
+    }
+    else if (Reason == "AxisXColor"sv || Reason == "AxisYColor"sv || Reason == "AxisZColor"sv
+             || Reason == "OriginColor"sv) {
+        applyAxisColors(rGrp, mDlg);
     }
 }
 

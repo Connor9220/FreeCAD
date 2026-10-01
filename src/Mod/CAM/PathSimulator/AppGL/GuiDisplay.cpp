@@ -258,6 +258,7 @@ GuiDisplay::GuiDisplay(QWidget* parent)
     connect(ui->ssaoButton, &QToolButton::toggled, this, &GuiDisplay::ssaoEnableChanged);
     connect(ui->incrementalButton, &QToolButton::toggled, this, &GuiDisplay::incrementalEnableChanged);
     connect(ui->dexelButton, &QToolButton::toggled, this, &GuiDisplay::dexelEnableChanged);
+    connect(ui->axesButton, &QToolButton::toggled, this, &GuiDisplay::axesEnableChanged);
     connect(ui->tablePoseButton, &QToolButton::toggled, this, &GuiDisplay::tablePoseEnableChanged);
 }
 
@@ -522,6 +523,12 @@ void GuiDisplay::setIncrementalEnabled(bool b)
 {
     QSignalBlocker blocker(ui->incrementalButton);
     ui->incrementalButton->setChecked(b);
+}
+
+void GuiDisplay::setAxesEnabled(bool b)
+{
+    QSignalBlocker blocker(ui->axesButton);
+    ui->axesButton->setChecked(b);
 }
 
 void GuiDisplay::setDexelEnabled(bool b)

@@ -141,6 +141,11 @@ void DlgCAMSimulator::connectTo(GuiDisplay& gui, Dummy3DViewer& dv)
         mMillSimulator->EnableDexel(b);
     });
 
+    connect(&gui, &GuiDisplay::axesEnableChanged, this, [this](bool b) {
+        mMillSimulator->EnableAxes(b);
+        update();
+    });
+
     connect(&gui, &GuiDisplay::stockVisibleChanged, this, &DlgCAMSimulator::setStockVisible);
     connect(&gui, &GuiDisplay::baseVisibleChanged, this, &DlgCAMSimulator::setBaseVisible);
 
@@ -201,6 +206,7 @@ void DlgCAMSimulator::updateGui()
     mGui->setIndexMode(state.mIndexMode);
     mGui->setIncrementalEnabled(state.mIncremental);
     mGui->setDexelEnabled(state.mDexelEngine);
+    mGui->setAxesEnabled(state.mViewAxes);
     mGui->setFps(mFps);
 
     if (mDummyViewer && !mDummyViewer->isAnimating()) {
@@ -478,6 +484,17 @@ void DlgCAMSimulator::setBackgroundColor(const QColor& c)
     update();
 }
 
+void DlgCAMSimulator::setAxisColors(
+    unsigned long x,
+    unsigned long y,
+    unsigned long z,
+    unsigned long origin
+)
+{
+    mMillSimulator->SetAxisColors(x, y, z, origin);
+    update();
+}
+
 void DlgCAMSimulator::setPathColor(const QColor& normal, const QColor& rapid)
 {
     const vec3 vnormal = {normal.redF(), normal.greenF(), normal.blueF()};
@@ -567,6 +584,7 @@ void DlgCAMSimulator::updateResources()
 void DlgCAMSimulator::updateWindowScale()
 {
     const qreal ratio = devicePixelRatioF();
+    mMillSimulator->SetPixelRatio((float)ratio);
     mMillSimulator->UpdateWindowScale(width() * ratio, height() * ratio);
 }
 

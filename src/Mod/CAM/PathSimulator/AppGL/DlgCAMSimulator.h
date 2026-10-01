@@ -145,6 +145,8 @@ public:
     void setRotateEnabled(bool b);
 
     void setBackgroundColor(const QColor& c);
+    // FreeCAD's axis colours and the origin's, 0xRRGGBBAA
+    void setAxisColors(unsigned long x, unsigned long y, unsigned long z, unsigned long origin);
     void setPathColor(const QColor& normal, const QColor& rapid);
 
 Q_SIGNALS:

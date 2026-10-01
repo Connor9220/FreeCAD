@@ -79,6 +79,18 @@ public:
     // what the dexel stock draws with: the view, the projection, and the pixels a millimetre
     // covers, at unit depth when the camera is perspective
     void GetDexelView(mat4x4 view, mat4x4 projection, float& pointScale, bool& perspective) const;
+    // For drawing over the result: from the machine's space to the screen (the camera alone),
+    // from the part's (the camera and the table's pose), the camera's rotation, and the pose;
+    // and the size drawn to, in pixels.
+    void GetOverlayView(mat4x4 machineClip, mat4x4 partClip, mat4x4 cameraRot, mat4x4 scene) const;
+    int Width() const
+    {
+        return mWidth;
+    }
+    int Height() const
+    {
+        return mHeight;
+    }
     void RestoreViewport() const;
 
     void SetPathColor(const vec3& normal, const vec3& rapid);

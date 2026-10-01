@@ -27,6 +27,8 @@ SET(CAMSimulator_SRCS_Module
 )
 
 SET(CAMSimulator_SRCS_Core
+    AxisOverlay.cpp
+    AxisOverlay.h
     DexelMesh.cpp
     DexelMesh.h
     DexelStock.cpp
