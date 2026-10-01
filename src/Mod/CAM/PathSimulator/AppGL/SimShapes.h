@@ -25,6 +25,7 @@
 #pragma once
 
 #include <QOpenGLFunctions>
+#include <memory>
 #include <vector>
 #include "linmath.h"
 
@@ -80,6 +81,16 @@ public:
     uint vbo = 0;
     uint ibo = 0;
     int numIndices = 0;
+
+    // the triangles as set, kept for taking them other than through OpenGL: the dexel cutter
+    // on the processor lays them over its rays
+    std::shared_ptr<const std::vector<Vertex>> cpuVerts;
+    std::shared_ptr<const std::vector<GLushort>> cpuIndices;
+
+    // While set, Render(model, normal) hands the shape to this rather than drawing it.
+    using Capture = void (*)(void* context, const Shape& shape, const mat4x4& model, const mat4x4& normal);
+    static Capture sCapture;
+    static void* sCaptureContext;
 
 public:
     void Render() const;

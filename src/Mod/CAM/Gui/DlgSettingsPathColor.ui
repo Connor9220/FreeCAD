@@ -607,6 +607,41 @@ Set to zero to disable G-code highlighter.</string>
         </property>
        </widget>
       </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="labelSimulatorDexelCutting">
+        <property name="text">
+         <string>Simulator dexel stock cuts on</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="Gui::PrefComboBox" name="SimulatorDexelCutting">
+        <property name="toolTip">
+         <string>Where the simulator's dexel stock is cut. Automatic uses the processor when it has 8 or more threads, the graphics card otherwise. The processor needs nothing from the graphics card beyond drawing; the graphics card path needs float render targets. Takes effect the next time the simulator starts.</string>
+        </property>
+        <property name="prefEntry" stdset="0">
+         <cstring>SimulatorDexelCutting</cstring>
+        </property>
+        <property name="prefPath" stdset="0">
+         <cstring>Mod/CAM</cstring>
+        </property>
+        <item>
+         <property name="text">
+          <string>Automatic</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Processor</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Graphics card</string>
+         </property>
+        </item>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>

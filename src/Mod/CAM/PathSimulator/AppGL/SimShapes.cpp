@@ -38,6 +38,8 @@ namespace CAMSimulator
 constexpr auto pi = std::numbers::pi_v<float>;
 
 int Shape::lastNumSlices = 0;
+Shape::Capture Shape::sCapture = nullptr;
+void* Shape::sCaptureContext = nullptr;
 std::vector<float> Shape::sinTable;
 std::vector<float> Shape::cosTable;
 
@@ -363,6 +365,8 @@ void Shape::SetupVertexAttribs() const
 
 void Shape::SetModelData(const std::vector<Vertex>& vbuffer, const std::vector<GLushort>& ibuffer)
 {
+    cpuVerts = std::make_shared<const std::vector<Vertex>>(vbuffer);
+    cpuIndices = std::make_shared<const std::vector<GLushort>>(ibuffer);
     GenerateModel((const float*)vbuffer.data(), ibuffer.data(), (int)vbuffer.size(), (int)ibuffer.size());
 }
 
@@ -378,6 +382,10 @@ void Shape::Render(
     const mat4x4& normallMat
 ) const  // normals are rotated only
 {
+    if (sCapture) {
+        sCapture(sCaptureContext, *this, modelMat, normallMat);
+        return;
+    }
     CurrentShader->UpdateModelMat(modelMat, normallMat);
     Render();
 }
@@ -386,6 +394,8 @@ void Shape::FreeResources()
 {
     GLDELETE_BUFFER(vbo);
     GLDELETE_BUFFER(ibo);
+    cpuVerts.reset();
+    cpuIndices.reset();
 }
 
 Shape::~Shape()

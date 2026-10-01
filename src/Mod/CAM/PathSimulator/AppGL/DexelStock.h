@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include "DexelCutter.h"
 #include "DexelMesh.h"
 #include "Shader.h"
 #include "SimShapes.h"
@@ -38,12 +39,13 @@ namespace CAMSimulator
 // once, and the surface is meshed again only where cuts changed it, so a frame costs the same
 // however far the program has run, and the stock is the same from any view.
 //
-// This is the portable form: OpenGL 2.1 with float textures and GLSL 1.20, as the simulator
-// runs on. Each grid keeps its rays in float textures, up to six stretches a ray, a seventh
-// closing the ray's narrowest gap or dropping its thinnest stretch. A cut draws the sweep along
-// each grid's axis to find where each ray enters and leaves it, then a pass over the sweep's
-// footprint takes that from the ray's stretches, and the new ends take the sweep's surface
-// normal.
+// A ray keeps up to six stretches, a seventh closing its narrowest gap or dropping its thinnest
+// stretch. A cut finds where each ray enters and leaves the sweep, the meshes the simulator
+// draws it with, and takes that from the ray's stretches, the new ends taking the sweep's
+// surface normal. It is done on the processor, by DexelCutter, the card only drawing the mesh,
+// or on the graphics card, as the CAM preferences choose: there the rays live in float
+// textures, the sweep drawn along each grid's axis and a pass over its footprint subtracting,
+// OpenGL 2.1 and GLSL 1.20 as the simulator runs on.
 class DexelStock
 {
 public:
@@ -77,6 +79,17 @@ public:
     // Cut the volume drawSweep draws, the box [lo, hi] around it in the part's coordinates.
     // drawSweep draws with the current shader, which the cut sets up.
     void Cut(const vec3 lo, const vec3 hi, const std::function<void()>& drawSweep);
+
+    // do the cuts gathered so far, when they are cut on the processor
+    void Flush();
+    int Pending() const
+    {
+        return mCpu ? mCutter.Pending() : 0;
+    }
+    bool OnProcessor() const
+    {
+        return mCpu;
+    }
 
     // Bring the mesh up to the cuts so far: the rays they changed read back, the tiles they
     // touched meshed again, for about budgetMs. True when it is up to date.
@@ -118,6 +131,12 @@ private:
         std::vector<float> normals;
     };
 
+    bool InitOn(
+        const std::vector<Vertex>& verts,
+        const std::vector<unsigned short>& indices,
+        float resolution,
+        bool cpu
+    );
     void UploadSet(Grid& g, int set);
     void ReadBack(Grid& g, const int rect[4]);
     void RenderPoints(
@@ -161,6 +180,18 @@ private:
     std::vector<Snapshot> mSnapshots;
 
     DexelMesher mMesher;
+
+    // Cut on the processor, the default, or on the graphics card. On the processor the rays live
+    // only in the copies the mesh reads, the card drawing just the mesh: its threads outpace a
+    // modest card's passes, and it takes nothing from OpenGL but plain buffers.
+    bool mCpu = true;
+    DexelCutter mCutter;
+    struct CpuSnapshot
+    {
+        std::vector<float> ends[3];
+        std::vector<float> normals[3];
+    };
+    std::vector<CpuSnapshot> mCpuSnapshots;
     bool mPending = false;  // cuts since the mesh last caught up, in the box below
     vec3 mPendingLo = {0, 0, 0};
     vec3 mPendingHi = {0, 0, 0};

@@ -44,6 +44,8 @@ namespace CAMSimulator
 // ahead catches up over frames that keep the display moving rather than holding it still.
 constexpr double DexelCutMsPerFrame = 50.0;
 constexpr double DexelMeshMsPerFrame = 12.0;
+// cuts the processor gathers before doing them together, each batch's sweeps found in parallel
+constexpr int DexelCutBatch = 512;
 // A long program keeps this many snapshots of its dexels, evenly through it, for going back.
 constexpr int DexelSnapshots = 5;
 constexpr size_t DexelSnapshotMinSegments = 2000;
@@ -1441,6 +1443,22 @@ bool MillSimulation::CutDexel()
         mDexelSub = 0;
     }
 
+    // cuts gathered for the processor are done a batch at a time, and all of them on leaving,
+    // so the time taken is the time they took
+    auto flushSome = [this] {
+        if (mDexel.Pending() >= DexelCutBatch) {
+            mDexel.Flush();
+        }
+    };
+    struct FlushOnLeaving
+    {
+        DexelStock& dexel;
+        ~FlushOnLeaving()
+        {
+            dexel.Flush();
+        }
+    } flushOnLeaving {mDexel};
+
     // the time a frame may take, looked at every few cuts
     const auto start = clock::now();
     const auto until = start + std::chrono::microseconds((long)(DexelCutMsPerFrame * 1000));
@@ -1463,6 +1481,7 @@ bool MillSimulation::CutDexel()
                 while (mDexelSub < to) {
                     const int k = ++mDexelSub;
                     mDexel.Cut(lo, hi, [p, k] { p->render(k); });
+                    flushSome();
                     if (mDexelSub < to && spent()) {
                         return false;
                     }
@@ -1471,6 +1490,7 @@ bool MillSimulation::CutDexel()
             else {
                 // a straight move, its sweep so far
                 mDexel.Cut(lo, hi, [p, to] { p->render(to); });
+                flushSome();
                 mDexelSub = to;
             }
         }

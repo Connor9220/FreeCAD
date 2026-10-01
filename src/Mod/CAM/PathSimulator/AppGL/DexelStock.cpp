@@ -23,10 +23,13 @@
 
 #include "DexelStock.h"
 
+#include <App/Application.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <thread>
 #include <unordered_map>
 
 // include this last as the defines can mess up other includes
@@ -591,6 +594,7 @@ void DexelStock::Free()
     }
     FreeSnapshots();
     mMesher.Free();
+    mCutter.Setup(mOrigin, mRes, mDims);
     mMeshShader.Destroy();
     mCopyShader.Destroy();
     mPending = false;
@@ -612,15 +616,37 @@ bool DexelStock::Init(
     float resolution
 )
 {
+    // Where to cut, as the CAM preferences say: on the processor or the graphics card, or, by
+    // default, the processor when it has the threads for it. A card that cannot take the
+    // cutting leaves it to the processor.
+    const long choice = App::GetApplication()
+                            .GetParameterGroupByPath("User parameter:BaseApp/Preferences/Mod/CAM")
+                            ->GetInt("SimulatorDexelCutting", 0);
+    bool cpu = choice == 1 || (choice == 0 && std::thread::hardware_concurrency() >= 8);
+    if (const char* forced = std::getenv("CAMSIM_DEXEL_GPU")) {
+        cpu = forced[0] != '1';
+    }
+    return InitOn(verts, indices, resolution, cpu)
+        || (!cpu && InitOn(verts, indices, resolution, true));
+}
+
+bool DexelStock::InitOn(
+    const std::vector<Vertex>& verts,
+    const std::vector<unsigned short>& indices,
+    float resolution,
+    bool cpu
+)
+{
     Free();
     if (verts.empty() || indices.size() < 3 || resolution <= 0) {
         return false;
     }
+    mCpu = cpu;
 
-    // what it takes: six colour targets for the subtraction
+    // what the card takes: six float colour targets for the subtraction
     GLint maxDrawBuffers = 0;
     glGetIntegerv(GL_MAX_DRAW_BUFFERS, &maxDrawBuffers);
-    if (maxDrawBuffers < 6) {
+    if (!mCpu && maxDrawBuffers < 6) {
         return false;
     }
 
@@ -749,6 +775,9 @@ bool DexelStock::Init(
 
         g.ends = g.initEnds;
         g.normals = g.initNormals;
+        if (mCpu) {
+            continue;
+        }
 
         // the textures, two sets, and the stock's first stretch for its colour
         for (int set = 0; set < 2; set++) {
@@ -790,6 +819,23 @@ bool DexelStock::Init(
         glGenBuffers(1, &g.pointVbo);
         glBindBuffer(GL_ARRAY_BUFFER, g.pointVbo);
         glBufferData(GL_ARRAY_BUFFER, index.size() * sizeof(float), index.data(), GL_STATIC_DRAW);
+    }
+
+    for (int c = 0; c < 3; c++) {
+        mDims[c] = dims[c];
+    }
+    if (mCpu) {
+        // the processor cuts: of OpenGL only the mesh's shader
+        if (mMeshShader.CompileShader("DexelMesh", VertShaderDexelMesh, FragShaderDexelMesh)
+            == 0xdeadbeef) {
+            Free();
+            return false;
+        }
+        mCutter.Setup(mOrigin, mRes, mDims);
+        mMesher.Setup(mOrigin, mRes, dims);
+        mMesher.MarkAllDirty();
+        mValid = true;
+        return true;
     }
 
     // the capture: entry and exit of a sweep, as big as the largest grid
@@ -836,9 +882,6 @@ bool DexelStock::Init(
     }
 
     // the whole surface to mesh, the first time it is drawn
-    for (int c = 0; c < 3; c++) {
-        mDims[c] = dims[c];
-    }
     mMesher.Setup(mOrigin, mRes, dims);
     mMesher.MarkAllDirty();
     mValid = true;
@@ -868,9 +911,12 @@ void DexelStock::Reset()
     if (!mValid) {
         return;
     }
+    mCutter.Setup(mOrigin, mRes, mDims);
     for (Grid& g : mGrids) {
-        UploadSet(g, 0);
-        UploadSet(g, 1);
+        if (!mCpu) {
+            UploadSet(g, 0);
+            UploadSet(g, 1);
+        }
         g.ends = g.initEnds;
         g.normals = g.initNormals;
     }
@@ -917,6 +963,16 @@ int DexelStock::SaveSnapshot()
     if (!mValid) {
         return -1;
     }
+    if (mCpu) {
+        Flush();
+        CpuSnapshot snap;
+        for (int d = 0; d < 3; d++) {
+            snap.ends[d] = mGrids[d].ends;
+            snap.normals[d] = mGrids[d].normals;
+        }
+        mCpuSnapshots.push_back(std::move(snap));
+        return (int)mCpuSnapshots.size() - 1;
+    }
     Snapshot snap;
     for (int i = 0; i < 16 && glGetError() != GL_NO_ERROR; i++) {
         // errors from before, cleared so a failed allocation shows
@@ -958,6 +1014,17 @@ int DexelStock::SaveSnapshot()
 
 void DexelStock::RestoreSnapshot(int index)
 {
+    if (mCpu) {
+        if (mValid && index >= 0 && index < (int)mCpuSnapshots.size()) {
+            mCutter.Setup(mOrigin, mRes, mDims);
+            for (int d = 0; d < 3; d++) {
+                mGrids[d].ends = mCpuSnapshots[index].ends[d];
+                mGrids[d].normals = mCpuSnapshots[index].normals[d];
+            }
+            mMesher.MarkAllDirty();
+        }
+        return;
+    }
     if (!mValid || index < 0 || index >= (int)mSnapshots.size()) {
         return;
     }
@@ -989,6 +1056,7 @@ void DexelStock::FreeSnapshotAt(size_t index)
 
 void DexelStock::FreeSnapshots()
 {
+    mCpuSnapshots.clear();
     while (!mSnapshots.empty()) {
         FreeSnapshotAt(mSnapshots.size() - 1);
     }
@@ -1035,6 +1103,28 @@ void DexelStock::SetupCapture(const Grid& g)
     setUniform3f(mCaptureShader, "dirD", dir);
 }
 
+// a sweep's shape handed to the processor's cutter rather than drawn
+static void CaptureForCutter(void* context, const Shape& shape, const mat4x4& model, const mat4x4& normal)
+{
+    if (!shape.cpuVerts || !shape.cpuIndices) {
+        return;
+    }
+    static_cast<DexelCutter*>(context)->Draw(shape, model, normal);
+}
+
+void DexelStock::Flush()
+{
+    if (!mValid || !mCpu) {
+        return;
+    }
+    DexelCutter::Grid grids[3];
+    for (int d = 0; d < 3; d++) {
+        Grid& g = mGrids[d];
+        grids[d] = {g.axis, g.a, g.b, g.w, g.h, g.ends.data(), g.normals.data()};
+    }
+    mCutter.Flush(grids);
+}
+
 void DexelStock::Cut(const vec3 lo, const vec3 hi, const std::function<void()>& drawSweep)
 {
     if (!mValid) {
@@ -1045,6 +1135,19 @@ void DexelStock::Cut(const vec3 lo, const vec3 hi, const std::function<void()>& 
         if (hi[c] < mOrigin[c] || lo[c] > mOrigin[c] + mDims[c] * mRes) {
             return;
         }
+    }
+
+    if (mCpu) {
+        // the sweep's triangles gathered for the processor, the mesh's tiles to remake
+        mMesher.MarkDirty(lo, hi);
+        mCutter.Begin(lo, hi);
+        Shape::sCapture = &CaptureForCutter;
+        Shape::sCaptureContext = &mCutter;
+        drawSweep();
+        Shape::sCapture = nullptr;
+        Shape::sCaptureContext = nullptr;
+        mCutter.End();
+        return;
     }
 
     // the rays to read back for the mesh, and the tiles of it to remake
@@ -1168,6 +1271,7 @@ bool DexelStock::Sync(double budgetMs)
     if (!mValid) {
         return true;
     }
+    Flush();
     if (mPending) {
         for (Grid& g : mGrids) {
             int rect[4];
@@ -1199,7 +1303,7 @@ void DexelStock::Render(
     }
     // CAMSIM_DEXEL_POINTS=1 draws the rays' ends as discs instead, to look at the rays themselves
     const char* points = std::getenv("CAMSIM_DEXEL_POINTS");
-    if (points && points[0] == '1') {
+    if (points && points[0] == '1' && !mCpu) {
         RenderPoints(view, projection, pointScale, perspective, stockColor, cutColor);
         return;
     }
