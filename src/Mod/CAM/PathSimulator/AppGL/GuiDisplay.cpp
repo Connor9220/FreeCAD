@@ -97,6 +97,15 @@ public:
         update();
     }
 
+    void setHits(const std::vector<float>& h)
+    {
+        if (h == hits) {
+            return;
+        }
+        hits = h;
+        update();
+    }
+
     void setSpans(const std::vector<SimTimeSpan>& s)
     {
         bool same = s.size() == spans.size();
@@ -114,7 +123,7 @@ public:
 protected:
     void paintEvent(QPaintEvent* /*event*/) override
     {
-        if (starts.empty()) {
+        if (starts.empty() && hits.empty()) {
             return;
         }
         // where the slider puts its handle's middle for a value, so the lines meet the handle
@@ -122,6 +131,18 @@ protected:
         sliderSpan(slider, x0, span);
 
         QPainter painter(this);
+        // where the holder meets the stock: red, a notch above and below to stand out
+        const QColor red(230, 40, 30);
+        painter.setPen(QPen(red, 2));
+        for (float f : hits) {
+            const int x = x0 + (int)std::lround(f * (float)span);
+            painter.drawLine(x, 1, x, height() - 2);
+            painter.fillRect(x - 3, 0, 7, 3, red);
+            painter.fillRect(x - 3, height() - 3, 7, 3, red);
+        }
+        if (starts.empty()) {
+            return;
+        }
         painter.setPen(QPen(QColor(255, 255, 255, 200), 2));
         for (float f : starts) {
             const int x = x0 + (int)std::lround(f * (float)span);
@@ -142,6 +163,7 @@ protected:
 private:
     QSlider* slider;
     std::vector<float> starts;
+    std::vector<float> hits;
     std::vector<SimTimeSpan> spans;
 };
 
@@ -259,6 +281,12 @@ GuiDisplay::GuiDisplay(QWidget* parent)
     connect(ui->incrementalButton, &QToolButton::toggled, this, &GuiDisplay::incrementalEnableChanged);
     connect(ui->dexelButton, &QToolButton::toggled, this, &GuiDisplay::dexelEnableChanged);
     connect(ui->axesButton, &QToolButton::toggled, this, &GuiDisplay::axesEnableChanged);
+    connect(
+        ui->stopOnCollisionButton,
+        &QToolButton::toggled,
+        this,
+        &GuiDisplay::stopOnCollisionChanged
+    );
     connect(ui->tablePoseButton, &QToolButton::toggled, this, &GuiDisplay::tablePoseEnableChanged);
 }
 
@@ -529,6 +557,18 @@ void GuiDisplay::setAxesEnabled(bool b)
 {
     QSignalBlocker blocker(ui->axesButton);
     ui->axesButton->setChecked(b);
+}
+
+void GuiDisplay::setStopOnCollision(bool b, bool available)
+{
+    QSignalBlocker blocker(ui->stopOnCollisionButton);
+    ui->stopOnCollisionButton->setEnabled(available);
+    ui->stopOnCollisionButton->setChecked(b && available);
+}
+
+void GuiDisplay::setCollisions(const std::vector<float>& stages)
+{
+    opMarkers->setHits(stages);
 }
 
 void GuiDisplay::setDexelEnabled(bool b)

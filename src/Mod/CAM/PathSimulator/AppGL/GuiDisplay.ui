@@ -321,6 +321,29 @@
        <property name="checkable">
         <bool>true</bool>
        </property>
+       <property name="checked">
+        <bool>true</bool>
+       </property>
+       <property name="autoRaise">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QToolButton" name="stopOnCollisionButton">
+       <property name="toolTip">
+        <string>Stop on collision: pause where a tool's holder is found meeting the stock, or a tool rapiding into it, each marked in red on the timeline. Found with the dexel stock cut on the processor only, as set in the CAM preferences.</string>
+       </property>
+       <property name="icon">
+        <iconset resource="../../Gui/Resources/Path.qrc">
+         <normaloff>:/gl_simulator/StopOnCollision.png</normaloff>:/gl_simulator/StopOnCollision.png</iconset>
+       </property>
+       <property name="checkable">
+        <bool>true</bool>
+       </property>
+       <property name="checked">
+        <bool>true</bool>
+       </property>
        <property name="autoRaise">
         <bool>true</bool>
        </property>

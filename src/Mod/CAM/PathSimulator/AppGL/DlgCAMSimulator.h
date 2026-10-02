@@ -100,6 +100,7 @@ public:
     int id;
     float diameter;
     float resolution;
+    std::vector<float> holder;  // the outline of the holder it is set in, if any
 };
 
 class DlgCAMSimulator: public QOpenGLWidget
@@ -134,7 +135,8 @@ public:
         const std::vector<float>& toolProfilePoints,
         int toolNumber,
         float diameter,
-        float resolution
+        float resolution,
+        const std::vector<float>& holderProfilePoints = {}
     );
 
     void setStockShape(const Part::TopoShape& shape, float resolution);

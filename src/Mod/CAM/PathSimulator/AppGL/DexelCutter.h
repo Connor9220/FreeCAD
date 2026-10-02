@@ -25,6 +25,7 @@
 
 #include "SimShapes.h"
 #include "linmath.h"
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -58,8 +59,10 @@ public:
     void Setup(const vec3 origin, float res, const int dims[3]);
 
     // a cut: its box, then the shapes its sweep is drawn with, each placed by model and its
-    // normals turned by normalRot; the triangles are taken from them on the cutting threads
-    void Begin(const vec3 lo, const vec3 hi);
+    // normals turned by normalRot; the triangles are taken from them on the cutting threads.
+    // A probe, given an id of 0 or more, cuts nothing: it finds whether its shapes meet the
+    // stock as the cuts before it left it, reported by TakeHits once done.
+    void Begin(const vec3 lo, const vec3 hi, int probe = -1);
     void Draw(const Shape& shape, const mat4x4 model, const mat4x4 normalRot);
     void End();
 
@@ -71,6 +74,9 @@ public:
     // do the cuts gathered, on the grids given
     void Flush(const Grid grids[3]);
 
+    // the probes done since last asked: each one's id and the rays on which it met material
+    void TakeHits(std::vector<std::pair<int, int>>& hits);
+
 private:
     struct Cut
     {
@@ -78,6 +84,7 @@ private:
         vec3 hi;
         size_t first = 0;  // its draws in mDraws
         size_t count = 0;
+        int probe = -1;
     };
     struct DrawCall
     {
@@ -101,7 +108,7 @@ private:
     // those missing every grid left out
     void CutTriangles(const Cut& cut, std::vector<float>& tris) const;
     void CaptureCut(const Grid& g, const Cut& cut, const std::vector<float>& tris, Capture& cap) const;
-    void ApplyRows(const Grid& g, int gridIndex, int row0, int row1) const;
+    void ApplyRows(const Grid& g, int gridIndex, int row0, int row1, std::atomic<int>* met) const;
 
     vec3 mOrigin = {0, 0, 0};
     float mRes = 1;
@@ -109,6 +116,7 @@ private:
     std::vector<Cut> mCuts;
     std::vector<DrawCall> mDraws;
     std::vector<Capture> mCaptures;  // a cut's for each grid, three a cut
+    std::vector<std::pair<int, int>> mHits;
 };
 
 }  // namespace CAMSimulator

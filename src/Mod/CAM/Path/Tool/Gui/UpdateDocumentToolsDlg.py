@@ -58,6 +58,8 @@ def _summary_text(info) -> str:
         parts.append(translate("CAM_Job", "Presets"))
     if info.geometry_changes:
         parts.append(translate("CAM_Job", "Geometry"))
+    if info.setup_changes:
+        parts.append(translate("CAM_Job", "Setup"))
     return ", ".join(parts)
 
 
@@ -76,7 +78,7 @@ def _detail_lines(info) -> list:
     lines = []
     if info.presets_differ:
         lines.append(translate("CAM_Job", "Presets"))
-    for change in info.geometry_changes:
+    for change in info.geometry_changes + info.setup_changes:
         label = _get_label_text(change.name)
         old = format_value(change.old_value, precision=3, units=units) or "?"
         new = format_value(change.new_value, precision=3, units=units) or "?"
@@ -239,7 +241,7 @@ class _UpdateToolsDialog(QtWidgets.QDialog):
         just repeats the summary), so they get no tree at all - returns
         None and the caller falls back to a plain table item.
         """
-        if not info.geometry_changes:
+        if not info.geometry_changes and not info.setup_changes:
             return None
 
         tree = QtWidgets.QTreeWidget()

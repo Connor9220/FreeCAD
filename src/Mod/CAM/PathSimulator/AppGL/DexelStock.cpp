@@ -1125,6 +1125,26 @@ void DexelStock::Flush()
     mCutter.Flush(grids);
 }
 
+int DexelStock::Probe(const vec3 lo, const vec3 hi, int id, const std::function<void()>& draw)
+{
+    if (!mValid || !mCpu) {
+        return -1;
+    }
+    for (int c = 0; c < 3; c++) {
+        if (hi[c] < mOrigin[c] || lo[c] > mOrigin[c] + mDims[c] * mRes) {
+            return 0;
+        }
+    }
+    mCutter.Begin(lo, hi, id);
+    Shape::sCapture = &CaptureForCutter;
+    Shape::sCaptureContext = &mCutter;
+    draw();
+    Shape::sCapture = nullptr;
+    Shape::sCaptureContext = nullptr;
+    mCutter.End();
+    return 1;
+}
+
 void DexelStock::Cut(const vec3 lo, const vec3 hi, const std::function<void()>& drawSweep)
 {
     if (!mValid) {

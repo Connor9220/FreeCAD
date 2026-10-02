@@ -25,6 +25,7 @@
 #include "MillSimulation.h"
 
 #include <Base/Console.h>
+#include <Base/Quantity.h>
 
 #include "GlUtils.h"
 #include <algorithm>
@@ -74,6 +75,10 @@ void MillSimulation::Clear()
     mOpStarts.clear();
     mDexel.Free();
     mDexelTried = false;
+    mProbes.clear();
+    mCollisions.clear();
+    mCollisionOps.clear();
+    mStopAt = -1;
 
     for (unsigned int i = 0; i < mToolTable.size(); i++) {
         delete mToolTable[i];
@@ -98,6 +103,10 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
     mQuality = quality;
     mDexel.Free();
     mDexelTried = false;
+    mProbes.clear();
+    mCollisions.clear();
+    mCollisionOps.clear();
+    mStopAt = -1;
     mDexelSeg = 0;
     mDexelSub = 0;
     millPathLine.Clear();
@@ -272,11 +281,17 @@ void MillSimulation::AddTool(EndMill* tool)
     mToolTable.push_back(tool);
 }
 
-void MillSimulation::AddTool(const std::vector<float>& toolProfile, int toolid, float diameter)
+void MillSimulation::AddTool(
+    const std::vector<float>& toolProfile,
+    int toolid,
+    float diameter,
+    const std::vector<float>& holderProfile
+)
 {
     // if we have another tool with same id, remove it
     RemoveTool(toolid);
     EndMill* tool = new EndMill(toolProfile, toolid, diameter);
+    tool->SetHolder(holderProfile);
     mToolTable.push_back(tool);
 }
 
@@ -911,6 +926,11 @@ void MillSimulation::GetScenePose(quat pose)
     if (MillPathSegments.empty()) {
         return;
     }
+    // the program done, the part back in the main work coordinates, the rotaries home, to look
+    // round it from there
+    if (mCurStep >= mNTotalSteps) {
+        return;
+    }
     const std::vector<MillFrame>& frames = mCodeParser.Frames;
     if (mPathStep < 0) {
         GetFramePose(pose, frames[MillPathSegments[0]->frameFrom]);
@@ -1062,22 +1082,16 @@ void MillSimulation::RenderSweeps(int first, bool fromScratch)
     GlsimEnd();
 }
 
-void MillSimulation::RenderTool()
+void MillSimulation::ToolPose(MillPathSegment* p, int step, vec3 toolPos, mat4x4 rmat)
 {
-    mToolShown = false;
-    if (mPathStep < 0) {
-        return;
-    }
-
-    MillPathSegment* p = MillPathSegments.at(mPathStep);
-    vec3 toolPos;
+    // where the tool's tip is at this step of the segment, on the part, and how it is turned
+    p->SetStepNumber(step);
     p->GetHeadPosition(toolPos);
-    mat4x4 tmat, rmat;
     p->GetToolRotation(rmat);
     if (p->continuous) {
         // on its true path: straight on the machine, the part turned back by where the
         // rotaries are, not along the piece's chord
-        const float t = std::clamp((float)mSubStep / (float)p->numSimSteps, 0.f, 1.f);
+        const float t = std::clamp((float)step / (float)p->numSimSteps, 0.f, 1.f);
         std::vector<float> angles(p->angFrom.size());
         for (size_t k = 0; k < angles.size(); k++) {
             angles[k] = p->angFrom[k] + (p->angTo[k] - p->angFrom[k]) * t;
@@ -1097,7 +1111,7 @@ void MillSimulation::RenderTool()
         // drawn on, has turned with the table; the tool stands on the part as the one tilt
         // with the other taken back.
         std::vector<float> angles;
-        const float t = std::clamp((float)mSubStep / (float)p->numSimSteps, 0.f, 1.f);
+        const float t = std::clamp((float)step / (float)p->numSimSteps, 0.f, 1.f);
         IndexAngles(p, t * p->duration, &angles);
         quat table, head, onPart;
         PoseFromAngles(table, angles);
@@ -1117,21 +1131,41 @@ void MillSimulation::RenderTool()
         GetFramePose(poseTo, to);
         quat_mul(seenFrom, poseFrom, from.rot);
         quat_mul(seenTo, poseTo, to.rot);
-        const float t = std::clamp((float)mSubStep / (float)p->numSimSteps, 0.f, 1.f);
+        const float t = std::clamp((float)step / (float)p->numSimSteps, 0.f, 1.f);
         QuatSlerp(seen, seenFrom, seenTo, t);
         GetScenePose(pose);
         quat_conj(pose, pose);
         quat_mul(unposed, pose, seen);
         mat4x4_from_quat(rmat, unposed);
     }
+}
+
+void MillSimulation::RenderTool()
+{
+    mToolShown = false;
+    if (mPathStep < 0) {
+        return;
+    }
+
+    MillPathSegment* p = MillPathSegments.at(mPathStep);
+    vec3 toolPos;
+    mat4x4 tmat, rmat;
+    ToolPose(p, mSubStep, toolPos, rmat);
     mat4x4_translate(tmat, toolPos[0], toolPos[1], toolPos[2]);
     mat4x4_mul(tmat, tmat, rmat);
     vec3_dup(mToolPos, toolPos);
     mat4x4_dup(mToolRot, rmat);
     mToolShown = true;
     // mat4x4_translate(tmat, toolPos.x, toolPos.y, toolPos.z);
-    simDisplay.StartGeometryPass(toolColor, false);
+    simDisplay.StartGeometryPass(CollidesAt(RapidIntoStock) ? holderHitColor : toolColor, false);
     p->endmill->toolShape.Render(tmat, rmat);
+    if (p->endmill->HasHolder()) {
+        simDisplay.StartGeometryPass(
+            CollidesAt(HolderMeetsStock) ? holderHitColor : holderColor,
+            false
+        );
+        p->endmill->holderShape.Render(tmat, rmat);
+    }
 }
 
 void MillSimulation::RenderPath()
@@ -1236,6 +1270,18 @@ void MillSimulation::SimNext(const clock::duration& elapsed)
 
     const int oldStep = mCurStep;
 
+    if (mStopAt >= 0) {
+        // the holder was found meeting the stock: stop where it does
+        mSimPlaying = false;
+        mSimTime = std::min(mStopAt, mTotalTime);
+        mPlayFrom = mSimTime;
+        mStopAt = -1;
+        StepFromTime();
+        CalcSegmentPositions();
+        simDisplay.updateDisplay = true;
+        return;
+    }
+
     if (mSimPlaying) {
         if (clock::now() < mHoldUntil) {
             return;  // holding after a back skip
@@ -1299,6 +1345,10 @@ void MillSimulation::SetArbitraryStock(
     mStockIndices = indices;
     mDexel.Free();
     mDexelTried = false;
+    mProbes.clear();
+    mCollisions.clear();
+    mCollisionOps.clear();
+    mStopAt = -1;
     mStockPoints.clear();
     for (const Vertex& v : verts) {
         mStockPoints.push_back({v.x, v.y, v.z});
@@ -1410,6 +1460,197 @@ bool MillSimulation::PrepareDexel()
 
 
 
+void MillSimulation::FlushDexel()
+{
+    mDexel.Flush();
+    TakeCollisions();
+}
+
+void MillSimulation::ProbeAlong(MillPathSegment* p, int fromStep, int toStep, int kind)
+{
+    // The holder, or the tool on a rapid, at its places over steps (fromStep, toStep] of the
+    // segment being cut, every millimetre or so, closer for a small tool, and at the last, each
+    // looked at against the stock as the cuts before it leave it: the holder's after the
+    // segment's cut, the tool's before it, the rapid's own cut being what it drags through.
+    const EndMill* tool = p->endmill;
+    const bool holder = kind == HolderMeetsStock;
+    if ((holder && !tool->HasHolder()) || mProbeWarned) {
+        return;
+    }
+    float radius = 0, zLo = 0, zHi = 0;
+    if (holder) {
+        tool->HolderBounds(radius, zLo, zHi);
+    }
+    else {
+        const std::vector<float>& prof = tool->profilePoints;
+        for (size_t i = 0; i + 1 < prof.size(); i += 2) {
+            radius = std::max(radius, std::fabs(prof[i]));
+            zLo = std::min(zLo, prof[i + 1]);
+            zHi = std::max(zHi, prof[i + 1]);
+        }
+    }
+    const float stepLength = p->Length() / (float)std::max(1, p->numSimSteps);
+    const float spacing = std::max(mDexel.Resolution(), holder ? 1.f : std::min(1.f, radius));
+    const int stride = stepLength > 0 ? std::max(1, (int)(spacing / stepLength)) : p->numSimSteps;
+    for (int k = fromStep + 1; k <= toStep; k++) {
+        if (k % stride != 0 && k != toStep) {
+            continue;
+        }
+        vec3 pos;
+        mat4x4 rmat, tmat;
+        ToolPose(p, k, pos, rmat);
+        mat4x4_translate(tmat, pos[0], pos[1], pos[2]);
+        mat4x4_mul(tmat, tmat, rmat);
+        // the box around it: its axis, widened by its radius
+        vec3 a, b, lo, hi;
+        const vec4 axisLo = {0, 0, zLo, 1};
+        const vec4 axisHi = {0, 0, zHi, 1};
+        vec4 wa, wb;
+        mat4x4_mul_vec4(wa, tmat, axisLo);
+        mat4x4_mul_vec4(wb, tmat, axisHi);
+        for (int c = 0; c < 3; c++) {
+            a[c] = wa[c];
+            b[c] = wb[c];
+            lo[c] = std::min(a[c], b[c]) - radius;
+            hi[c] = std::max(a[c], b[c]) + radius;
+        }
+        const int id = mNextProbe++;
+        const Shape& shape = holder ? tool->holderShape : tool->toolShape;
+        const int found = mDexel.Probe(lo, hi, id, [&shape, tmat, rmat] {
+            shape.Render(tmat, rmat);
+        });
+        if (found < 0) {
+            Base::Console().warning(
+                "CAM Simulator: collisions are found when the simulator cuts on the processor, "
+                "as set in the CAM preferences.\n"
+            );
+            mProbeWarned = true;
+            return;
+        }
+        if (found > 0) {
+            Collision probe;
+            probe.seg = mDexelSeg;
+            probe.kind = kind;
+            // the segment's last step drawn is the one before its end, the next one's start
+            probe.step = std::min(k, p->numSimSteps - 1);
+            vec3_dup(probe.pos, pos);
+            mProbes[id] = probe;
+        }
+    }
+}
+
+void MillSimulation::TakeCollisions()
+{
+    std::vector<std::pair<int, int>> hits;
+    mDexel.TakeHits(hits);
+    for (const auto& [id, rays] : hits) {
+        const auto it = mProbes.find(id);
+        if (it == mProbes.end()) {
+            continue;
+        }
+        const Collision hit = it->second;
+        mProbes.erase(it);
+        const int key = hit.seg * CollisionKinds + hit.kind;
+        if (rays <= 0 || mCollisions.count(key) != 0) {
+            continue;
+        }
+        mCollisions[key] = hit;
+        // found as it plays through it: stop there, the earliest found. One where playback was
+        // moved to, a skip landing on it or play pressed where it stopped, lets it play on.
+        const float t = HitTime(hit);
+        if (mStopOnCollision && mSimPlaying && t > mPlayFrom + 1e-4f) {
+            mStopAt = mStopAt < 0 ? t : std::min(mStopAt, t);
+        }
+        // said once an operation for each kind, where it first happens
+        const MillPathSegment* p = MillPathSegments[hit.seg];
+        if (mCollisionOps.insert(p->op * CollisionKinds + hit.kind).second) {
+            const std::string op = p->op >= 0 && p->op < (int)mCodeParser.OpNames.size()
+                ? mCodeParser.OpNames[p->op]
+                : std::string();
+            auto length = [](float mm) {
+                return Base::Quantity(mm, Base::Unit::Length).getUserString();
+            };
+            const bool holder = hit.kind == HolderMeetsStock;
+            Base::Console().warning(
+                "CAM Simulator: {}tool {} {} the stock{}{} at X {} Y {} Z {}{}\n",
+                holder ? "the holder of " : "",
+                p->endmill->toolId,
+                holder ? "meets" : "rapids into",
+                op.empty() ? "" : " in ",
+                op,
+                length(hit.pos[0]),
+                length(hit.pos[1]),
+                length(hit.pos[2]),
+                holder && p->isRapid ? ", on a rapid" : ""
+            );
+        }
+    }
+}
+
+float MillSimulation::HitTime(const Collision& hit) const
+{
+    // the middle of the step, so the step the time falls in is the hit's
+    const MillPathSegment* p = MillPathSegments[hit.seg];
+    return p->startTime
+        + p->duration * ((float)hit.step + 0.5f) / (float)std::max(1, p->numSimSteps);
+}
+
+std::vector<float> MillSimulation::GetCollisionStages() const
+{
+    std::vector<float> stages;
+    if (mTotalTime <= 0) {
+        return stages;
+    }
+    for (const auto& [key, hit] : mCollisions) {
+        stages.push_back(HitTime(hit) / mTotalTime);
+    }
+    return stages;
+}
+
+bool MillSimulation::CanFindCollisions() const
+{
+    if (!mDexelEngine) {
+        return false;
+    }
+    if (mDexel.IsValid()) {
+        return mDexel.OnProcessor();
+    }
+    return !mDexelTried;  // not set up yet; once it fails to be, drawn with CSG
+}
+
+void MillSimulation::EnableStopOnCollision(bool b)
+{
+    mStopOnCollision = b;
+    if (!b) {
+        mStopAt = -1;
+    }
+}
+
+std::vector<float> MillSimulation::MarksAndHits() const
+{
+    // where the skip buttons stop: the marks, and the collisions
+    std::vector<float> marks = mMarks;
+    for (const auto& [key, hit] : mCollisions) {
+        marks.push_back(HitTime(hit));
+    }
+    std::sort(marks.begin(), marks.end());
+    return marks;
+}
+
+void MillSimulation::DropCollisions(int fromSeg)
+{
+    // going back: what is found from here on is found again as it is cut again
+    mCollisions.erase(mCollisions.lower_bound(fromSeg * CollisionKinds), mCollisions.end());
+    mProbes.clear();
+}
+
+bool MillSimulation::CollidesAt(int kind) const
+{
+    // red from where it collides on in the current segment
+    const auto hit = mCollisions.find(mPathStep * CollisionKinds + kind);
+    return mPathStep >= 0 && hit != mCollisions.end() && hit->second.step <= mSubStep;
+}
+
 bool MillSimulation::CutDexel()
 {
     // Cut the dexels up to the current step: the segments since the last frame, and the one
@@ -1420,6 +1661,7 @@ bool MillSimulation::CutDexel()
             mDexel.Reset();
             mDexelSeg = 0;
             mDexelSub = 0;
+            DropCollisions(0);
         }
         return true;
     }
@@ -1441,23 +1683,24 @@ bool MillSimulation::CutDexel()
             mDexelSeg = 0;
         }
         mDexelSub = 0;
+        DropCollisions(mDexelSeg);
     }
 
     // cuts gathered for the processor are done a batch at a time, and all of them on leaving,
     // so the time taken is the time they took
     auto flushSome = [this] {
         if (mDexel.Pending() >= DexelCutBatch) {
-            mDexel.Flush();
+            FlushDexel();
         }
     };
     struct FlushOnLeaving
     {
-        DexelStock& dexel;
+        MillSimulation* sim;
         ~FlushOnLeaving()
         {
-            dexel.Flush();
+            sim->FlushDexel();
         }
-    } flushOnLeaving {mDexel};
+    } flushOnLeaving {this};
 
     // the time a frame may take, looked at every few cuts
     const auto start = clock::now();
@@ -1481,6 +1724,7 @@ bool MillSimulation::CutDexel()
                 while (mDexelSub < to) {
                     const int k = ++mDexelSub;
                     mDexel.Cut(lo, hi, [p, k] { p->render(k); });
+                    ProbeAlong(p, k - 1, k, HolderMeetsStock);
                     flushSome();
                     if (mDexelSub < to && spent()) {
                         return false;
@@ -1488,8 +1732,12 @@ bool MillSimulation::CutDexel()
                 }
             }
             else {
-                // a straight move, its sweep so far
+                // a straight move, its sweep so far; a rapid's tool looked at before it cuts
+                if (p->isRapid) {
+                    ProbeAlong(p, mDexelSub, to, RapidIntoStock);
+                }
                 mDexel.Cut(lo, hi, [p, to] { p->render(to); });
+                ProbeAlong(p, mDexelSub, to, HolderMeetsStock);
                 flushSome();
                 mDexelSub = to;
             }
@@ -1763,12 +2011,15 @@ void MillSimulation::SkipToPreviousMark()
     if (mSimPlaying) {
         mHoldUntil = clock::now() + std::chrono::milliseconds(750);
     }
-    auto it = std::lower_bound(mMarks.begin(), mMarks.end(), mSimTime - 1e-4f);
-    const float previous = it == mMarks.begin() ? 0.f : *(it - 1);
+    const std::vector<float> marks = MarksAndHits();
+    auto it = std::lower_bound(marks.begin(), marks.end(), mSimTime - 1e-4f);
+    const float previous = it == marks.begin() ? 0.f : *(it - 1);
     if (previous == mSimTime) {
         return;
     }
     mSimTime = previous;
+    mPlayFrom = previous;
+    mStopAt = -1;
     StepFromTime();
     CalcSegmentPositions();
     simDisplay.updateDisplay = true;
@@ -1776,14 +2027,17 @@ void MillSimulation::SkipToPreviousMark()
 
 void MillSimulation::SkipToNextMark()
 {
-    // to the next operation's start, or a rotary axis starting or stopping, whichever comes
-    // first; to the end of the program after the last
-    auto it = std::upper_bound(mMarks.begin(), mMarks.end(), mSimTime + 1e-4f);
-    const float next = it == mMarks.end() ? mTotalTime : *it;
+    // to the next operation's start, a rotary axis starting or stopping, or where the holder
+    // meets the stock, whichever comes first; to the end of the program after the last
+    const std::vector<float> marks = MarksAndHits();
+    auto it = std::upper_bound(marks.begin(), marks.end(), mSimTime + 1e-4f);
+    const float next = it == marks.end() ? mTotalTime : *it;
     if (next == mSimTime) {
         return;
     }
     mSimTime = next;
+    mPlayFrom = next;
+    mStopAt = -1;
     StepFromTime();
     CalcSegmentPositions();
     simDisplay.updateDisplay = true;
@@ -1796,6 +2050,7 @@ void MillSimulation::SetPlaying(bool b)
     }
 
     mSimPlaying = b;
+    mPlayFrom = mSimTime;
     simDisplay.updateDisplay = true;
 }
 
@@ -1819,6 +2074,8 @@ void MillSimulation::SetSimulationStage(float stage)
 {
     // the stage is a share of the program's time
     mSimTime = std::clamp(stage, 0.f, 1.f) * mTotalTime;
+    mPlayFrom = mSimTime;
+    mStopAt = -1;
     const int oldStep = mCurStep;
     StepFromTime();
     if (mCurStep == oldStep) {
@@ -1848,6 +2105,7 @@ void MillSimulation::SetState(const MillSimulationState& state)
     mViewTablePose = state.mViewTablePose;
     EnableDexel(state.mDexelEngine);
     EnableAxes(state.mViewAxes);
+    EnableStopOnCollision(state.mStopOnCollision);
     EnableIncremental(state.mIncremental);
     SetIndexMode(state.mIndexMode);
 }

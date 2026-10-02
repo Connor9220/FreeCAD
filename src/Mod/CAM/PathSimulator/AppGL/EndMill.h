@@ -45,16 +45,27 @@ public:
     Shape pathShape;
     Shape halfToolShape;
     Shape toolShape;
+    Shape holderShape;  // drawn with the tool, never cutting
 
 public:
     EndMill(int toolid, float diameter);
     EndMill(const std::vector<float>& toolProfile, int toolid, float diameter);
     virtual ~EndMill();
+    // the holder the tool is set in: its outline as radius, height pairs from the tool's tip,
+    // from the top at its rim down to the axis at its face, as the tool's own
+    void SetHolder(const std::vector<float>& holderProfile);
+    bool HasHolder() const
+    {
+        return holderPoints.size() >= 4;
+    }
+    // the holder's widest radius and the heights it spans, from the tool's tip
+    void HolderBounds(float& radius, float& zLo, float& zHi) const;
     void GenerateDisplayLists(float quality);
     unsigned int GenerateArcSegmentDL(float radius, float angleRad, float zShift, Shape* retShape) const;
 
 protected:
     void MirrorPointBuffer();
+    std::vector<float> holderPoints;
 };
 
 }  // namespace CAMSimulator

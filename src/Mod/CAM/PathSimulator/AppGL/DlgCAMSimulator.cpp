@@ -141,6 +141,10 @@ void DlgCAMSimulator::connectTo(GuiDisplay& gui, Dummy3DViewer& dv)
         mMillSimulator->EnableDexel(b);
     });
 
+    connect(&gui, &GuiDisplay::stopOnCollisionChanged, this, [this](bool b) {
+        mMillSimulator->EnableStopOnCollision(b);
+    });
+
     connect(&gui, &GuiDisplay::axesEnableChanged, this, [this](bool b) {
         mMillSimulator->EnableAxes(b);
         update();
@@ -207,6 +211,8 @@ void DlgCAMSimulator::updateGui()
     mGui->setIncrementalEnabled(state.mIncremental);
     mGui->setDexelEnabled(state.mDexelEngine);
     mGui->setAxesEnabled(state.mViewAxes);
+    mGui->setStopOnCollision(state.mStopOnCollision, mMillSimulator->CanFindCollisions());
+    mGui->setCollisions(mMillSimulator->GetCollisionStages());
     mGui->setFps(mFps);
 
     if (mDummyViewer && !mDummyViewer->isAnimating()) {
@@ -335,14 +341,13 @@ void DlgCAMSimulator::addTool(
     const std::vector<float>& toolProfilePoints,
     int toolNumber,
     float diameter,
-    float resolution
+    float resolution,
+    const std::vector<float>& holderProfilePoints
 )
 {
-    Q_UNUSED(resolution)
-
     std::string toolCmd = "T" + std::to_string(toolNumber);
     addGcodeCommand(toolCmd.c_str());
-    mTools.emplace_back(toolProfilePoints, toolNumber, diameter);
+    mTools.push_back({toolProfilePoints, toolNumber, diameter, resolution, holderProfilePoints});
 }
 
 static SimShape getMeshData(const Part::TopoShape& shape, float resolution)
@@ -544,7 +549,7 @@ void DlgCAMSimulator::updateResources()
 
     for (const auto& tool : mTools) {
         if (!mMillSimulator->ToolExists(tool.id)) {
-            mMillSimulator->AddTool(tool.profile, tool.id, tool.diameter);
+            mMillSimulator->AddTool(tool.profile, tool.id, tool.diameter, tool.holder);
         }
     }
 

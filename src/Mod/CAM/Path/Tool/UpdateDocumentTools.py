@@ -43,9 +43,10 @@ current library version" instead of "a different tool".
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+import FreeCAD
 import Path
 from .FeedsSpeeds.presets import get_presets
-from .toolbit.models.base import PropertyGroupShape
+from .toolbit.models.base import NoHolder, PropertyGroupShape
 
 
 def resolve_library_source(asset_manager, embedded_tool_id: str, depth: int = 0):
@@ -152,6 +153,45 @@ def diff_tool_geometry(embedded_obj, library_obj) -> List[GeometryChange]:
     return changes
 
 
+# How the tool is set up rather than what it is: the holder it is set in and how far it sticks out
+SetupProperties = ("Holder", "Stickout")
+
+
+def _setup_value(obj, name):
+    """A setup property as the two sides can be compared: a tool from before holders has none, and
+    may keep its stickout as text."""
+    value = getattr(obj, name, None)
+    if name == "Holder":
+        return value or NoHolder
+    if isinstance(value, str):
+        try:
+            value = FreeCAD.Units.Quantity(value)
+        except Exception:
+            return value
+    if isinstance(value, (int, float)):  # a detached tool's that was never set
+        value = FreeCAD.Units.Quantity(value, "mm")
+    return value if value is not None else FreeCAD.Units.Quantity(0, "mm")
+
+
+def _setup_differs(old_value, new_value) -> bool:
+    if isinstance(old_value, FreeCAD.Units.Quantity) and isinstance(
+        new_value, FreeCAD.Units.Quantity
+    ):
+        return abs(old_value.Value - new_value.Value) > 1e-6
+    return old_value != new_value
+
+
+def diff_tool_setup(embedded_obj, library_obj) -> List[GeometryChange]:
+    """The holder and stickout where the library's differ from the embedded tool's."""
+    changes = []
+    for name in SetupProperties:
+        old_value = _setup_value(embedded_obj, name)
+        new_value = _setup_value(library_obj, name)
+        if _setup_differs(old_value, new_value):
+            changes.append(GeometryChange(name=name, old_value=old_value, new_value=new_value))
+    return changes
+
+
 def _presets_differ(embedded_obj, library_obj) -> bool:
     return get_presets(embedded_obj) != get_presets(library_obj)
 
@@ -165,12 +205,13 @@ class ToolStaleInfo:
     presets_differ: bool
     geometry_changes: List[GeometryChange] = field(default_factory=list)
     units: Optional[str] = None
+    setup_changes: List[GeometryChange] = field(default_factory=list)
 
 
 def job_stale_tools(job, asset_manager) -> List[ToolStaleInfo]:
     """Dry-run only - never writes anything. For every ToolController's
     embedded tool with a resolvable library source, report whether it
-    differs at all (presets and/or geometry). Tools with no library
+    differs at all (presets, geometry and/or setup). Tools with no library
     match, or with no differences, are simply absent from the result.
     """
     details = []
@@ -198,7 +239,8 @@ def job_stale_tools(job, asset_manager) -> List[ToolStaleInfo]:
 
         presets_differ = _presets_differ(tool_obj, library_asset.obj)
         geometry_changes = diff_tool_geometry(tool_obj, library_asset.obj)
-        if not presets_differ and not geometry_changes:
+        setup_changes = diff_tool_setup(tool_obj, library_asset.obj)
+        if not presets_differ and not geometry_changes and not setup_changes:
             continue
 
         details.append(
@@ -210,6 +252,7 @@ def job_stale_tools(job, asset_manager) -> List[ToolStaleInfo]:
                 presets_differ=presets_differ,
                 geometry_changes=geometry_changes,
                 units=getattr(library_asset.obj, "Units", None),
+                setup_changes=setup_changes,
             )
         )
 

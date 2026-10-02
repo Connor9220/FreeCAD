@@ -37,8 +37,11 @@ from Path.Base.Generator import toolchange
 from ...docobject import DetachedDocumentObject
 from ...assets.asset import Asset
 from ...shape import ToolBitShape, ToolBitShapeCustom, ToolBitShapeIcon
-from ..util import to_json, format_value
+from ..util import to_json, format_value, units_from_json
 from ..migration import ParameterAccessor, migrate_parameters
+
+# The Holder of a bit that is not in one
+NoHolder = "None"
 
 ToolBitView = LazyLoader("Path.Tool.toolbit.ui.view", globals(), "Path.Tool.toolbit.ui.view")
 
@@ -199,6 +202,13 @@ class ToolBit(Asset, ABC):
         params = attrs.get("parameter", {})
         attr = attrs.get("attribute", {})
 
+        # A bit that does not say its units is in those its sizes are given in, so that it
+        # saves in them; not every bit has been through the asset folder's migration.
+        if isinstance(params, dict) and "Units" not in params:
+            units = units_from_json(params)
+            if units:
+                params = {**params, "Units": units}
+
         # Filter parameters if method exists
         if (
             hasattr(tool_bit_shape.__class__, "filter_parameters")
@@ -210,7 +220,9 @@ class ToolBit(Asset, ABC):
         # Update parameters.
         for param_name, param_value in params.items():
             tool_bit_shape.set_parameter(param_name, param_value)
-            if hasattr(toolbit.obj, param_name):
+            if param_name == "Holder":
+                toolbit.set_holder_id(param_value)
+            elif hasattr(toolbit.obj, param_name):
                 PathUtil.setProperty(toolbit.obj, param_name, param_value)
 
         # Update attributes; the separation between parameters and attributes
@@ -219,7 +231,9 @@ class ToolBit(Asset, ABC):
         # Discussion: https://github.com/FreeCAD/FreeCAD/issues/21722
         for attr_name, attr_value in attr.items():
             tool_bit_shape.set_parameter(attr_name, attr_value)
-            if hasattr(toolbit.obj, attr_name):
+            if attr_name == "Holder":
+                toolbit.set_holder_id(attr_value)
+            elif hasattr(toolbit.obj, attr_name):
                 PathUtil.setProperty(toolbit.obj, attr_name, attr_value)
             else:
                 Path.Log.debug(
@@ -372,6 +386,22 @@ class ToolBit(Asset, ABC):
             )
             self.obj.Material = ["HSS", "Carbide"]
             self.obj.Material = "HSS"  # Default value
+        if not hasattr(self.obj, "Holder"):
+            self.obj.addProperty(
+                "App::PropertyEnumeration",
+                "Holder",
+                "Attributes",
+                QT_TRANSLATE_NOOP("App::Property", "The holder or collet nut the tool is set in"),
+            )
+            self.obj.Holder = [NoHolder]
+            self.obj.Holder = NoHolder
+        if not hasattr(self.obj, "Stickout"):
+            self.obj.addProperty(
+                "App::PropertyLength",
+                "Stickout",
+                "Attributes",
+                QT_TRANSLATE_NOOP("App::Property", "How far the tool sticks out of its holder"),
+            )
 
     def get_id(self) -> str:
         """Returns the unique ID of the tool bit."""
@@ -1024,6 +1054,17 @@ class ToolBit(Asset, ABC):
                     f"(type {type(value).__name__}, value {value}): {e}"
                 )
 
+        # A bit in no holder, or with no stickout, saves as it did before there were holders.
+        if attrs["parameter"].get("Holder") == NoHolder:
+            del attrs["parameter"]["Holder"]
+        stickout = getattr(self.obj, "Stickout", None)
+        if (
+            isinstance(stickout, FreeCAD.Units.Quantity)
+            and stickout.Value == 0
+            and "Stickout" not in param_names
+        ):
+            attrs["parameter"].pop("Stickout", None)
+
         # Merge unrecognised keys back so they aren't dropped on save.
         extra = getattr(self, "_extra_attrs", {})
         for k, v in extra.items():
@@ -1112,6 +1153,56 @@ class ToolBit(Asset, ABC):
 
         # Default to keeping spindle off.
         return toolchange.SpindleDirection.OFF
+
+    def get_holder_id(self) -> Optional[str]:
+        """The id of the holder the bit is set in, or None if it is in none."""
+        holder_id = getattr(self.obj, "Holder", NoHolder)
+        return None if not holder_id or holder_id == NoHolder else holder_id
+
+    def set_holder_id(self, holder_id: Optional[str]):
+        """Sets the bit in the holder of that id, or in none for None. A holder that is not
+        there is kept by its id, so a bit set up elsewhere keeps its holder."""
+        holder_id = holder_id or NoHolder
+        choices = self.obj.getEnumerationsOfProperty("Holder")
+        if holder_id not in choices:
+            self.obj.Holder = choices + [holder_id]
+        self.obj.Holder = holder_id
+
+    def refresh_holder_choices(self):
+        """Offers every holder there is, keeping the one the bit is set in."""
+        from ...holder import available_holders
+
+        current = self.obj.Holder
+        choices = [NoHolder] + sorted(available_holders())
+        if current not in choices:
+            choices.append(current)
+        self.obj.Holder = choices
+        self.obj.Holder = current
+
+    def get_holder(self, asset_manager=None):
+        """The ToolHolder the bit is set in, or None if it is in none or it cannot be found."""
+        holder_id = self.get_holder_id()
+        if holder_id is None:
+            return None
+        if asset_manager is None:
+            from ...camassets import cam_assets as asset_manager
+
+        holder = asset_manager.get_or_none(f"toolholder://{holder_id}")
+        if holder is None:
+            Path.Log.warning(f"Tool holder '{holder_id}' of '{self.obj.Label}' was not found")
+        return holder
+
+    def get_stickout(self) -> FreeCAD.Units.Quantity:
+        """How far the bit sticks out of its holder; zero if that is not known."""
+        stickout = getattr(self.obj, "Stickout", None)
+        if isinstance(stickout, str):  # kept as text by bits from before it was an attribute
+            try:
+                stickout = FreeCAD.Units.Quantity(stickout)
+            except Exception:
+                stickout = None
+        if not isinstance(stickout, FreeCAD.Units.Quantity):
+            return FreeCAD.Units.Quantity(0, "mm")
+        return stickout
 
     def can_rotate(self) -> bool:
         """

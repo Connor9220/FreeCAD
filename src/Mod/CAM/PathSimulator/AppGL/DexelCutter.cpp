@@ -255,14 +255,16 @@ void DexelCutter::Setup(const vec3 origin, float res, const int dims[3])
     }
     mCuts.clear();
     mDraws.clear();
+    mHits.clear();
 }
 
-void DexelCutter::Begin(const vec3 lo, const vec3 hi)
+void DexelCutter::Begin(const vec3 lo, const vec3 hi, int probe)
 {
     Cut cut;
     vec3_dup(cut.lo, lo);
     vec3_dup(cut.hi, hi);
     cut.first = mDraws.size();
+    cut.probe = probe;
     mCuts.push_back(cut);
 }
 
@@ -460,10 +462,14 @@ void DexelCutter::CaptureCut(
     }
 }
 
-void DexelCutter::ApplyRows(const Grid& g, int gridIndex, int row0, int row1) const
+void DexelCutter::ApplyRows(const Grid& g, int gridIndex, int row0, int row1, std::atomic<int>* met)
+    const
 {
     // the gathered cuts, in order, on these rows of the grid
     const float sliver = 0.05f * mRes;
+    // a probe meets material where it reaches into a stretch further than this: one only
+    // touching the stock's face does not
+    const float reach = 0.25f * mRes;
     for (size_t c = 0; c < mCuts.size(); c++) {
         const Capture& cap = mCaptures[c * 3 + gridIndex];
         const int rw = cap.rect[2] - cap.rect[0];
@@ -481,6 +487,16 @@ void DexelCutter::ApplyRows(const Grid& g, int gridIndex, int row0, int row1) co
                     continue;  // the sweep misses this ray, or only grazes it
                 }
                 const size_t ray = ((size_t)v * g.w + u) * Ends;
+                if (mCuts[c].probe >= 0) {
+                    const float* e = g.ends + ray;
+                    for (int k = 0; k < Ends; k += 2) {
+                        if (e[k] < 1e29f && std::min(e[k + 1], t1) - std::max(e[k], t0) > reach) {
+                            met[c].fetch_add(1, std::memory_order_relaxed);
+                            break;
+                        }
+                    }
+                    continue;
+                }
                 subtractRay(g.ends + ray, g.normals + ray, t0, t1, cap.nIn[r], cap.nOut[r], sliver);
             }
         }
@@ -506,16 +522,31 @@ void DexelCutter::Flush(const Grid grids[3])
     // Then taken from the rays in order, a band of rows of a grid at a time, to whichever thread
     // is free: the cuts gather where the tool is, so narrow bands keep the threads busy.
     const int bands = 8 * std::max(1, (int)std::thread::hardware_concurrency());
+    std::unique_ptr<std::atomic<int>[]> met(new std::atomic<int>[mCuts.size()]);
+    for (size_t c = 0; c < mCuts.size(); c++) {
+        met[c].store(0);
+    }
     pool.Run(3 * bands, [&](int i) {
         const int gi = i / bands;
         const int band = i % bands;
         const Grid& g = grids[gi];
         const int row0 = (int)((long long)g.h * band / bands);
         const int row1 = (int)((long long)g.h * (band + 1) / bands);
-        ApplyRows(g, gi, row0, row1);
+        ApplyRows(g, gi, row0, row1, met.get());
     });
+    for (size_t c = 0; c < mCuts.size(); c++) {
+        if (mCuts[c].probe >= 0) {
+            mHits.emplace_back(mCuts[c].probe, met[c].load());
+        }
+    }
     mCuts.clear();
     mDraws.clear();
+}
+
+void DexelCutter::TakeHits(std::vector<std::pair<int, int>>& hits)
+{
+    hits.insert(hits.end(), mHits.begin(), mHits.end());
+    mHits.clear();
 }
 
 }  // namespace CAMSimulator

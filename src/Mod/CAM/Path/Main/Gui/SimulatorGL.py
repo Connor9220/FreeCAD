@@ -49,6 +49,24 @@ if FreeCAD.GuiUp:
 _filePath = os.path.dirname(os.path.abspath(__file__))
 
 
+def ClipProfile(profile, top):
+    """A tool's profile, as AddTool takes it from the top down, cut off at height top."""
+    points = list(zip(profile[0::2], profile[1::2]))
+    if not points or points[0][1] <= top:
+        return profile
+    clipped = []
+    for (r0, z0), (r1, z1) in zip(points, points[1:]):
+        if z0 > top >= z1:
+            r = r0 + (r1 - r0) * (top - z0) / (z1 - z0)
+            clipped = [(r, top)]
+            break
+    if not clipped:
+        return profile
+    below = [(r, z) for r, z in points if z < top or IsSame(z, top)]
+    clipped += [p for p in below if not (IsSame(p[1], top) and IsSame(p[0], clipped[0][0]))]
+    return [v for p in clipped for v in p]
+
+
 def IsSame(x, y):
     """Check if two floats are the same within an epsilon"""
     return abs(x - y) < 0.0001
@@ -291,6 +309,33 @@ class CAMSimulation:
 
         return profile
 
+    def GetHolderProfile(self, tool):
+        """The outline of the holder a tool is set in, as AddTool takes the tool's: radius and
+        height pairs from the tool's tip, from the top at its rim down to the axis at its face.
+        None if the tool is in no holder, or how far it sticks out of it is not known."""
+        proxy = getattr(tool, "Proxy", None)
+        if not hasattr(proxy, "get_holder"):
+            return None
+        holder = proxy.get_holder()
+        stickout = proxy.get_stickout().getValueAs("mm").Value
+        if holder is None or stickout <= 0:
+            return None
+        points = list(holder.profile)
+        if points[0][1] < points[-1][1]:
+            points.reverse()
+        while points and points[0][0] <= 0:
+            points.pop(0)
+        if len(points) < 2:
+            return None
+        if points[-1][0] > 0:
+            points.append((0.0, points[-1][1]))
+        profile = []
+        for r, z in points:
+            if profile and IsSame(profile[-2], r) and IsSame(profile[-1], z + stickout):
+                continue
+            profile += [r, z + stickout]
+        return profile
+
     def Activate(self):
         """Invoke the simulator task panel"""
         self.initdone = False
@@ -449,7 +494,12 @@ class CAMSimulation:
             # arcs of the profile in chords: finer at high quality, where the cut surfaces
             # they sweep are fine enough to show them
             toolProfile = self.GetToolProfile(tool, 0.25 if self.quality >= 9 else 0.5)
-            self.millSim.AddTool(toolProfile, toolNumber, tool.Diameter, 1)
+            holder = self.GetHolderProfile(tool)
+            if holder:
+                # what is above the holder's face is in it, cutting nothing: the holder meets
+                # what is there
+                toolProfile = ClipProfile(toolProfile, holder[-1])
+            self.millSim.AddTool(toolProfile, toolNumber, tool.Diameter, 1, holder=holder)
             # The simulation runs at the programmed feeds. As the cycle time
             # estimate does, a G0 without F moves at the tool controller's
             # rapid rate (its feed when none is set) and a feed move without

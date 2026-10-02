@@ -73,6 +73,7 @@ EndMill::~EndMill()
 {
     toolShape.FreeResources();
     halfToolShape.FreeResources();
+    holderShape.FreeResources();
     pathShape.FreeResources();
 }
 
@@ -91,12 +92,34 @@ void EndMill::GenerateDisplayLists(float quality)
     // full tool
     toolShape.RotateProfile(profilePoints.data(), nPoints, 0, 0, nslices, false);
 
+    if (HasHolder()) {
+        const int nHolderPoints = (int)holderPoints.size() / 2;
+        holderShape.RotateProfile(holderPoints.data(), nHolderPoints, 0, 0, nslices, false);
+    }
+
     // half tool
     halfToolShape.RotateProfile(profilePoints.data(), nPoints, 0, 0, nslices / 2, true);
 
     // unit path
     int nFullPoints = PROFILE_BUFFER_POINTS(nPoints);
     pathShape.ExtrudeProfileLinear(profilePoints.data(), nFullPoints, 0, 1, 0, 0, true, false);
+}
+
+void EndMill::SetHolder(const std::vector<float>& holderProfile)
+{
+    holderPoints.assign(holderProfile.begin(), holderProfile.end() - (holderProfile.size() % 2));
+}
+
+void EndMill::HolderBounds(float& radius, float& zLo, float& zHi) const
+{
+    radius = 0;
+    zLo = 1e30f;
+    zHi = -1e30f;
+    for (size_t i = 0; i + 1 < holderPoints.size(); i += 2) {
+        radius = std::max(radius, std::fabs(holderPoints[i]));
+        zLo = std::min(zLo, holderPoints[i + 1]);
+        zHi = std::max(zHi, holderPoints[i + 1]);
+    }
 }
 
 unsigned int EndMill::GenerateArcSegmentDL(float radius, float angleRad, float zShift, Shape* retShape) const

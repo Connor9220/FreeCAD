@@ -65,6 +65,10 @@ public:
     void setIncrementalEnabled(bool b);
     void setDexelEnabled(bool b);
     void setAxesEnabled(bool b);
+    // stop on collision as set, shown off and greyed out where collisions are not found
+    void setStopOnCollision(bool b, bool available);
+    // where the holder meets the stock, as shares of the program's time
+    void setCollisions(const std::vector<float>& stages);
     void setFps(float fps);
 
 Q_SIGNALS:
@@ -86,6 +90,7 @@ Q_SIGNALS:
     void incrementalEnableChanged(bool b);
     void dexelEnableChanged(bool b);
     void axesEnableChanged(bool b);
+    void stopOnCollisionChanged(bool b);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;

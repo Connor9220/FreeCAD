@@ -160,6 +160,15 @@ def ensure_toolbitshape_assets_initialized(asset_manager: AssetManager, store_na
     shape_path.mkdir(parents=True, exist_ok=True)
 
 
+def ensure_toolholder_assets_initialized(asset_manager: AssetManager, store_name: str = "local"):
+    """
+    Ensures the folder for the user's own tool holders exists. The built-in holders are not
+    copied there: they are read from where FreeCAD is installed.
+    """
+    holder_path = Preferences.getAssetPath() / "Tools" / "Holder"
+    holder_path.mkdir(parents=True, exist_ok=True)
+
+
 def ensure_assets_initialized(asset_manager: AssetManager, store="local"):
     """
     Ensures the given store is initialized with built-in assets.
@@ -167,6 +176,7 @@ def ensure_assets_initialized(asset_manager: AssetManager, store="local"):
     ensure_library_assets_initialized(asset_manager, store)
     ensure_toolbit_assets_initialized(asset_manager, store)
     ensure_toolbitshape_assets_initialized(asset_manager, store)
+    ensure_toolholder_assets_initialized(asset_manager, store)
 
 
 def _on_asset_path_changed(group, key, value):
@@ -182,6 +192,7 @@ asset_mapping = {
     "toolbitshape": "Tools/Shape/{asset_id}.fcstd",
     "toolbitshapesvg": "Tools/Shape/{asset_id}",  # Asset ID has ".svg" included
     "toolbitshapepng": "Tools/Shape/{asset_id}",  # Asset ID has ".png" included
+    "toolholder": "Tools/Holder/{asset_id}.fcholder",
     "machine": "Machine/{asset_id}.fcm",
 }
 
@@ -192,6 +203,7 @@ builtin_asset_mapping = {
     "toolbitshape": "Shape/{asset_id}.fcstd",
     "toolbitshapesvg": "Shape/{asset_id}",  # Asset ID has ".svg" included
     "toolbitshapepng": "Shape/{asset_id}",  # Asset ID has ".png" included
+    "toolholder": "Holder/{asset_id}.fcholder",
     "machine": "Machine/{asset_id}.fcm",
 }
 

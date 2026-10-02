@@ -99,21 +99,23 @@ PyObject* CAMSimPy::BeginSimulation(PyObject* args, PyObject* kwds)
 
 PyObject* CAMSimPy::AddTool(PyObject* args, PyObject* kwds)
 {
-    static const std::array<const char*, 5>
-        kwlist {"shape", "toolnumber", "diameter", "resolution", nullptr};
+    static const std::array<const char*, 6>
+        kwlist {"shape", "toolnumber", "diameter", "resolution", "holder", nullptr};
     PyObject* pObjToolShape;
     int toolNumber;
     float resolution;
     float diameter;
+    PyObject* pObjHolder = Py_None;
     if (!Base::Wrapped_ParseTupleAndKeywords(
             args,
             kwds,
-            "Oiff",
+            "Oiff|O",
             kwlist,
             &pObjToolShape,
             &toolNumber,
             &diameter,
-            &resolution
+            &resolution,
+            &pObjHolder
         )) {
         return nullptr;
     }
@@ -125,8 +127,25 @@ PyObject* CAMSimPy::AddTool(PyObject* args, PyObject* kwds)
         toolProfile.push_back(static_cast<float>(PyFloat_AsDouble(item)));
     }
 
+    // The holder the tool is set in, drawn with it: the same kind of list, from the tool's tip
+    std::vector<float> holderProfile;
+    if (pObjHolder != Py_None) {
+        PyObject* seq = PySequence_Fast(pObjHolder, "holder must be a list of floats");
+        if (!seq) {
+            return nullptr;
+        }
+        Py_ssize_t n = PySequence_Fast_GET_SIZE(seq);
+        for (Py_ssize_t i = 0; i < n; ++i) {
+            holderProfile.push_back((float)PyFloat_AsDouble(PySequence_Fast_GET_ITEM(seq, i)));
+        }
+        Py_DECREF(seq);
+        if (PyErr_Occurred()) {
+            return nullptr;
+        }
+    }
+
     CAMSim* sim = getCAMSimPtr();
-    sim->addTool(toolProfile, toolNumber, diameter, resolution);
+    sim->addTool(toolProfile, toolNumber, diameter, resolution, holderProfile);
 
     Py_INCREF(Py_None);
     return Py_None;

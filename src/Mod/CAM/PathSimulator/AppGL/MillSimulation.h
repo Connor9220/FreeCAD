@@ -34,6 +34,9 @@
 #include "StockObject.h"
 #include "linmath.h"
 #include <chrono>
+#include <map>
+#include <set>
+#include <unordered_map>
 #include <vector>
 
 #define VIEWITEM_SIMULATION 1
@@ -70,8 +73,9 @@ struct MillSimulationState
     bool mViewTablePose = true;  // the part turns with the rotary table; else the tool tilts
     int mIndexMode = 0;          // how an index turns the table: an IndexMode
     bool mIncremental = false;   // keep the cut stock between frames and draw only new moves
-    bool mDexelEngine = false;   // the stock as dexels, cut once, rather than CSG every frame
+    bool mDexelEngine = true;    // the stock as dexels, cut once, rather than CSG every frame
     bool mViewAxes = true;       // the work coordinates, work plane and rotary axes over the view
+    bool mStopOnCollision = true;  // playback stops where the holder is found meeting the stock
 
     bool mSimPlaying = false;
     bool mSingleStep = false;
@@ -88,7 +92,12 @@ public:
     void Clear();
     void InitSimulation(float quality, float maxStockDimension);
     void AddTool(EndMill* tool);
-    void AddTool(const std::vector<float>& toolProfile, int toolid, float diameter);
+    void AddTool(
+        const std::vector<float>& toolProfile,
+        int toolid,
+        float diameter,
+        const std::vector<float>& holderProfile = {}
+    );
     bool ToolExists(int toolid);
     void RenderSimulation();
     void RenderTool();
@@ -109,6 +118,33 @@ public:
     bool GetIndexAngles(std::vector<float>& angles) const;
     const std::vector<float>& GetOperationStarts() const;
     std::string GetCurrentOperation() const;
+
+    // Collisions, found as the stock is cut: the tool's holder meeting the stock, and the tool
+    // rapiding into it. For each segment one of them happens in, the first place in it. On the
+    // processor's cutting only.
+    enum CollisionKind
+    {
+        HolderMeetsStock = 0,
+        RapidIntoStock = 1,
+        CollisionKinds
+    };
+    struct Collision
+    {
+        int seg = 0;
+        int step = 0;
+        int kind = HolderMeetsStock;
+        vec3 pos = {0, 0, 0};  // the tool's tip there, on the part
+    };
+    // by segment and kind: seg * CollisionKinds + kind
+    const std::map<int, Collision>& GetCollisions() const
+    {
+        return mCollisions;
+    }
+    // when each was found, as a share of the program's time
+    std::vector<float> GetCollisionStages() const;
+    void EnableStopOnCollision(bool b);
+    // whether collisions are found: with the dexel stock, cut on the processor
+    bool CanFindCollisions() const;
 
     void SetPlaying(bool b);
     void SingleStep();
@@ -158,6 +194,14 @@ protected:
     void RenderSweeps(int first, bool fromScratch);
     bool PrepareDexel();
     bool CutDexel();
+    void FlushDexel();
+    void ProbeAlong(MillPathSegment* p, int fromStep, int toStep, int kind);
+    void TakeCollisions();
+    void DropCollisions(int fromSeg);
+    bool CollidesAt(int kind) const;
+    void ToolPose(MillPathSegment* p, int step, vec3 pos, mat4x4 rmat);
+    float HitTime(const Collision& hit) const;
+    std::vector<float> MarksAndHits() const;
     void RenderDexel();
     void RenderAxes();
     bool CurrentAngles(std::vector<float>& angles) const;
@@ -223,6 +267,13 @@ public:
     std::vector<std::pair<int, int>> mDexelSnaps;  // the segment each snapshot is before, its id
     int mDexelSeg = 0;
     int mDexelSub = 0;
+    std::unordered_map<int, Collision> mProbes;  // the places looked at, by probe id
+    int mNextProbe = 0;
+    std::map<int, Collision> mCollisions;  // by segment and kind
+    std::set<int> mCollisionOps;  // operation * CollisionKinds + kind, for those reported
+    bool mProbeWarned = false;
+    float mStopAt = -1;    // a hit found while playing: the time to stop at, next frame
+    float mPlayFrom = 0;   // where playback last started or was moved to: hits there do not stop it
     float mQuality = 10;
     std::vector<Vertex> mStockVerts;
     std::vector<GLushort> mStockIndices;
@@ -247,6 +298,8 @@ public:
     vec3 stockColor = {0.5f, 0.55f, 0.9f};
     vec3 cutColor = {0.5f, 0.84f, 0.73f};
     vec3 toolColor = {0.5f, 0.4f, 0.3f};
+    vec3 holderColor = {0.62f, 0.64f, 0.68f};
+    vec3 holderHitColor = {0.9f, 0.15f, 0.1f};
     vec3 baseShapeColor = {0.7f, 0.6f, 0.5f};
 };
 

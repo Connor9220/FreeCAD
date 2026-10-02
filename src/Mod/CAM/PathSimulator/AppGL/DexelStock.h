@@ -80,6 +80,16 @@ public:
     // drawSweep draws with the current shader, which the cut sets up.
     void Cut(const vec3 lo, const vec3 hi, const std::function<void()>& drawSweep);
 
+    // Whether the volume draw draws, the holder at a place on its path say, meets the stock as
+    // the cuts before it leave it, cutting nothing: found with the cuts, on the processor
+    // only, and reported by TakeHits by id once they are done. 1 if it will be, 0 if it is away
+    // from the stock and meets nothing, -1 if it cannot be found.
+    int Probe(const vec3 lo, const vec3 hi, int id, const std::function<void()>& draw);
+    void TakeHits(std::vector<std::pair<int, int>>& hits)
+    {
+        mCutter.TakeHits(hits);
+    }
+
     // do the cuts gathered so far, when they are cut on the processor
     void Flush();
     int Pending() const
