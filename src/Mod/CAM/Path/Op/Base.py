@@ -834,12 +834,17 @@ class ObjectOp:
 
         # A new operation adopts the work plane of the one before it, the way
         # it adopts that operation's tool controller. A job machining one
-        # tilted face should not need the frame assigned per operation.
+        # tilted face should not need the frame assigned per operation. That
+        # is the operation just before it, a dressup's own: one in the Job's
+        # frame leaves the new one there too, not reaching back past it for a
+        # plane further up the list.
         if hasattr(obj, "Workplane"):
+            import Path.Dressup.Utils as PathDressup
+
             for op in job.Operations.Group[-2::-1]:
-                previous = getattr(op, "Workplane", None)
-                if previous is not None:
-                    obj.Workplane = previous
+                op = PathDressup.baseOp(op)
+                if hasattr(op, "Workplane"):
+                    obj.Workplane = op.Workplane
                     break
 
         if FeatureDepths & features:
