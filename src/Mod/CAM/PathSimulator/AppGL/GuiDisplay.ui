@@ -196,7 +196,7 @@
      <item>
       <widget class="QToolButton" name="stockModelButton">
        <property name="toolTip">
-        <string>Toggle view simulation/model</string>
+        <string>Toggle view simulation/model, then both, then the model compared with the simulation: red where the cuts went past it, the cut colour where stock is left on it</string>
        </property>
        <property name="icon">
         <iconset resource="../../Gui/Resources/Path.qrc">

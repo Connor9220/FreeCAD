@@ -1188,7 +1188,36 @@ void MillSimulation::RenderBaseShape()
     simDisplay.StartDepthPass();
     glPolygonOffset(0, -2);
     glEnable(GL_POLYGON_OFFSET_FILL);
-    simDisplay.StartGeometryPass(baseShapeColor, false);
+    // Over the dexel stock, the model red where the cuts went in past it; compared alone, also
+    // in the cut colour where they left material on it. Within half a ray step or a tenth of a
+    // millimetre it is as cut.
+    const bool overStock = (mViewItems & (VIEWITEM_SIMULATION | VIEWITEM_COMPARE)) != 0;
+    if (overStock && mDexelEngine && mDexel.IsValid() && mDexel.PrepareLookup()) {
+        Shader& shader = simDisplay.StartCompareGeometryPass(baseShapeColor);
+        constexpr int unit = 4;
+        mDexel.BindLookup(unit);
+        const unsigned int id = shader.shaderId;
+        glUniform1i(glGetUniformLocation(id, "raysX"), unit);
+        glUniform1i(glGetUniformLocation(id, "raysY"), unit + 1);
+        glUniform1i(glGetUniformLocation(id, "raysZ"), unit + 2);
+        glUniform3fv(glGetUniformLocation(id, "rayOrigin"), 1, mDexel.Origin());
+        glUniform1f(glGetUniformLocation(id, "rayStep"), mDexel.Resolution());
+        const vec3 dims = {(float)mDexel.Dim(0), (float)mDexel.Dim(1), (float)mDexel.Dim(2)};
+        glUniform3fv(glGetUniformLocation(id, "rayDims"), 1, dims);
+        glUniform1f(
+            glGetUniformLocation(id, "tolerance"),
+            std::max(0.5f * mDexel.Resolution(), 0.1f)
+        );
+        glUniform3fv(glGetUniformLocation(id, "overColor"), 1, overcutColor);
+        glUniform3fv(glGetUniformLocation(id, "underColor"), 1, cutColor);
+        glUniform1i(
+            glGetUniformLocation(id, "showUnder"),
+            (mViewItems & VIEWITEM_COMPARE) != 0 ? 1 : 0
+        );
+    }
+    else {
+        simDisplay.StartGeometryPass(baseShapeColor, false);
+    }
     mBaseShape.render();
     glDisable(GL_POLYGON_OFFSET_FILL);
 }
@@ -1207,7 +1236,9 @@ void MillSimulation::Render()
 
     if (simDisplay.updateDisplay) {
         UpdateScene();
-        const bool dexel = mDexelEngine && (mViewItems & VIEWITEM_SIMULATION) != 0 && PrepareDexel();
+        // the dexels are cut to show the stock, or the model compared with it
+        const bool dexel = mDexelEngine
+            && (mViewItems & (VIEWITEM_SIMULATION | VIEWITEM_COMPARE)) != 0 && PrepareDexel();
         if (dexel) {
             mDexelBehind = !CutDexel();
             // and the mesh once the cuts have caught up, a few milliseconds of it a frame: while
@@ -1221,7 +1252,9 @@ void MillSimulation::Render()
         }
         simDisplay.PrepareFrameBuffer();
         if (dexel) {
-            RenderDexel();
+            if ((mViewItems & VIEWITEM_SIMULATION) != 0) {
+                RenderDexel();
+            }
         }
         else if (mIncremental && (mViewItems & VIEWITEM_SIMULATION) != 0) {
             RenderSimulationCached();
@@ -1389,6 +1422,21 @@ void MillSimulation::SetBaseVisible(bool b)
 bool MillSimulation::IsBaseVisible() const
 {
     return mViewItems & VIEWITEM_BASE_SHAPE;
+}
+
+void MillSimulation::SetCompareVisible(bool b)
+{
+    if (b == IsCompareVisible()) {
+        return;
+    }
+
+    mViewItems ^= VIEWITEM_COMPARE;
+    simDisplay.updateDisplay = true;
+}
+
+bool MillSimulation::IsCompareVisible() const
+{
+    return mViewItems & VIEWITEM_COMPARE;
 }
 
 void MillSimulation::UpdateWindowScale(int width, int height)
@@ -1821,6 +1869,11 @@ bool MillSimulation::CurrentAngles(std::vector<float>& angles) const
     return angles.size() == n;
 }
 
+void MillSimulation::ShowCornerTriad(bool b)
+{
+    mShowCornerTriad = b;
+}
+
 void MillSimulation::RenderAxes()
 {
     // The axis indicators over the result: the machine's axes in a corner always, and when
@@ -1829,7 +1882,9 @@ void MillSimulation::RenderAxes()
     mat4x4 machineClip, partClip, cameraRot, scene;
     simDisplay.GetOverlayView(machineClip, partClip, cameraRot, scene);
     mAxisOverlay.Begin(simDisplay.Width(), simDisplay.Height(), mPixelRatio);
-    mAxisOverlay.CornerTriad(cameraRot);
+    if (mShowCornerTriad) {
+        mAxisOverlay.CornerTriad(cameraRot);
+    }
 
     if (mViewAxes && simulationInitiated) {
         const vec3& size = mStockObject.size;

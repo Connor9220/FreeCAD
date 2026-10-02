@@ -487,7 +487,7 @@ void GuiDisplay::setStockVisible(bool b)
     stockVisible = b;
 
     QSignalBlocker blocker(ui->stockModelButton);
-    ui->stockModelButton->setChecked(stockVisible && baseVisible);
+    ui->stockModelButton->setChecked((stockVisible && baseVisible) || compareVisible);
 }
 
 void GuiDisplay::setBaseVisible(bool b)
@@ -495,28 +495,43 @@ void GuiDisplay::setBaseVisible(bool b)
     baseVisible = b;
 
     QSignalBlocker blocker(ui->stockModelButton);
-    ui->stockModelButton->setChecked(stockVisible && baseVisible);
+    ui->stockModelButton->setChecked((stockVisible && baseVisible) || compareVisible);
+}
+
+void GuiDisplay::setCompareVisible(bool b)
+{
+    compareVisible = b;
+
+    QSignalBlocker blocker(ui->stockModelButton);
+    ui->stockModelButton->setChecked((stockVisible && baseVisible) || compareVisible);
 }
 
 void GuiDisplay::on_stockModelButton_clicked()
 {
-    // stock -> base -> both
-    //   ^---------------'
+    // stock -> base -> both -> base compared with the stock
+    //   ^------------------------------------------------'
 
-    bool sv = false;
+    bool sv = true;
     bool bv = false;
+    bool cv = false;
 
-    if (stockVisible == baseVisible) {
-        sv = true;
-        bv = false;
-    }
-    else if (!baseVisible) {
+    if (stockVisible && !baseVisible) {
         sv = false;
         bv = true;
     }
-    else if (!stockVisible) {
+    else if (!stockVisible && baseVisible && !compareVisible) {
         sv = true;
         bv = true;
+    }
+    else if (stockVisible && baseVisible) {
+        sv = false;
+        bv = true;
+        cv = true;
+    }
+
+    if (cv != compareVisible) {
+        setCompareVisible(cv);
+        Q_EMIT compareVisibleChanged(cv);
     }
 
     if (sv != stockVisible) {

@@ -31,6 +31,7 @@ class SoCamera;
 namespace Gui
 {
 class View3DSettings;
+class NaviCubeSettings;
 }  // namespace Gui
 
 namespace CAMSimulator
@@ -78,6 +79,7 @@ protected:
     Dummy3DViewer* mDummyViewer = nullptr;
 
     std::unique_ptr<View3DSettings> mViewSettings;
+    std::unique_ptr<Gui::NaviCubeSettings> mNaviSettings;
     std::unique_ptr<CAMSettings> mCAMSettings;
 };
 

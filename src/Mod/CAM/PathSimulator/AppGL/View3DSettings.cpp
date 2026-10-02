@@ -49,7 +49,6 @@ static void applyAxisColors(const ParameterGrp& rGrp, DlgCAMSimulator& dlg)
 
 View3DSettings::View3DSettings(ParameterGrp::handle hGrp, Dummy3DViewer& view, DlgCAMSimulator& dlg)
     : Gui::View3DSettings(hGrp, &view)
-    , mView(view)
     , mDlg(dlg)
 {
     applyAxisColors(*hGrp, mDlg);
@@ -116,13 +115,7 @@ void View3DSettings::OnChange(ParameterGrp::SubjectType& rCaller, ParameterGrp::
     // apply/overwrite settings to dummy viewer
 
     const ParameterGrp& rGrp = static_cast<ParameterGrp&>(rCaller);
-    if (Reason == "ShowNaviCube"sv) {
-        // always hide the navi cube
-        mView.setEnabledNaviCube(false);
-    }
-    else {
-        Gui::View3DSettings::OnChange(rCaller, Reason);
-    }
+    Gui::View3DSettings::OnChange(rCaller, Reason);
 
     // apply settings to dlg
 

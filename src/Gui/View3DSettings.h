@@ -58,7 +58,7 @@ private:
     std::vector<View3DInventorViewer*> _viewers;
 };
 
-class NaviCubeSettings
+class GuiExport NaviCubeSettings
 {
     Q_DECLARE_TR_FUNCTIONS(NaviCubeSettings)
 public:

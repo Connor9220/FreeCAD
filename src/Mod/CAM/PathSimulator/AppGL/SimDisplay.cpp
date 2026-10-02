@@ -66,6 +66,7 @@ void SimDisplay::InitShaders()
     // geometric shader - generate texture with all geometric info for further processing
     shaderGeom.CompileShader("Geometric", VertShaderGeom, FragShaderGeom);
     shaderGeomCloser.CompileShader("GeomCloser", VertShaderGeom, FragShaderGeom);
+    shaderGeomCompare.CompileShader("GeomCompare", VertShaderGeomCompare, FragShaderGeomCompare);
 
     // SSAO shader - generate SSAO info and embed in texture buffer
     shaderSSAO.CompileShader("SSAO", VertShader2DFbo, FragShaderSSAO);
@@ -324,6 +325,7 @@ void SimDisplay::CleanGL()
     shaderFlat.Destroy();
     shaderSimFbo.Destroy();
     shaderGeom.Destroy();
+    shaderGeomCompare.Destroy();
     shaderSSAO.Destroy();
     shaderSSAOLighting.Destroy();
     shaderSSAOBlur.Destroy();
@@ -360,6 +362,20 @@ void SimDisplay::StartGeometryPass(const vec3& objColor, bool invertNormals)
     shaderGeom.UpdateObjColor(objColor);
     glEnable(GL_CULL_FACE);
     glDisable(GL_BLEND);
+}
+
+// The geometric pass for the model compared with the cut stock: the caller sets what it is
+// compared with, the shader returned active.
+Shader& SimDisplay::StartCompareGeometryPass(const vec3& objColor)
+{
+    glBindFramebuffer(GL_FRAMEBUFFER, mDrawToCache ? mCacheFbo : mFbo);
+    shaderGeomCompare.Activate();
+    shaderGeomCompare.UpdateNormalState(false);
+    shaderGeomCompare.UpdateViewMat(mMatView);
+    shaderGeomCompare.UpdateObjColor(objColor);
+    glEnable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    return shaderGeomCompare;
 }
 
 // A 'closer' geometry pass is similar to std geometry pass, but render the objects
@@ -786,6 +802,8 @@ void SimDisplay::UpdateProjectionMatrix()
     shaderSSAO.UpdateProjectionMat(projmat);
     shaderLinePath.Activate();
     shaderLinePath.UpdateProjectionMat(projmat);
+    shaderGeomCompare.Activate();
+    shaderGeomCompare.UpdateProjectionMat(projmat);
 
     projmat[2][2] *= 0.99999F;
     shaderGeomCloser.Activate();

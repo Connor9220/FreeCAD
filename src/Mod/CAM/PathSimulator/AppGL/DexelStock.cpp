@@ -577,6 +577,11 @@ DexelStock::~DexelStock()
 
 void DexelStock::Free()
 {
+    for (unsigned int& t : mLookupTex) {
+        GLDELETE_TEXTURE(t);
+    }
+    mLookupAll = true;
+    mLookupDirty = false;
     for (Grid& g : mGrids) {
         for (int set = 0; set < 2; set++) {
             for (unsigned int& t : g.tex[set]) {
@@ -911,6 +916,7 @@ void DexelStock::Reset()
     if (!mValid) {
         return;
     }
+    mLookupAll = true;
     mCutter.Setup(mOrigin, mRes, mDims);
     for (Grid& g : mGrids) {
         if (!mCpu) {
@@ -1014,6 +1020,7 @@ int DexelStock::SaveSnapshot()
 
 void DexelStock::RestoreSnapshot(int index)
 {
+    mLookupAll = true;
     if (mCpu) {
         if (mValid && index >= 0 && index < (int)mCpuSnapshots.size()) {
             mCutter.Setup(mOrigin, mRes, mDims);
@@ -1157,6 +1164,12 @@ void DexelStock::Cut(const vec3 lo, const vec3 hi, const std::function<void()>& 
         }
     }
 
+    for (int c = 0; c < 3; c++) {
+        mLookupLo[c] = mLookupDirty ? std::min(mLookupLo[c], lo[c]) : lo[c];
+        mLookupHi[c] = mLookupDirty ? std::max(mLookupHi[c], hi[c]) : hi[c];
+    }
+    mLookupDirty = true;
+
     if (mCpu) {
         // the sweep's triangles gathered for the processor, the mesh's tiles to remake
         mMesher.MarkDirty(lo, hi);
@@ -1286,11 +1299,10 @@ void DexelStock::ReadBack(Grid& g, const int rect[4])
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-bool DexelStock::Sync(double budgetMs)
+void DexelStock::CatchUpMirror()
 {
-    if (!mValid) {
-        return true;
-    }
+    // the rays the processor keeps, as cut so far: the cuts gathered done, or those the card
+    // did read back
     Flush();
     if (mPending) {
         for (Grid& g : mGrids) {
@@ -1301,6 +1313,83 @@ bool DexelStock::Sync(double budgetMs)
         }
         mPending = false;
     }
+}
+
+bool DexelStock::PrepareLookup()
+{
+    if (!mValid) {
+        return false;
+    }
+    CatchUpMirror();
+    glActiveTexture(GL_TEXTURE0);
+    for (int d = 0; d < 3; d++) {
+        Grid& g = mGrids[d];
+        if (g.ends.size() < (size_t)g.w * g.h * Ends) {
+            return false;
+        }
+        const bool fresh = mLookupTex[d] == 0;
+        if (fresh) {
+            glGenTextures(1, &mLookupTex[d]);
+            glBindTexture(GL_TEXTURE_2D, mLookupTex[d]);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
+        glBindTexture(GL_TEXTURE_2D, mLookupTex[d]);
+        if (fresh || mLookupAll) {
+            glTexImage2D(
+                GL_TEXTURE_2D,
+                0,
+                GL_RGBA32F,
+                3 * g.w,
+                g.h,
+                0,
+                GL_RGBA,
+                GL_FLOAT,
+                g.ends.data()
+            );
+            continue;
+        }
+        int rect[4];
+        if (!mLookupDirty || !GridRect(g, mLookupLo, mLookupHi, rect)) {
+            continue;
+        }
+        // the rows the cuts reached, whole: a row's rays lie together
+        const int rows = rect[3] - rect[1];
+        glTexSubImage2D(
+            GL_TEXTURE_2D,
+            0,
+            0,
+            rect[1],
+            3 * g.w,
+            rows,
+            GL_RGBA,
+            GL_FLOAT,
+            g.ends.data() + (size_t)rect[1] * g.w * Ends
+        );
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    mLookupAll = false;
+    mLookupDirty = false;
+    return true;
+}
+
+void DexelStock::BindLookup(int firstUnit) const
+{
+    for (int d = 0; d < 3; d++) {
+        glActiveTexture(GL_TEXTURE0 + firstUnit + d);
+        glBindTexture(GL_TEXTURE_2D, mLookupTex[d]);
+    }
+    glActiveTexture(GL_TEXTURE0);
+}
+
+bool DexelStock::Sync(double budgetMs)
+{
+    if (!mValid) {
+        return true;
+    }
+    CatchUpMirror();
     DexelMesher::Grid grids[3];
     for (int d = 0; d < 3; d++) {
         const Grid& g = mGrids[d];

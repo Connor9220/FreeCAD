@@ -40,7 +40,6 @@ public:
     void OnChange(ParameterGrp::SubjectType& rCaller, ParameterGrp::MessageType Reason) override;
 
 private:
-    Dummy3DViewer& mView;
     DlgCAMSimulator& mDlg;
 };
 

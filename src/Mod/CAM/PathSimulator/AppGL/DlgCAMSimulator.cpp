@@ -152,6 +152,10 @@ void DlgCAMSimulator::connectTo(GuiDisplay& gui, Dummy3DViewer& dv)
 
     connect(&gui, &GuiDisplay::stockVisibleChanged, this, &DlgCAMSimulator::setStockVisible);
     connect(&gui, &GuiDisplay::baseVisibleChanged, this, &DlgCAMSimulator::setBaseVisible);
+    connect(&gui, &GuiDisplay::compareVisibleChanged, this, [this](bool b) {
+        mMillSimulator->SetCompareVisible(b);
+        update();
+    });
 
     // connect to dummy viewer
 
@@ -203,6 +207,7 @@ void DlgCAMSimulator::updateGui()
 
     mGui->setStockVisible(state.mViewItems & VIEWITEM_SIMULATION);
     mGui->setBaseVisible(state.mViewItems & VIEWITEM_BASE_SHAPE);
+    mGui->setCompareVisible(state.mViewItems & VIEWITEM_COMPARE);
 
     mGui->setPathVisible(state.mViewPath);
     mGui->setSsaoEnabled(state.mViewSSAO);
@@ -511,6 +516,12 @@ void DlgCAMSimulator::timerEvent(QTimerEvent* event)
 {
     (void)event;
 
+    // the NaviCube the viewer underneath works, drawn by it when it changed, to show over the
+    // simulation; its axes stand for the machine's in the corner
+    if (mDummyViewer && mDummyViewer->updateNaviCube()) {
+        mMillSimulator->ShowCornerTriad(mDummyViewer->naviCubeImage().isNull());
+    }
+
     update();
 
     // TODO: keep things simple for now, should probably only update gui if something changed
@@ -654,6 +665,27 @@ void DlgCAMSimulator::paintGL()
     }
 
     mLastProcessSim = now;
+
+    // the NaviCube over it all, where the viewer underneath takes its clicks
+    if (mDummyViewer && !mDummyViewer->naviCubeImage().isNull()) {
+        glUseProgram(0);
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_STENCIL_TEST);
+        glDisable(GL_SCISSOR_TEST);
+        glDisable(GL_CULL_FACE);
+        glActiveTexture(GL_TEXTURE0);
+        const qreal ratio = mDummyViewer->devicePixelRatioF();
+        const QRect cube = mDummyViewer->naviCubeRect();
+        QPainter painter(this);
+        painter.drawImage(
+            QRectF(cube.x() / ratio, cube.y() / ratio, cube.width() / ratio, cube.height() / ratio),
+            mDummyViewer->naviCubeImage()
+        );
+    }
 }
 
 void DlgCAMSimulator::resizeGL(int w, int h)

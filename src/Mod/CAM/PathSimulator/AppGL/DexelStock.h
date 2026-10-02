@@ -122,6 +122,23 @@ public:
         return mRes;
     }
 
+    // The rays' ends on the card, for looking up the material where the model's surface is: a
+    // texture a grid, rays as its rows have them, three texels a ray holding its twelve ends.
+    // Brought up to the cuts so far; false if they cannot be had.
+    bool PrepareLookup();
+    // bound to units firstUnit, +1 and +2, the grids along X, Y and Z
+    void BindLookup(int firstUnit) const;
+    const float* Origin() const
+    {
+        return mOrigin;
+    }
+    // the rays across each grid: the grid along axis d has Dim((d + 1) % 3) columns and
+    // Dim((d + 2) % 3) rows
+    int Dim(int axis) const
+    {
+        return mDims[axis];
+    }
+
 private:
     struct Grid
     {
@@ -202,6 +219,12 @@ private:
         std::vector<float> normals[3];
     };
     std::vector<CpuSnapshot> mCpuSnapshots;
+    void CatchUpMirror();
+    unsigned int mLookupTex[3] = {};
+    bool mLookupAll = true;     // the lookup textures to upload whole
+    bool mLookupDirty = false;  // cuts since they were, in the box below
+    vec3 mLookupLo = {0, 0, 0};
+    vec3 mLookupHi = {0, 0, 0};
     bool mPending = false;  // cuts since the mesh last caught up, in the box below
     vec3 mPendingLo = {0, 0, 0};
     vec3 mPendingHi = {0, 0, 0};

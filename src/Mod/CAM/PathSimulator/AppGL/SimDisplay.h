@@ -55,6 +55,7 @@ public:
     void StartDepthPass();
     void StartGeometryPass(const vec3& objColor, bool invertNormals);
     void StartCloserGeometryPass(const vec3& objColor);
+    Shader& StartCompareGeometryPass(const vec3& objColor);
     void RenderLightObject();
     void ScaleViewToStock(StockObject* obj);
     void RenderResult(bool recalculate, bool ssao);
@@ -121,6 +122,7 @@ protected:
     Shader shader3D, shaderInv3D, shaderFlat, shaderSimFbo;
     Shader shaderGeom, shaderSSAO, shaderSSAOLighting, shaderSSAOBlur;
     Shader shaderGeomCloser;
+    Shader shaderGeomCompare;
     Shader shaderLinePath;
     Shader shaderClear;
 

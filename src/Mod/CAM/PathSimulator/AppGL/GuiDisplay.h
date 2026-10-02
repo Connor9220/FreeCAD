@@ -57,6 +57,7 @@ public:
 
     void setStockVisible(bool b);
     void setBaseVisible(bool b);
+    void setCompareVisible(bool b);
     void setRotateEnabled(bool b);
     void setPathVisible(bool b);
     void setSsaoEnabled(bool b);
@@ -82,6 +83,7 @@ Q_SIGNALS:
     void viewAll();
     void stockVisibleChanged(bool b);
     void baseVisibleChanged(bool b);
+    void compareVisibleChanged(bool b);
     void rotateEnableChanged(bool b);
     void pathVisibleChanged(bool b);
     void ssaoEnableChanged(bool b);
@@ -119,6 +121,7 @@ private:
 
     bool stockVisible = true;
     bool baseVisible = false;
+    bool compareVisible = false;  // the model compared with the cut stock
 };
 
 }  // namespace CAMSimulator

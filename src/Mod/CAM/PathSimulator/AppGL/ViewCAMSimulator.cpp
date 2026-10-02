@@ -278,9 +278,15 @@ void ViewCAMSimulator::applySettings()
 
     mViewSettings = std::make_unique<CAMSimulator::View3DSettings>(hGrpView, *mDummyViewer, *mDlg);
     mCAMSettings = std::make_unique<CAMSettings>(hGrpCAM, *mDlg);
+    // the NaviCube as set for the 3D views: the viewer underneath works it, the simulation shows it
+    mNaviSettings = std::make_unique<Gui::NaviCubeSettings>(
+        App::GetApplication().GetParameterGroupByPath("User parameter:BaseApp/Preferences/NaviCube"),
+        mDummyViewer
+    );
 
     mViewSettings->applySettings();
     mCAMSettings->applySettings();
+    mNaviSettings->applySettings();
 }
 
 ViewCAMSimulator* ViewCAMSimulator::clone()

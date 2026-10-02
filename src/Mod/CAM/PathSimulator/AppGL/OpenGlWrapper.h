@@ -80,6 +80,7 @@ extern QOpenGLExtraFunctions gOpenGLFunctions;
 #define glGenTextures gOpenGLFunctions.glGenTextures
 #define glTexParameteri gOpenGLFunctions.glTexParameteri
 #define glTexImage2D gOpenGLFunctions.glTexImage2D
+#define glTexSubImage2D gOpenGLFunctions.glTexSubImage2D
 #define glDeleteTextures gOpenGLFunctions.glDeleteTextures
 #define glPolygonOffset gOpenGLFunctions.glPolygonOffset
 

@@ -26,6 +26,10 @@
 
 #include "TopoShapeViewProvider.h"
 #include <Gui/View3DInventorViewer.h>
+#include <Inventor/SbLinear.h>
+#include <Inventor/sensors/SoNodeSensor.h>
+#include <QImage>
+#include <QRect>
 
 namespace CAMSimulator
 {
@@ -42,6 +46,20 @@ public:
     void setBaseShape(const Part::TopoShape& shape);
     void setBaseVisible(bool b);
 
+    // FreeCAD's NaviCube, which this viewer, under the simulation and taking its mouse, works as
+    // in any 3D view, drawn by it for the simulation to show over its own drawing: brought up to
+    // date when the camera or the cube changed, true then. Its rectangle is in device pixels
+    // from the top left; the image is empty when the cube is not shown.
+    bool updateNaviCube();
+    const QImage& naviCubeImage() const
+    {
+        return naviImage;
+    }
+    QRect naviCubeRect() const
+    {
+        return naviRect;
+    }
+
 protected:
     void paintEvent(QPaintEvent* event) override;
 
@@ -49,8 +67,18 @@ public:
     bool discardPaintEvent_ = true;
 
 private:
+    static void naviCubeChanged(void* data, SoSensor* sensor);
+
     TopoShapeViewProvider stockViewProvider;
     TopoShapeViewProvider baseViewProvider;
+
+    SoNodeSensor naviSensor;
+    SoNode* naviNode = nullptr;
+    bool naviDirty = true;
+    SbRotation naviCameraRot;
+    SbVec2s naviSize {0, 0};
+    QImage naviImage;
+    QRect naviRect;
 };
 
 }  // namespace CAMSimulator

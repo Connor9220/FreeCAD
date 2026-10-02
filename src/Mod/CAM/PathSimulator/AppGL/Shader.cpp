@@ -527,6 +527,148 @@ const char* FragShaderGeom = R"(
     }
 )";
 
+// The model's surface against the cut stock: as the geometric shader, its colour where the
+// material left meets its surface; red where the cuts went in past it, and, when comparing, the
+// cut colour where material is left on it. Along the rays most square to the surface, the four
+// round the point, each saying how far the material reaches beyond the surface, or how far in
+// the cuts went; all four must agree, the rays being a step apart.
+const char* VertShaderGeomCompare = R"(
+    #version 120
+
+    layout(location = 0) attribute vec3 aPosition;
+    layout(location = 1) attribute vec3 aNormal;
+
+    varying vec3 Position;
+    varying vec3 Normal;
+    varying vec3 PartPosition;
+    varying vec3 PartNormal;
+
+    uniform bool invertedNormals;
+
+    uniform mat4 model;
+    uniform mat4 view;
+    uniform mat4 projection;
+
+    void main()
+    {
+        vec4 partPos = model * vec4(aPosition, 1.0);
+        PartPosition = partPos.xyz;
+        PartNormal = mat3(model) * aNormal;
+        vec4 viewPos = view * partPos;
+        Position = viewPos.xyz;
+        Normal = mat3(view * model) * (invertedNormals ? -aNormal : aNormal);
+        gl_Position = projection * viewPos;
+    }
+)";
+
+const char* FragShaderGeomCompare = R"(
+    #version 120
+
+    varying vec3 Position;
+    varying vec3 Normal;
+    varying vec3 PartPosition;
+    varying vec3 PartNormal;
+
+    uniform vec3 objectColor;
+    uniform sampler2D raysX;
+    uniform sampler2D raysY;
+    uniform sampler2D raysZ;
+    uniform vec3 rayOrigin;
+    uniform float rayStep;
+    uniform vec3 rayDims;
+    uniform float tolerance;
+    uniform vec3 overColor;
+    uniform vec3 underColor;
+    uniform bool showUnder;
+
+    // along the ray at column col, row row of a grid w by h: how far its material reaches
+    // beyond t, outward being the way s points; less than 0 how far in from t the cuts went
+    float reach(sampler2D rays, float col, float row, float w, float h, float t, float s)
+    {
+        if (col < 0.0 || row < 0.0 || col > w - 1.0 || row > h - 1.0) {
+            return 0.0;
+        }
+        float y = (row + 0.5) / h;
+        vec4 q0 = texture2D(rays, vec2((3.0 * col + 0.5) / (3.0 * w), y));
+        vec4 q1 = texture2D(rays, vec2((3.0 * col + 1.5) / (3.0 * w), y));
+        vec4 q2 = texture2D(rays, vec2((3.0 * col + 2.5) / (3.0 * w), y));
+        float e[12];
+        e[0] = q0.x; e[1] = q0.y; e[2] = q0.z; e[3] = q0.w;
+        e[4] = q1.x; e[5] = q1.y; e[6] = q1.z; e[7] = q1.w;
+        e[8] = q2.x; e[9] = q2.y; e[10] = q2.z; e[11] = q2.w;
+        float inward = 1.0e9;
+        for (int k = 0; k < 6; k++) {
+            float a = e[2 * k];
+            float b = e[2 * k + 1];
+            if (a > 1.0e29) {
+                continue;
+            }
+            if (t >= a && t <= b) {
+                return s > 0.0 ? b - t : t - a;
+            }
+            if (s > 0.0 && b < t) {
+                inward = min(inward, t - b);
+            }
+            if (s < 0.0 && a > t) {
+                inward = min(inward, a - t);
+            }
+        }
+        return -inward;
+    }
+
+    void main()
+    {
+        vec3 n = PartNormal;
+        vec3 m = abs(n);
+        vec3 p = (PartPosition - rayOrigin) / rayStep - 0.5;
+        // the grid whose rays are most square to the surface, its columns and rows across
+        float col, row, w, h, t, s;
+        int axis;
+        if (m.x >= m.y && m.x >= m.z) {
+            axis = 0; col = p.y; row = p.z; w = rayDims.y; h = rayDims.z;
+            t = PartPosition.x; s = sign(n.x);
+        }
+        else if (m.y >= m.z) {
+            axis = 1; col = p.z; row = p.x; w = rayDims.z; h = rayDims.x;
+            t = PartPosition.y; s = sign(n.y);
+        }
+        else {
+            axis = 2; col = p.x; row = p.y; w = rayDims.x; h = rayDims.y;
+            t = PartPosition.z; s = sign(n.z);
+        }
+        float c0 = floor(col);
+        float r0 = floor(row);
+        float least = 1.0e9;
+        float most = -1.0e9;
+        for (int i = 0; i < 4; i++) {
+            float c = c0 + float(i - 2 * (i / 2));
+            float r = r0 + float(i / 2);
+            float d;
+            if (axis == 0) {
+                d = reach(raysX, c, r, w, h, t, s);
+            }
+            else if (axis == 1) {
+                d = reach(raysY, c, r, w, h, t, s);
+            }
+            else {
+                d = reach(raysZ, c, r, w, h, t, s);
+            }
+            least = min(least, d);
+            most = max(most, d);
+        }
+        vec3 color = objectColor;
+        if (most < -tolerance) {
+            color = overColor;
+        }
+        else if (showUnder && least > tolerance) {
+            color = underColor;
+        }
+        gl_FragData[0] = vec4(color, 1.0f);
+        gl_FragData[1] = vec4(Position, 0.0f);
+        gl_FragData[2] = vec4(normalize(Normal), 0.0f);
+    }
+)";
+
 const char* FragShaderSSAO = R"(
     #version 120
 

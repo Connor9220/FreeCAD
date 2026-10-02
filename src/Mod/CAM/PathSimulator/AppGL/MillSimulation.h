@@ -41,7 +41,8 @@
 
 #define VIEWITEM_SIMULATION 1
 #define VIEWITEM_BASE_SHAPE 2
-#define VIEWITEM_MAX 4
+#define VIEWITEM_COMPARE 4  // the model alone, coloured where the cut stock differs from it
+#define VIEWITEM_MAX 8
 
 namespace CAMSimulator
 {
@@ -162,6 +163,8 @@ public:
     void SetBaseObject(const std::vector<Vertex>& verts, const std::vector<GLushort>& indices);
     void SetBaseVisible(bool b);
     bool IsBaseVisible() const;
+    void SetCompareVisible(bool b);
+    bool IsCompareVisible() const;
 
     void SetPathVisible(bool b);
     void EnableSsao(bool b);
@@ -172,6 +175,8 @@ public:
     void SetAxisColors(unsigned long x, unsigned long y, unsigned long z, unsigned long origin);
     // pixels a screen point, for the indicators' sizes
     void SetPixelRatio(float ratio);
+    // the machine's axes in the corner, left out where the NaviCube shows them
+    void ShowCornerTriad(bool b);
     void EnableTablePose(bool b);
     void SetIndexMode(int mode);
     void SetRotaryAxes(const std::vector<SimRotaryAxis>& axes);
@@ -258,6 +263,7 @@ public:
     DexelStock mDexel;
     AxisOverlay mAxisOverlay;
     float mPixelRatio = 1;
+    bool mShowCornerTriad = true;
     bool mToolShown = false;  // where the tool was last drawn, on the part, and its tilt
     vec3 mToolPos = {0, 0, 0};
     mat4x4 mToolRot = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
@@ -300,6 +306,7 @@ public:
     vec3 toolColor = {0.5f, 0.4f, 0.3f};
     vec3 holderColor = {0.62f, 0.64f, 0.68f};
     vec3 holderHitColor = {0.9f, 0.15f, 0.1f};
+    vec3 overcutColor = {0.9f, 0.15f, 0.1f};
     vec3 baseShapeColor = {0.7f, 0.6f, 0.5f};
 };
 

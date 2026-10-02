@@ -23,6 +23,7 @@
  ***************************************************************************/
 
 #include "EndMill.h"
+#include <algorithm>
 
 namespace CAMSimulator
 {
@@ -54,12 +55,14 @@ EndMill::EndMill(const std::vector<float>& toolProfile, int toolid, float diamet
     profilePoints.resize(buffSize);
 
     // copy profile points
+    // add some width to reduce simulation artifacts, a point on the axis staying there: a tip
+    // moved off it leaves the tool open at the tip and along its seams. A hair at most, so a big
+    // tool does not cut visibly past where it goes.
+    const float grow = std::min(diameter * 0.01f, 0.05f);
     for (int i = 0; i < srcBuffSize; i += 2) {
-        // add some width to reduce simulation artifacts, a point on the axis staying there: a
-        // tip moved off it leaves the tool open at the tip and along its seams
         const bool onAxis = fabs(toolProfile[i]) <= 0.0001f;
-        profilePoints[i] = onAxis ? 0.0f : toolProfile[i] + diameter * 0.01f;
-        profilePoints[i + 1] = toolProfile[i + 1] - diameter * 0.01f;
+        profilePoints[i] = onAxis ? 0.0f : toolProfile[i] + grow;
+        profilePoints[i + 1] = toolProfile[i + 1] - grow;
     }
     if (missingCenterPoint) {
         profilePoints[srcBuffSize] = 0.0F;
