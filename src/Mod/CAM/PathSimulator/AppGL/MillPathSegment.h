@@ -59,7 +59,8 @@ public:
     virtual ~MillPathSegment();
 
     virtual void AppendPathPoints(std::vector<MillPathPosition>& pointsBuffer);
-    virtual void render(int substep);
+    // the sweep to substep; a straight move's from step from, the piece since then
+    virtual void render(int substep, int from = 0);
     virtual void GetHeadPosition(vec3 headPos);
     void GetToolRotation(mat4x4 rot) const;
     void SetMinSimSteps(int steps);

@@ -81,6 +81,9 @@ public:
     std::vector<Vertex> verts;
     std::vector<GLushort> indices;
     bool needsUpdate = false;
+    // the colour it is drawn in, where it has one of its own
+    bool colored = false;
+    float color[3] = {0, 0, 0};
 };
 
 // A G-code line, or a change of the work plane frame the lines after it are given in
@@ -144,6 +147,14 @@ public:
     void setStockShape(const Part::TopoShape& shape, float resolution);
     void setStockVisible(bool b);
     void setBaseShape(const Part::TopoShape& shape, float resolution);
+    // cuttable: soft jaws, the tool cutting them only a warning
+    void setWorkholdingShape(
+        const Part::TopoShape& shape,
+        float resolution,
+        bool cuttable = false,
+        const float* color = nullptr,
+        bool append = false
+    );
     void setBaseVisible(bool b);
 
     void setRotateEnabled(bool b);
@@ -187,6 +198,9 @@ private:
     const SoCamera* mCamera = nullptr;
     SimShape mStock;
     SimShape mBase;
+    std::vector<SimShape> mWorkholding;  // in pieces each within short indices
+    std::vector<SimShape> mSoftJaws;     // cut into with a warning, in pieces the same
+    bool mWorkholdingNeedsUpdate = false;
 
     std::unique_ptr<MillSimulationState> mState;
     clock::time_point mLastProcessSim = clock::time_point::min();

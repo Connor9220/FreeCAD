@@ -31,6 +31,8 @@
 
 #include "MillMotion.h"
 
+class QLabel;
+
 namespace CAMSimulator
 {
 class Ui_GuiDisplay;
@@ -67,11 +69,13 @@ public:
     void setIncrementalEnabled(bool b);
     void setDexelEnabled(bool b);
     void setAxesEnabled(bool b);
-    // stop on collision as set, shown off and greyed out where collisions are not found
+    // stop on collision as set, shown off and grayed out where collisions are not found
     void setStopOnCollision(bool b, bool available);
     // where the tool, its shank or its holder collides, each run of hits from its first to its
     // last, as shares of the program's time
     void setCollisions(const std::vector<std::pair<float, float>>& stages);
+    // where the tool cuts into soft jaws, the same
+    void setCuts(const std::vector<std::pair<float, float>>& stages);
     void setFps(float fps);
 
 Q_SIGNALS:
@@ -99,6 +103,9 @@ Q_SIGNALS:
 protected:
     void resizeEvent(QResizeEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
+    // see-through over the 3D view: what is drawn again starts from nothing, not from what was
+    // there, else a part drawn again over it leaves holes and old pixels
+    void paintEvent(QPaintEvent* event) override;
 
 private Q_SLOTS:
     void on_playButton_clicked();
@@ -124,6 +131,10 @@ private:
     bool stockVisible = true;
     bool baseVisible = false;
     bool compareVisible = false;  // the model compared with the cut stock
+    // the view shown, named on its button, and what a click turns to
+    void showView();
+    // a label's text, set only when it changes
+    void relabel(QLabel* label, const QString& text);
 };
 
 }  // namespace CAMSimulator

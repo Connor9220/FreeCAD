@@ -25,10 +25,14 @@
 #include "GuiDisplay.h"
 
 #include "ui_GuiDisplay.h"
+#include <QFontMetrics>
+#include <QLabel>
+#include <QPaintEvent>
 #include <QPainter>
 #include <QStyleOptionSlider>
 #include <Base/Quantity.h>
 #include <Base/Unit.h>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -106,6 +110,15 @@ public:
         update();
     }
 
+    void setCuts(const std::vector<std::pair<float, float>>& c)
+    {
+        if (c == cuts) {
+            return;
+        }
+        cuts = c;
+        update();
+    }
+
     void setSpans(const std::vector<SimTimeSpan>& s)
     {
         bool same = s.size() == spans.size();
@@ -123,7 +136,7 @@ public:
 protected:
     void paintEvent(QPaintEvent* /*event*/) override
     {
-        if (starts.empty() && hits.empty()) {
+        if (starts.empty() && hits.empty() && cuts.empty()) {
             return;
         }
         // where the slider puts its handle's middle for a value, so the lines meet the handle
@@ -131,23 +144,27 @@ protected:
         sliderSpan(slider, x0, span);
 
         QPainter painter(this);
-        // each run of collisions: a red line where it starts, a notch above and below to stand
-        // out, and a faint band on to where it ends
-        const QColor red(230, 40, 30);
-        QColor band = red;
-        band.setAlpha(90);
-        for (const auto& [from, to] : hits) {
-            const int x = x0 + (int)std::lround(from * (float)span);
-            const int xEnd = x0 + (int)std::lround(to * (float)span);
-            if (xEnd > x) {
-                const int third = height() / 3;
-                painter.fillRect(x, third, xEnd - x, height() - 2 * third, band);
+        // each run of collisions: a line where it starts, a notch above and below to stand out,
+        // and a faint band on to where it ends; red, and yellow for cuts into soft jaws
+        auto drawRuns = [&](const std::vector<std::pair<float, float>>& runs,
+                            const QColor& color) {
+            QColor band = color;
+            band.setAlpha(90);
+            for (const auto& [from, to] : runs) {
+                const int x = x0 + (int)std::lround(from * (float)span);
+                const int xEnd = x0 + (int)std::lround(to * (float)span);
+                if (xEnd > x) {
+                    const int third = height() / 3;
+                    painter.fillRect(x, third, xEnd - x, height() - 2 * third, band);
+                }
+                painter.setPen(QPen(color, 2));
+                painter.drawLine(x, 1, x, height() - 2);
+                painter.fillRect(x - 3, 0, 7, 3, color);
+                painter.fillRect(x - 3, height() - 3, 7, 3, color);
             }
-            painter.setPen(QPen(red, 2));
-            painter.drawLine(x, 1, x, height() - 2);
-            painter.fillRect(x - 3, 0, 7, 3, red);
-            painter.fillRect(x - 3, height() - 3, 7, 3, red);
-        }
+        };
+        drawRuns(hits, QColor(230, 40, 30));
+        drawRuns(cuts, QColor(240, 200, 40));
         if (starts.empty()) {
             return;
         }
@@ -172,6 +189,7 @@ private:
     QSlider* slider;
     std::vector<float> starts;
     std::vector<std::pair<float, float>> hits;
+    std::vector<std::pair<float, float>> cuts;
     std::vector<SimTimeSpan> spans;
 };
 
@@ -259,6 +277,38 @@ GuiDisplay::GuiDisplay(QWidget* parent)
 {
     ui->setupUi(this);
 
+    // the readouts as wide as their widest, so the row does not move as they change
+    const QFontMetrics metrics(ui->timeLabel->font());
+    const int padding = 16;
+    ui->timeLabel->setMinimumWidth(
+        metrics.horizontalAdvance(QStringLiteral("00:00:00 / 00:00:00")) + padding
+    );
+    ui->feedLabel->setMinimumWidth(
+        metrics.horizontalAdvance(tr("Rapid %1").arg(QStringLiteral("00000.0 mm/min"))) + padding
+    );
+    ui->fpsLabel->setMinimumWidth(
+        metrics.horizontalAdvance(tr("%1 fps").arg(QStringLiteral("000"))) + padding
+    );
+    // each readout its own width, the speed and the clock side by side: the operation's name,
+    // the one that runs long, takes the room left over
+    ui->speedLabel->setMinimumWidth(metrics.horizontalAdvance(QStringLiteral("x1000")));
+    for (QLabel* label : {ui->speedLabel, ui->timeLabel, ui->feedLabel, ui->fpsLabel}) {
+        label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+    }
+    ui->opLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+
+    // the view the stock and model button shows, named beside its icon
+    ui->stockModelButton->setCheckable(false);
+    ui->stockModelButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    // as wide as its widest name, so changing the view does not move the buttons beside it
+    int widest = 0;
+    for (const QString& name : {tr("Stock"), tr("Model"), tr("Both"), tr("Compare")}) {
+        ui->stockModelButton->setText(name);
+        widest = std::max(widest, ui->stockModelButton->sizeHint().width());
+    }
+    ui->stockModelButton->setFixedWidth(widest);
+    showView();
+
     opMarkers = new OperationMarkers(ui->stageSlider);
     ui->stageSlider->installEventFilter(this);
 
@@ -273,6 +323,10 @@ GuiDisplay::GuiDisplay(QWidget* parent)
 
     indexTimeline = new IndexTimeline(ui->stageSlider, this);
     ui->verticalLayout->insertWidget(sliderRow + 1, indexTimeline);
+
+    // the frames drawn per second up in the top left corner, out of the bar's way
+    ui->horizontalLayout->removeWidget(ui->fpsLabel);
+    ui->verticalLayout->insertWidget(0, ui->fpsLabel, 0, Qt::AlignLeft | Qt::AlignTop);
 
     playing = true;
     setPlaying(false);
@@ -301,6 +355,13 @@ GuiDisplay::GuiDisplay(QWidget* parent)
 GuiDisplay::~GuiDisplay()
 {
     delete ui;
+}
+
+void GuiDisplay::paintEvent(QPaintEvent* event)
+{
+    QPainter painter(this);
+    painter.setCompositionMode(QPainter::CompositionMode_Source);
+    painter.fillRect(event->rect(), Qt::transparent);
 }
 
 bool GuiDisplay::eventFilter(QObject* watched, QEvent* event)
@@ -375,11 +436,16 @@ void GuiDisplay::setOperationStarts(const std::vector<float>& starts)
     opMarkers->setStarts(starts);
 }
 
+void GuiDisplay::relabel(QLabel* label, const QString& text)
+{
+    if (label->text() != text) {
+        label->setText(text);
+    }
+}
+
 void GuiDisplay::setOperation(const QString& name)
 {
-    if (ui->opLabel->text() != name) {
-        ui->opLabel->setText(name);
-    }
+    relabel(ui->opLabel, name);
 }
 
 void GuiDisplay::setSpeed(int s)
@@ -449,16 +515,15 @@ static QString formatTime(float seconds)
 
 void GuiDisplay::setTime(float seconds, float totalSeconds)
 {
-    ui->timeLabel->setText(
+    relabel(
+        ui->timeLabel,
         QStringLiteral("%1 / %2").arg(formatTime(seconds), formatTime(totalSeconds))
     );
 }
 
 void GuiDisplay::setFeedLabel(const QString& text, bool rapid)
 {
-    if (ui->feedLabel->text() != text) {
-        ui->feedLabel->setText(text);
-    }
+    relabel(ui->feedLabel, text);
     // rapids in red
     const QString style = QStringLiteral("color:%1; padding-left:12px")
                               .arg(rapid ? QStringLiteral("#ff5050") : QStringLiteral("white"));
@@ -494,24 +559,48 @@ void GuiDisplay::setStockVisible(bool b)
 {
     stockVisible = b;
 
-    QSignalBlocker blocker(ui->stockModelButton);
-    ui->stockModelButton->setChecked((stockVisible && baseVisible) || compareVisible);
+    showView();
 }
 
 void GuiDisplay::setBaseVisible(bool b)
 {
     baseVisible = b;
 
-    QSignalBlocker blocker(ui->stockModelButton);
-    ui->stockModelButton->setChecked((stockVisible && baseVisible) || compareVisible);
+    showView();
 }
 
 void GuiDisplay::setCompareVisible(bool b)
 {
     compareVisible = b;
 
-    QSignalBlocker blocker(ui->stockModelButton);
-    ui->stockModelButton->setChecked((stockVisible && baseVisible) || compareVisible);
+    showView();
+}
+
+void GuiDisplay::showView()
+{
+    QString text;
+    QString tip;
+    if (compareVisible) {
+        text = tr("Compare");
+        tip = tr(
+            "The model compared with the cut stock: red where the cuts went past it, the cut "
+            "colour where stock is left on it. Click for the stock."
+        );
+    }
+    else if (stockVisible && baseVisible) {
+        text = tr("Both");
+        tip = tr("The cut stock with the model in it. Click to compare them.");
+    }
+    else if (baseVisible) {
+        text = tr("Model");
+        tip = tr("The model. Click for the cut stock with the model in it.");
+    }
+    else {
+        text = tr("Stock");
+        tip = tr("The stock as it is cut. Click for the model.");
+    }
+    ui->stockModelButton->setText(text);
+    ui->stockModelButton->setToolTip(tip);
 }
 
 void GuiDisplay::on_stockModelButton_clicked()
@@ -594,6 +683,11 @@ void GuiDisplay::setCollisions(const std::vector<std::pair<float, float>>& stage
     opMarkers->setHits(stages);
 }
 
+void GuiDisplay::setCuts(const std::vector<std::pair<float, float>>& stages)
+{
+    opMarkers->setCuts(stages);
+}
+
 void GuiDisplay::setDexelEnabled(bool b)
 {
     QSignalBlocker blocker(ui->dexelButton);
@@ -602,10 +696,7 @@ void GuiDisplay::setDexelEnabled(bool b)
 
 void GuiDisplay::setFps(float fps)
 {
-    const QString text = fps > 0 ? tr("%1 fps").arg(fps, 0, 'f', 0) : QString();
-    if (ui->fpsLabel->text() != text) {
-        ui->fpsLabel->setText(text);
-    }
+    relabel(ui->fpsLabel, fps > 0 ? tr("%1 fps").arg(fps, 0, 'f', 0) : QString());
 }
 
 void GuiDisplay::setIndexMode(int mode)

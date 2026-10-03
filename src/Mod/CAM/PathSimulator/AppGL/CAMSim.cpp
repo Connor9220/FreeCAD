@@ -74,6 +74,20 @@ void CAMSim::SetBaseShape(const Part::TopoShape& baseShape, float resolution)
     DlgCAMSimulator::instance()->setBaseShape(baseShape, resolution);
 }
 
+void CAMSim::SetWorkholding(
+    const Part::TopoShape& shape,
+    float resolution,
+    bool cuttable,
+    const float* color,
+    bool append
+)
+{
+    if (shape.isNull()) {
+        return;
+    }
+    DlgCAMSimulator::instance()->setWorkholdingShape(shape, resolution, cuttable, color, append);
+}
+
 void CAMSim::AddCommand(Command* cmd)
 {
     std::string gline = cmd->toGCode();

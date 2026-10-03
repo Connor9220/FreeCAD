@@ -57,7 +57,24 @@ class CAMSim(BaseClass):
         Set the shape of the tool to be used for simulation, and the outline of the holder
         it is set in, if any, drawn with it. shape is the part of the tool that cuts; shank, the
         tool above its cutting edges, up to the holder: drawn with it, cutting nothing, a
-        collision where it meets the stock
+        collision where it meets the stock or the workholding
+        """
+        ...
+
+    def SetWorkholding(
+        self,
+        shape: TopoShape,
+        resolution: float,
+        cuttable: bool = False,
+        color: tuple[float, float, float] | None = None,
+        append: bool = False,
+    ) -> None:
+        """
+        Set the vises, clamps and fixtures holding the stock: shown, and found where a tool or
+        its holder hits them, never cut. With cuttable, what may be cut into, soft jaws: the
+        tool cutting them a warning that does not stop the simulation, its holder still a hit.
+        Drawn in color, red, green and blue from 0 to 1, else the simulator's own; with append,
+        added to what was set before, so each colour of the workholding can be set in turn
         """
         ...
 

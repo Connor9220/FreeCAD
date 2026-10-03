@@ -69,6 +69,15 @@ public:
         const std::vector<float>& shankProfilePoints = {}
     );
     void SetBaseShape(const Part::TopoShape& baseShape, float resolution);
+    // cuttable: soft jaws, the tool cutting them only a warning
+    // color, red, green and blue, else the simulator's own; with append, added to what was set
+    void SetWorkholding(
+        const Part::TopoShape& shape,
+        float resolution,
+        bool cuttable = false,
+        const float* color = nullptr,
+        bool append = false
+    );
     void AddCommand(Command* cmd);
     void BeginOperation(const std::string& name);
     void SetFrame(

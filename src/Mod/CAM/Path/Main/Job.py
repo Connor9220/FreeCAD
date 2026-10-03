@@ -106,13 +106,14 @@ def workholdingParts(job, cuttable=False):
     """workholdingParts(job, cuttable=False) ... the pieces of the job's workholding in use, as
     (part, shape) pairs, each shape where it stands, the part the one it shows as: a vise's parts
     shown, hard jaw plates swapped for soft jaws being hidden, and out of the tools' way; clamps
-    and the like whole. With cuttable, only what may be cut into, soft jaws and soft parallels;
-    without, the rest."""
+    and the like whole; and the stock of the other Jobs sharing a vise, in its other stations.
+    With cuttable, only what may be cut into, soft jaws and soft parallels; without, the rest."""
     import Part
     import Path.Main.Workholding as PathWorkholding
 
     group = getattr(job, "Workholding", None)
     parts = []
+    others = []
     for obj in getattr(group, "Group", []) or []:
         # what is cut into on purpose, a table's waste board, nothing is found hitting
         if not getattr(obj, "Collides", True):
@@ -133,6 +134,8 @@ def workholdingParts(job, cuttable=False):
                     shape = shape.copy()
                     shape.Placement = obj.Placement.multiply(shape.Placement)
                     parts.append((part, shape))
+                # the parts of the Jobs sharing it, as big as they can be: their stock
+                others += [o for o in PathWorkholding.sharedWith(obj) if o not in others]
             elif not cuttable:
                 shape = Part.getShape(
                     obj, "", needSubElement=False, transform=True, noElementMap=True
@@ -141,6 +144,11 @@ def workholdingParts(job, cuttable=False):
                     parts.append((obj, shape))
         except Exception as e:
             Path.Log.warning(f"Workholding {obj.Label} has no shape: {e}")
+    if not cuttable:
+        for other in others:
+            stock = getattr(other, "Stock", None)
+            if stock is not None and not stock.Shape.isNull() and stock.Shape.Solids:
+                parts.append((stock, stock.Shape.copy()))
     return parts
 
 

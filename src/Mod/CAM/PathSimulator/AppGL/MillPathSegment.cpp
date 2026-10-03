@@ -190,7 +190,7 @@ void MillPathSegment::AppendPathPoints(std::vector<MillPathPosition>& pointsBuff
     }
 }
 
-void MillPathSegment::render(int step)
+void MillPathSegment::render(int step, int from)
 {
     mStepNumber = step;
     mat4x4 mat, mat2, rmat;
@@ -269,17 +269,21 @@ void MillPathSegment::render(int step)
             }
         }
         else {
-            float renderDist = step * mStepDistance;
+            // from the step from to this one: the tool at the end where it has come to, down
+            // only as far as it has, a ramp's end at the move's last depth cutting too deep
+            from = std::clamp(from, 0, step);
+            float renderDist = (step - from) * mStepDistance;
             mat4x4_translate_in_place_v(mat, mStartPos);
             mat4x4_rotate_Z(mat, mat, mXYAngle);
             mat4x4_rotate_Z(rmat, rmat, mXYAngle);
+            mat4x4_translate_in_place(mat, from * mStepDistance, 0, from * mStepLength[PZ]);
             mat4x4_dup(mat2, mat);
             if (mDiff[PZ] != 0.0) {
                 mat4x4_mul(mat2, mat2, mShearMat);
             }
             mat4x4_scale_aniso(mat2, mat2, renderDist, 1, 1);
             endmill->pathShape.Render(mat2, rmat);
-            mat4x4_translate_in_place(mat, renderDist, 0, mDiff[PZ]);
+            mat4x4_translate_in_place(mat, renderDist, 0, (step - from) * mStepLength[PZ]);
             endmill->halfToolShape.Render(mat, rmat);
         }
     }

@@ -80,6 +80,10 @@ void MillSimulation::Clear()
     mCollisionOps.clear();
     mStopOps.clear();
     mStopAt = -1;
+    mWorkholding.Free();
+    mWorkholdingTried = false;
+    mSoftJaws.Free();
+    mSoftJawsTried = false;
 
     for (unsigned int i = 0; i < mToolTable.size(); i++) {
         delete mToolTable[i];
@@ -109,6 +113,10 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
     mCollisionOps.clear();
     mStopOps.clear();
     mStopAt = -1;
+    mWorkholding.Free();
+    mWorkholdingTried = false;
+    mSoftJaws.Free();
+    mSoftJawsTried = false;
     mDexelSeg = 0;
     mDexelSub = 0;
     millPathLine.Clear();
@@ -1161,18 +1169,30 @@ void MillSimulation::RenderTool()
     mat4x4_dup(mToolRot, rmat);
     mToolShown = true;
     // mat4x4_translate(tmat, toolPos.x, toolPos.y, toolPos.z);
-    simDisplay.StartGeometryPass(CollidesAt(RapidIntoStock) ? holderHitColor : toolColor, false);
+    const bool toolHits = CollidesAt(RapidIntoStock) || CollidesAt(ToolHitsWorkholding);
+    simDisplay.StartGeometryPass(
+        toolHits                         ? holderHitColor
+            : CollidesAt(ToolCutsSoftJaw) ? toolCutsSoftJawColor
+                                          : toolColor,
+        false
+    );
     p->endmill->toolShape.Render(tmat, rmat);
     if (p->endmill->HasShank()) {
         simDisplay.StartGeometryPass(
-            CollidesAt(ShankMeetsStock) ? holderHitColor : shankColor,
+            CollidesAt(ShankMeetsStock) || CollidesAt(ShankHitsWorkholding)
+                    || CollidesAt(ShankHitsSoftJaw)
+                ? holderHitColor
+                : shankColor,
             false
         );
         p->endmill->shankShape.Render(tmat, rmat);
     }
     if (p->endmill->HasHolder()) {
         simDisplay.StartGeometryPass(
-            CollidesAt(HolderMeetsStock) ? holderHitColor : holderColor,
+            CollidesAt(HolderMeetsStock) || CollidesAt(HolderHitsWorkholding)
+                    || CollidesAt(HolderHitsSoftJaw)
+                ? holderHitColor
+                : holderColor,
             false
         );
         p->endmill->holderShape.Render(tmat, rmat);
@@ -1251,12 +1271,17 @@ void MillSimulation::Render()
         const bool dexel = mDexelEngine
             && (mViewItems & (VIEWITEM_SIMULATION | VIEWITEM_COMPARE)) != 0 && PrepareDexel();
         if (dexel) {
+            PrepareWorkholding();
             mDexelBehind = !CutDexel();
             // and the mesh once the cuts have caught up, a few milliseconds of it a frame: while
             // they are behind, every few frames, so a long catch up still shows its progress
             mDexelFramesBehind = mDexelBehind ? mDexelFramesBehind + 1 : 0;
             if ((!mDexelBehind || mDexelFramesBehind % 8 == 0)
                 && !mDexel.Sync(DexelMeshMsPerFrame)) {
+                mDexelBehind = true;
+            }
+            // and the soft jaws', as they are cut
+            if (mSoftJaws.IsValid() && !mDexelBehind && !mSoftJaws.Sync(DexelMeshMsPerFrame)) {
                 mDexelBehind = true;
             }
             simDisplay.RestoreViewport();
@@ -1274,6 +1299,7 @@ void MillSimulation::Render()
             RenderSimulation();
         }
         RenderTool();
+        RenderWorkholding(dexel);
         RenderBaseShape();
         RenderPath();
         // the dexels behind the step keep cutting next frame
@@ -1394,6 +1420,10 @@ void MillSimulation::SetArbitraryStock(
     mCollisionOps.clear();
     mStopOps.clear();
     mStopAt = -1;
+    mWorkholding.Free();
+    mWorkholdingTried = false;
+    mSoftJaws.Free();
+    mSoftJawsTried = false;
     mStockPoints.clear();
     for (const Vertex& v : verts) {
         mStockPoints.push_back({v.x, v.y, v.z});
@@ -1419,6 +1449,136 @@ bool MillSimulation::IsStockVisible() const
 void MillSimulation::SetBaseObject(const std::vector<Vertex>& verts, const std::vector<GLushort>& indices)
 {
     mBaseShape.GenerateSolid(verts, indices);
+}
+
+void MillSimulation::SetWorkholding(
+    const std::vector<std::pair<std::vector<Vertex>, std::vector<GLushort>>>& pieces,
+    const std::vector<Color>& colors
+)
+{
+    mWorkholdingShapes.clear();
+    mWorkholdingColors = colors;
+    mWorkholdingColors.resize(pieces.size());
+    mWorkholdingVerts.clear();
+    mWorkholdingIndices.clear();
+    for (const auto& [verts, indices] : pieces) {
+        auto solid = std::make_unique<SolidObject>();
+        solid->GenerateSolid(verts, indices);
+        mWorkholdingShapes.push_back(std::move(solid));
+        const auto offset = (unsigned int)mWorkholdingVerts.size();
+        mWorkholdingVerts.insert(mWorkholdingVerts.end(), verts.begin(), verts.end());
+        for (GLushort i : indices) {
+            mWorkholdingIndices.push_back(offset + i);
+        }
+    }
+    mWorkholding.Free();
+    mWorkholdingTried = false;
+    mSoftJaws.Free();
+    mSoftJawsTried = false;
+    simDisplay.updateDisplay = true;
+}
+
+void MillSimulation::SetSoftJaws(
+    const std::vector<std::pair<std::vector<Vertex>, std::vector<GLushort>>>& pieces
+)
+{
+    mSoftJawShapes.clear();
+    mSoftJawVerts.clear();
+    mSoftJawIndices.clear();
+    for (const auto& [verts, indices] : pieces) {
+        auto solid = std::make_unique<SolidObject>();
+        solid->GenerateSolid(verts, indices);
+        mSoftJawShapes.push_back(std::move(solid));
+        const auto offset = (unsigned int)mSoftJawVerts.size();
+        mSoftJawVerts.insert(mSoftJawVerts.end(), verts.begin(), verts.end());
+        for (GLushort i : indices) {
+            mSoftJawIndices.push_back(offset + i);
+        }
+    }
+    mSoftJaws.Free();
+    mSoftJawsTried = false;
+    simDisplay.updateDisplay = true;
+}
+
+bool MillSimulation::PrepareWorkholding()
+{
+    // their dexels set up once the stock's are, half a millimetre apart or the stock's spacing:
+    // the workholding's, and the soft jaws'
+    if (!mDexel.IsValid()) {
+        return false;
+    }
+    const float resolution = std::max(mDexel.Resolution(), 0.5f);
+    auto prepare = [resolution](
+                       DexelStock& dexels,
+                       bool& tried,
+                       const std::vector<Vertex>& verts,
+                       const std::vector<unsigned int>& indices,
+                       const char* what
+                   ) {
+        if (dexels.IsValid()) {
+            return true;
+        }
+        if (tried || verts.empty()) {
+            return false;
+        }
+        tried = true;
+        if (!dexels.InitSolid(verts, indices, resolution)) {
+            Base::Console().warning(
+                "CAM Simulator: the {} could not be set up for finding collisions.\n",
+                what
+            );
+            return false;
+        }
+        return true;
+    };
+    const bool workholding = prepare(
+        mWorkholding,
+        mWorkholdingTried,
+        mWorkholdingVerts,
+        mWorkholdingIndices,
+        "workholding"
+    );
+    const bool softJaws
+        = prepare(mSoftJaws, mSoftJawsTried, mSoftJawVerts, mSoftJawIndices, "soft jaws");
+    return workholding || softJaws;
+}
+
+void MillSimulation::RenderWorkholding(bool dexel)
+{
+    // each piece in its own colour, the vise's as the model shows it, else the workholding's
+    const float* drawn = nullptr;
+    for (size_t i = 0; i < mWorkholdingShapes.size(); i++) {
+        const Color& color = mWorkholdingColors[i];
+        const float* rgb = color.own ? color.rgb : workholdingColor;
+        if (rgb != drawn) {
+            simDisplay.StartGeometryPass(*reinterpret_cast<const vec3*>(rgb), false);
+            drawn = rgb;
+        }
+        mWorkholdingShapes[i]->render();
+    }
+    // soft jaws as they are cut, where the stock is cut as dexels too: what the tool has cut
+    // away yellow, as it is while it cuts them
+    if (dexel && mSoftJaws.IsValid()) {
+        mat4x4 view, projection;
+        float pointScale = 1;
+        bool perspective = true;
+        simDisplay.GetDexelView(view, projection, pointScale, perspective);
+        mSoftJaws.Render(
+            view,
+            projection,
+            pointScale,
+            perspective,
+            softJawColor,
+            toolCutsSoftJawColor
+        );
+        return;
+    }
+    if (!mSoftJawShapes.empty()) {
+        simDisplay.StartGeometryPass(softJawColor, false);
+        for (const auto& solid : mSoftJawShapes) {
+            solid->render();
+        }
+    }
 }
 
 void MillSimulation::SetBaseVisible(bool b)
@@ -1496,7 +1656,9 @@ void MillSimulation::EnableDexel(bool b)
 bool MillSimulation::PrepareDexel()
 {
     // the dexels are set up from the stock's mesh the first time they are drawn, the rays a
-    // sixtieth of the stock's longest side apart for each step of quality
+    // sixtieth of the stock's longest side apart for each step of quality, but no closer than
+    // half a millimetre over the quality: on a small stock they would be finer than anything
+    // seen, each cut and each mesh many times the work
     if (mDexel.IsValid()) {
         return true;
     }
@@ -1505,10 +1667,13 @@ bool MillSimulation::PrepareDexel()
     }
     mDexelTried = true;
     const float maxDim = std::max({mStockObject.size[0], mStockObject.size[1], mStockObject.size[2]});
-    const float resolution = maxDim / (60.f * std::clamp(mQuality, 1.f, 10.f));
+    const float quality = std::clamp(mQuality, 1.f, 10.f);
+    const float resolution = std::max(maxDim / (60.f * quality), 0.5f / quality);
     mDexelSeg = 0;
     mDexelSub = 0;
     mDexelSnaps.clear();
+    mSoftJawSnaps.clear();
+    mSoftJaws.Reset();
     if (!mDexel.Init(mStockVerts, mStockIndices, resolution)) {
         Base::Console().warning(
             "CAM Simulator: the dexel stock could not be set up on this OpenGL; drawing with CSG.\n"
@@ -1523,20 +1688,31 @@ bool MillSimulation::PrepareDexel()
 void MillSimulation::FlushDexel()
 {
     mDexel.Flush();
+    mWorkholding.Flush();
+    mSoftJaws.Flush();
     TakeCollisions();
 }
 
 void MillSimulation::ProbeAlong(MillPathSegment* p, int fromStep, int toStep, int kind)
 {
-    // The holder, the shank, or the tool on a rapid, at its places over steps (fromStep, toStep]
-    // of the segment being cut, every millimetre or so, closer for a small tool, and at the last,
-    // each looked at against the stock as the cuts before it leave it: the holder's and the
-    // shank's after the segment's cut, the tool's before it, the rapid's own cut being what it
-    // drags through.
+    // The holder, or the tool on a rapid, at its places over steps (fromStep, toStep] of the
+    // segment being cut, every millimetre or so, closer for a small tool, and at the last, each
+    // looked at against the stock as the cuts before it leave it: the holder's after the
+    // segment's cut, the tool's before it, the rapid's own cut being what it drags through.
     const EndMill* tool = p->endmill;
-    const bool holder = kind == HolderMeetsStock;
-    const bool shank = kind == ShankMeetsStock;
-    if ((holder && !tool->HasHolder()) || (shank && !tool->HasShank()) || mProbeWarned) {
+    const bool holder
+        = kind == HolderMeetsStock || kind == HolderHitsWorkholding || kind == HolderHitsSoftJaw;
+    const bool shank
+        = kind == ShankMeetsStock || kind == ShankHitsWorkholding || kind == ShankHitsSoftJaw;
+    const bool softJaws
+        = kind == ToolCutsSoftJaw || kind == HolderHitsSoftJaw || kind == ShankHitsSoftJaw;
+    const bool workholding = kind == ToolHitsWorkholding || kind == HolderHitsWorkholding
+        || kind == ShankHitsWorkholding;
+    DexelStock& target = softJaws ? mSoftJaws : workholding ? mWorkholding : mDexel;
+    // the workholding's and soft jaws' dexels are the processor's whichever cuts the stock
+    if ((holder && !tool->HasHolder()) || (shank && !tool->HasShank())
+        || (!workholding && !softJaws && mProbeWarned)
+        || !target.IsValid()) {
         return;
     }
     float radius = 0, zLo = 0, zHi = 0;
@@ -1597,7 +1773,7 @@ void MillSimulation::ProbeAlong(MillPathSegment* p, int fromStep, int toStep, in
             mat4x4_translate_in_place(smat, 0.f, 0.f, slack);
         }
         mat4x4_scale_aniso(smat, smat, thinner, thinner, 1.f);
-        const int found = mDexel.Probe(lo, hi, id, [&shape, smat, rmat] {
+        const int found = target.Probe(lo, hi, id, [&shape, smat, rmat] {
             shape.Render(smat, rmat);
         });
         if (found < 0) {
@@ -1611,7 +1787,8 @@ void MillSimulation::ProbeAlong(MillPathSegment* p, int fromStep, int toStep, in
         if (found > 0) {
             Collision probe;
             probe.seg = mDexelSeg;
-            probe.kind = kind;
+            // the tool in the soft jaws on a rapid is no cut but a hit
+            probe.kind = kind == ToolCutsSoftJaw && p->isRapid ? ToolHitsWorkholding : kind;
             // the segment's last step drawn is the one before its end, the next one's start
             probe.step = std::min(k, p->numSimSteps - 1);
             vec3_dup(probe.pos, pos);
@@ -1632,6 +1809,8 @@ void MillSimulation::TakeCollisions()
     }
     std::vector<std::pair<int, int>> hits;
     mDexel.TakeHits(hits);
+    mWorkholding.TakeHits(hits);
+    mSoftJaws.TakeHits(hits);
     for (const auto& [id, rays] : hits) {
         const auto it = mProbes.find(id);
         if (it == mProbes.end()) {
@@ -1648,18 +1827,17 @@ void MillSimulation::TakeCollisions()
         mCollisions[key] = hit;
         // found as it plays through it: stop there, the earliest found. One where playback was
         // moved to, a skip landing on it or play pressed where it stopped, lets it play on; and
-        // once an operation for each kind: a crash running on through the moves after stops
-        // once, not at each of them, nor again as the dexels are cut again from a snapshot
-        // behind the stop, which finds it a step or so on. Moving playback back, or on the
-        // slider, has it stop at them afresh.
+        // once an operation for each kind, as it is said: a crash running on through the moves
+        // after stops once, not at each of them, nor again as the dexels are cut again from a
+        // snapshot behind the stop, which finds it a step or so on. Moving playback back, or on
+        // the slider, has it stop at them afresh. A cut into soft jaws is only warned of.
+        const MillPathSegment* p = MillPathSegments[hit.seg];
         const float t = HitTime(hit);
-        const MillPathSegment* hitSeg = MillPathSegments[hit.seg];
-        if (mStopOnCollision && mSimPlaying && t > mPlayFrom + 1e-4f
-            && mStopOps.insert(hitSeg->op * CollisionKinds + hit.kind).second) {
+        if (mStopOnCollision && mSimPlaying && t > mPlayFrom + 1e-4f && !IsCut(hit.kind)
+            && mStopOps.insert(p->op * CollisionKinds + hit.kind).second) {
             mStopAt = mStopAt < 0 ? t : std::min(mStopAt, t);
         }
         // said once an operation for each kind, where it first happens
-        const MillPathSegment* p = MillPathSegments[hit.seg];
         if (mCollisionOps.insert(p->op * CollisionKinds + hit.kind).second) {
             const std::string op = p->op >= 0 && p->op < (int)mCodeParser.OpNames.size()
                 ? mCodeParser.OpNames[p->op]
@@ -1667,24 +1845,32 @@ void MillSimulation::TakeCollisions()
             auto length = [](float mm) {
                 return Base::Quantity(mm, Base::Unit::Length).getUserString();
             };
-            const bool holder = hit.kind == HolderMeetsStock;
-            const bool shank = hit.kind == ShankMeetsStock;
+            const bool holder = hit.kind == HolderMeetsStock || hit.kind == HolderHitsWorkholding
+                || hit.kind == HolderHitsSoftJaw;
+            const bool shank = hit.kind == ShankMeetsStock || hit.kind == ShankHitsWorkholding
+                || hit.kind == ShankHitsSoftJaw;
             const bool retract = hit.kind == RapidIntoStock && RetractsAt(hit.seg);
+            const char* what = hit.kind == HolderMeetsStock || hit.kind == ShankMeetsStock
+                ? "meets the stock"
+                : retract                       ? "retracts through the stock"
+                : hit.kind == RapidIntoStock    ? "rapids through the stock"
+                : hit.kind == ToolCutsSoftJaw   ? "cuts into the soft jaws"
+                : hit.kind == HolderHitsSoftJaw || hit.kind == ShankHitsSoftJaw
+                ? "hits the soft jaws"
+                : "hits the workholding";
             Base::Console().warning(
-                "CAM Simulator: {}tool {} {} the stock{}{} at X {} Y {} Z {}{}\n",
+                "CAM Simulator: {}tool {} {}{}{} at X {} Y {} Z {}{}\n",
                 holder ? "the holder of "
                     : shank ? "the shank, above the cutting edges, of "
                             : "",
                 p->endmill->toolId,
-                holder || shank ? "meets"
-                    : retract       ? "retracts through"
-                                    : "rapids through",
+                what,
                 op.empty() ? "" : " in ",
                 op,
                 length(hit.pos[0]),
                 length(hit.pos[1]),
                 length(hit.pos[2]),
-                (holder || shank) && p->isRapid ? ", on a rapid" : ""
+                hit.kind != RapidIntoStock && p->isRapid ? ", on a rapid" : ""
             );
         }
     }
@@ -1714,10 +1900,13 @@ float MillSimulation::HitTime(const Collision& hit) const
         + p->duration * ((float)hit.step + 0.5f) / (float)std::max(1, p->numSimSteps);
 }
 
-std::vector<std::pair<float, float>> MillSimulation::HitRuns() const
+std::vector<std::pair<float, float>> MillSimulation::HitRuns(bool cuts) const
 {
     std::vector<std::pair<float, float>> runs;
     for (int kind = 0; kind < CollisionKinds; kind++) {
+        if (IsCut(kind) != cuts) {
+            continue;
+        }
         int lastSeg = -1;
         for (const auto& [key, hit] : mCollisions) {
             if (hit.kind != kind) {
@@ -1749,7 +1938,19 @@ std::vector<std::pair<float, float>> MillSimulation::GetCollisionStages() const
     if (mTotalTime <= 0) {
         return stages;
     }
-    for (const auto& [from, to] : HitRuns()) {
+    for (const auto& [from, to] : HitRuns(false)) {
+        stages.emplace_back(from / mTotalTime, to / mTotalTime);
+    }
+    return stages;
+}
+
+std::vector<std::pair<float, float>> MillSimulation::GetCutStages() const
+{
+    std::vector<std::pair<float, float>> stages;
+    if (mTotalTime <= 0) {
+        return stages;
+    }
+    for (const auto& [from, to] : HitRuns(true)) {
         stages.emplace_back(from / mTotalTime, to / mTotalTime);
     }
     return stages;
@@ -1778,8 +1979,10 @@ std::vector<float> MillSimulation::MarksAndHits() const
 {
     // where the skip buttons stop: the marks, and where each run of collisions starts
     std::vector<float> marks = mMarks;
-    for (const auto& [from, to] : HitRuns()) {
-        marks.push_back(from);
+    for (bool cuts : {false, true}) {
+        for (const auto& [from, to] : HitRuns(cuts)) {
+            marks.push_back(from);
+        }
     }
     std::sort(marks.begin(), marks.end());
     return marks;
@@ -1807,6 +2010,7 @@ bool MillSimulation::CutDexel()
     if (mPathStep < 0) {
         if (mDexelSeg > 0 || mDexelSub > 0) {
             mDexel.Reset();
+            mSoftJaws.Reset();
             mDexelSeg = 0;
             mDexelSub = 0;
             DropCollisions(0);
@@ -1824,10 +2028,17 @@ bool MillSimulation::CutDexel()
         }
         if (best >= 0) {
             mDexel.RestoreSnapshot(mDexelSnaps[best].second);
+            if (mSoftJawSnaps[best] >= 0) {
+                mSoftJaws.RestoreSnapshot(mSoftJawSnaps[best]);
+            }
+            else {
+                mSoftJaws.Reset();
+            }
             mDexelSeg = mDexelSnaps[best].first;
         }
         else {
             mDexel.Reset();
+            mSoftJaws.Reset();
             mDexelSeg = 0;
         }
         mDexelSub = 0;
@@ -1874,6 +2085,13 @@ bool MillSimulation::CutDexel()
                     mDexel.Cut(lo, hi, [p, k] { p->render(k); });
                     ProbeAlong(p, k - 1, k, HolderMeetsStock);
                     ProbeAlong(p, k - 1, k, ShankMeetsStock);
+                    ProbeAlong(p, k - 1, k, ToolHitsWorkholding);
+                    ProbeAlong(p, k - 1, k, HolderHitsWorkholding);
+                    ProbeAlong(p, k - 1, k, ShankHitsWorkholding);
+                    ProbeAlong(p, k - 1, k, ToolCutsSoftJaw);
+                    mSoftJaws.Cut(lo, hi, [p, k] { p->render(k); });
+                    ProbeAlong(p, k - 1, k, HolderHitsSoftJaw);
+                    ProbeAlong(p, k - 1, k, ShankHitsSoftJaw);
                     flushSome();
                     if (mDexelSub < to && spent()) {
                         return false;
@@ -1881,13 +2099,23 @@ bool MillSimulation::CutDexel()
                 }
             }
             else {
-                // a straight move, its sweep so far; a rapid's tool looked at before it cuts
+                // a straight move, the piece of its sweep since the last cut: the whole sweep so
+                // far, again each frame, is a big cut on a stock not much bigger than the tool;
+                // a rapid's tool looked at before it cuts
                 if (p->isRapid) {
                     ProbeAlong(p, mDexelSub, to, RapidIntoStock);
                 }
-                mDexel.Cut(lo, hi, [p, to] { p->render(to); });
+                const int from = mDexelSub;
+                mDexel.Cut(lo, hi, [p, from, to] { p->render(to, from); });
                 ProbeAlong(p, mDexelSub, to, HolderMeetsStock);
                 ProbeAlong(p, mDexelSub, to, ShankMeetsStock);
+                ProbeAlong(p, mDexelSub, to, ToolHitsWorkholding);
+                ProbeAlong(p, mDexelSub, to, HolderHitsWorkholding);
+                ProbeAlong(p, mDexelSub, to, ShankHitsWorkholding);
+                ProbeAlong(p, mDexelSub, to, ToolCutsSoftJaw);
+                mSoftJaws.Cut(lo, hi, [p, from, to] { p->render(to, from); });
+                ProbeAlong(p, mDexelSub, to, HolderHitsSoftJaw);
+                ProbeAlong(p, mDexelSub, to, ShankHitsSoftJaw);
                 flushSome();
                 mDexelSub = to;
             }
@@ -1910,6 +2138,7 @@ bool MillSimulation::CutDexel()
             const int id = have ? -1 : mDexel.SaveSnapshot();
             if (id >= 0) {
                 mDexelSnaps.emplace_back(mDexelSeg, id);
+                mSoftJawSnaps.push_back(mSoftJaws.IsValid() ? mSoftJaws.SaveSnapshot() : -1);
             }
         }
         if (spent()) {

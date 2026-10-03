@@ -941,6 +941,20 @@ class TestPathWorkholdingStations(PathTestUtils.PathTestBase):
         self.assertRoughly(bb.XMax, station.Base.x)
         self.assertTrue(follower.Placement.isSame(owner.Placement, 1e-9))
 
+    def test11_simulated_with_the_other_part(self):
+        """Each Job sharing the vise simulated with the other's part in its station, as big as it
+        can be: its stock, hit and never cut."""
+        owner = PathWorkholding.addVise(self.job, self.part)
+        other = self.jobs[1]
+        self.assertNotIn(other.Stock, [p for p, _ in PathJob.workholdingParts(self.job)])
+        follower = PathWorkholding.shareVise(owner, other)
+        PathWorkholding.seat(other, follower, grip=5)
+        parts = dict(PathJob.workholdingParts(self.job))
+        self.assertIn(other.Stock, parts)
+        self.assertTrue(parts[other.Stock].BoundBox.isInside(other.Stock.Shape.BoundBox.Center))
+        self.assertIn(self.job.Stock, dict(PathJob.workholdingParts(other)))
+        self.assertNotIn(other.Stock, dict(PathJob.workholdingParts(self.job, cuttable=True)))
+
     def test05_shares_refused(self):
         """No third Job in a vise of two stations, nor a Job twice; a follower is not moved."""
         owner = PathWorkholding.addVise(self.job, self.part)

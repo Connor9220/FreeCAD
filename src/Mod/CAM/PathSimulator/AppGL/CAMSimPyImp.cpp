@@ -191,6 +191,52 @@ PyObject* CAMSimPy::SetBaseShape(PyObject* args, PyObject* kwds)
     return Py_None;
 }
 
+PyObject* CAMSimPy::SetWorkholding(PyObject* args, PyObject* kwds)
+{
+    static const std::array<const char*, 6> kwlist {
+        "shape",
+        "resolution",
+        "cuttable",
+        "color",
+        "append",
+        nullptr
+    };
+    PyObject* pObjShape;
+    float resolution;
+    int cuttable = 0;
+    PyObject* pColor = Py_None;
+    int append = 0;
+    if (!Base::Wrapped_ParseTupleAndKeywords(
+            args,
+            kwds,
+            "O!f|pOp",
+            kwlist,
+            &(Part::TopoShapePy::Type),
+            &pObjShape,
+            &resolution,
+            &cuttable,
+            &pColor,
+            &append
+        )) {
+        return nullptr;
+    }
+    // the colour it is drawn in, red, green and blue from 0 to 1; none, the simulator's own
+    float color[3] = {0, 0, 0};
+    bool colored = pColor != Py_None;
+    if (colored
+        && !PyArg_ParseTuple(pColor, "fff", &color[0], &color[1], &color[2])) {
+        PyErr_SetString(PyExc_TypeError, "color must be three numbers, red, green and blue");
+        return nullptr;
+    }
+    CAMSim* sim = getCAMSimPtr();
+    const Part::TopoShape& shape
+        = static_cast<Part::TopoShapePy*>(pObjShape)->getTopoShapePtr()->getShape();
+    sim->SetWorkholding(shape, resolution, cuttable != 0, colored ? color : nullptr, append != 0);
+
+    Py_IncRef(Py_None);
+    return Py_None;
+}
+
 PyObject* CAMSimPy::AddCommand(PyObject* args)
 {
     PyObject* pObjCmd;

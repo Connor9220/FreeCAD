@@ -645,13 +645,22 @@ bool DexelStock::Init(
     if (const char* forced = std::getenv("CAMSIM_DEXEL_GPU")) {
         cpu = forced[0] != '1';
     }
-    return InitOn(verts, indices, resolution, cpu)
-        || (!cpu && InitOn(verts, indices, resolution, true));
+    const std::vector<unsigned int> wide(indices.begin(), indices.end());
+    return InitOn(verts, wide, resolution, cpu) || (!cpu && InitOn(verts, wide, resolution, true));
+}
+
+bool DexelStock::InitSolid(
+    const std::vector<Vertex>& verts,
+    const std::vector<unsigned int>& indices,
+    float resolution
+)
+{
+    return InitOn(verts, indices, resolution, true);
 }
 
 bool DexelStock::InitOn(
     const std::vector<Vertex>& verts,
-    const std::vector<unsigned short>& indices,
+    const std::vector<unsigned int>& indices,
     float resolution,
     bool cpu
 )

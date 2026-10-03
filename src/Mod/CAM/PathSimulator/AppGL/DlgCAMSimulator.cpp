@@ -29,6 +29,7 @@
 #include "GuiDisplay.h"
 #include "MillSimulation.h"
 #include "ViewCAMSimulator.h"
+#include <algorithm>
 #include <Base/Matrix.h>
 #include <Base/Placement.h>
 #include <Base/Rotation.h>
@@ -218,7 +219,11 @@ void DlgCAMSimulator::updateGui()
     mGui->setAxesEnabled(state.mViewAxes);
     mGui->setStopOnCollision(state.mStopOnCollision, mMillSimulator->CanFindCollisions());
     mGui->setCollisions(mMillSimulator->GetCollisionStages());
+    mGui->setCuts(mMillSimulator->GetCutStages());
     mGui->setFps(mFps);
+    // the panel drawn whole with each frame of the 3D view under it, so no part of it is left
+    // half drawn over the new frame
+    mGui->update();
 
     if (mDummyViewer && !mDummyViewer->isAnimating()) {
         mGui->setRotateEnabled(false);
@@ -242,6 +247,10 @@ void DlgCAMSimulator::cloneFrom(const DlgCAMSimulator& from)
 
     mBase = from.mBase;
     mBase.needsUpdate = true;
+
+    mWorkholding = from.mWorkholding;
+    mSoftJaws = from.mSoftJaws;
+    mWorkholdingNeedsUpdate = true;
 
     const auto state = from.mMillSimulator->GetState();
     mState = std::make_unique<MillSimulationState>(state);
@@ -289,6 +298,9 @@ void DlgCAMSimulator::resetSimulation()
     mRotaryAxes.clear();
     mStock = {};
     mBase = {};
+    mWorkholding.clear();
+    mSoftJaws.clear();
+    mWorkholdingNeedsUpdate = true;
 }
 
 void DlgCAMSimulator::addGcodeCommand(const char* cmd)
@@ -411,6 +423,45 @@ static SimShape getMeshData(const Part::TopoShape& shape, float resolution)
 
     ret.needsUpdate = true;
     return ret;
+}
+
+void DlgCAMSimulator::setWorkholdingShape(
+    const Part::TopoShape& shape,
+    float resolution,
+    bool cuttable,
+    const float* color,
+    bool append
+)
+{
+    // face by face, a new piece where the next face would take a piece past short indices;
+    // what is added in a colour of its own starts pieces of its own
+    std::vector<SimShape>& pieces = cuttable ? mSoftJaws : mWorkholding;
+    if (!append) {
+        pieces.clear();
+    }
+    bool fresh = true;
+    for (auto& face : shape.getSubTopoShapes(TopAbs_FACE)) {
+        SimShape mesh = getMeshData(face, resolution);
+        if (mesh.verts.empty()) {
+            continue;
+        }
+        if (fresh || pieces.empty() || pieces.back().verts.size() + mesh.verts.size() > 65535) {
+            pieces.emplace_back();
+            if (color != nullptr) {
+                pieces.back().colored = true;
+                std::copy(color, color + 3, pieces.back().color);
+            }
+            fresh = false;
+        }
+        SimShape& piece = pieces.back();
+        const auto offset = (GLushort)piece.verts.size();
+        piece.verts.insert(piece.verts.end(), mesh.verts.begin(), mesh.verts.end());
+        for (GLushort i : mesh.indices) {
+            piece.indices.push_back((GLushort)(i + offset));
+        }
+    }
+    mWorkholdingNeedsUpdate = true;
+    update();
 }
 
 void DlgCAMSimulator::setStockShape(const Part::TopoShape& shape, float resolution)
@@ -595,6 +646,21 @@ void DlgCAMSimulator::updateResources()
     if (mBase.needsUpdate) {
         mMillSimulator->SetBaseObject(mBase.verts, mBase.indices);
         mBase.needsUpdate = false;
+    }
+
+    if (mWorkholdingNeedsUpdate) {
+        std::vector<std::pair<std::vector<Vertex>, std::vector<GLushort>>> pieces, soft;
+        std::vector<MillSimulation::Color> colors;
+        for (const SimShape& piece : mWorkholding) {
+            pieces.emplace_back(piece.verts, piece.indices);
+            colors.push_back({piece.colored, {piece.color[0], piece.color[1], piece.color[2]}});
+        }
+        for (const SimShape& piece : mSoftJaws) {
+            soft.emplace_back(piece.verts, piece.indices);
+        }
+        mMillSimulator->SetWorkholding(pieces, colors);
+        mMillSimulator->SetSoftJaws(soft);
+        mWorkholdingNeedsUpdate = false;
     }
 
     // update state

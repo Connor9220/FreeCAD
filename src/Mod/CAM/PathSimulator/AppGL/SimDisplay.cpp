@@ -701,17 +701,26 @@ void SimDisplay::UpdateCameraProjection(const SoCamera& camera)
 
 #endif
 
+    // How deep the scene goes past the stock's middle: the tool and its holder, the vise, stand
+    // well beyond a small stock, so no less than a metre.
+    const float depth = std::max(mMaxStockDimension * 10.0f, 1000.0f);
+
     if (perspective) {
         heightAngle = perspective->heightAngle.getValue();
 
-        nearDistance = mMaxStockDimension * 0.001f;
-        farDistance = mMaxStockDimension * 10.0f;
+        // From the camera, as far as it stands from the stock and the scene's depth beyond: a
+        // view zoomed out from a small stock would otherwise cut it off. The near plane keeps the
+        // depth precision of the far one.
+        const SbVec3f center(mStockCenter[0], mStockCenter[1], mStockCenter[2]);
+        const float distance = (camera.position.getValue() - center).length();
+        nearDistance = std::max(mMaxStockDimension * 0.001f, distance * 0.001f);
+        farDistance = distance + depth;
     }
     else if (orthographic) {
         height = orthographic->height.getValue();
 
-        nearDistance = -mMaxStockDimension * 10.0f;
-        farDistance = mMaxStockDimension * 10.0f;
+        nearDistance = -depth;
+        farDistance = depth;
     }
 
     if ((bool)perspective == mCameraPerspective && heightAngle == mCameraHeightAngle

@@ -35,6 +35,7 @@
 #include "linmath.h"
 #include <chrono>
 #include <map>
+#include <memory>
 #include <set>
 #include <unordered_map>
 #include <vector>
@@ -128,10 +129,22 @@ public:
     {
         HolderMeetsStock = 0,
         RapidIntoStock = 1,
+        ToolHitsWorkholding = 2,
+        HolderHitsWorkholding = 3,
+        // soft jaws: the tool may cut them, a warning; its holder in them is a hit
+        ToolCutsSoftJaw = 4,
+        HolderHitsSoftJaw = 5,
         // the tool above its cutting edges: rubbing or crashing into what it meets
-        ShankMeetsStock = 2,
+        ShankMeetsStock = 6,
+        ShankHitsWorkholding = 7,
+        ShankHitsSoftJaw = 8,
         CollisionKinds
     };
+    // a cut warned of, not a hit: the simulation does not stop for it
+    static bool IsCut(int kind)
+    {
+        return kind == ToolCutsSoftJaw;
+    }
     struct Collision
     {
         int seg = 0;
@@ -148,6 +161,8 @@ public:
     // program's time: hits of one kind in a row, the moves between them cutting nothing, one
     // run; a cut that meets nothing ends it
     std::vector<std::pair<float, float>> GetCollisionStages() const;
+    // the same for the cuts into soft jaws
+    std::vector<std::pair<float, float>> GetCutStages() const;
     void EnableStopOnCollision(bool b);
     // whether collisions are found: with the dexel stock, cut on the processor
     bool CanFindCollisions() const;
@@ -166,6 +181,23 @@ public:
     bool IsStockVisible() const;
 
     void SetBaseObject(const std::vector<Vertex>& verts, const std::vector<GLushort>& indices);
+    // the vises, clamps and fixtures, in pieces each within short indices: shown, and found
+    // where a tool or its holder hits them
+    // a piece's colour, where it has one of its own
+    struct Color
+    {
+        bool own = false;
+        vec3 rgb = {0, 0, 0};
+    };
+    // colors, one for each piece, the workholding's own where there are none
+    void SetWorkholding(
+        const std::vector<std::pair<std::vector<Vertex>, std::vector<GLushort>>>& pieces,
+        const std::vector<Color>& colors = {}
+    );
+    // soft jaws, the same: shown, the tool cutting them warned of, its holder hitting them
+    void SetSoftJaws(
+        const std::vector<std::pair<std::vector<Vertex>, std::vector<GLushort>>>& pieces
+    );
     void SetBaseVisible(bool b);
     bool IsBaseVisible() const;
     void SetCompareVisible(bool b);
@@ -204,6 +236,8 @@ protected:
     void RenderSweeps(int first, bool fromScratch);
     bool PrepareDexel();
     bool CutDexel();
+    bool PrepareWorkholding();
+    void RenderWorkholding(bool dexel);
     void FlushDexel();
     void ProbeAlong(MillPathSegment* p, int fromStep, int toStep, int kind);
     void TakeCollisions();
@@ -213,8 +247,9 @@ protected:
     float HitTime(const Collision& hit) const;
     // whether the segment moves the tool up its own axis: a rapid there retracts
     bool RetractsAt(int seg);
-    // the runs of collisions, as GetCollisionStages has them, in seconds
-    std::vector<std::pair<float, float>> HitRuns() const;
+    // the runs of the collisions cuts says, or of the rest, as GetCollisionStages has them, in
+    // seconds
+    std::vector<std::pair<float, float>> HitRuns(bool cuts) const;
     std::vector<float> MarksAndHits() const;
     void RenderDexel();
     void RenderAxes();
@@ -270,6 +305,19 @@ public:
 
     // the stock as dexels: set up from the stock's mesh, cut up to this step
     DexelStock mDexel;
+    // the workholding as dexels, never cut, for probes to find what meets it
+    DexelStock mWorkholding;
+    bool mWorkholdingTried = false;
+    std::vector<std::unique_ptr<SolidObject>> mWorkholdingShapes;
+    std::vector<Color> mWorkholdingColors;  // one for each shape
+    std::vector<Vertex> mWorkholdingVerts;
+    std::vector<unsigned int> mWorkholdingIndices;
+    // soft jaws as dexels, cut as the stock is, each first cut into them warned of
+    DexelStock mSoftJaws;
+    bool mSoftJawsTried = false;
+    std::vector<std::unique_ptr<SolidObject>> mSoftJawShapes;
+    std::vector<Vertex> mSoftJawVerts;
+    std::vector<unsigned int> mSoftJawIndices;
     AxisOverlay mAxisOverlay;
     float mPixelRatio = 1;
     bool mShowCornerTriad = true;
@@ -280,6 +328,7 @@ public:
     bool mDexelBehind = false;
     int mDexelFramesBehind = 0;
     std::vector<std::pair<int, int>> mDexelSnaps;  // the segment each snapshot is before, its id
+    std::vector<int> mSoftJawSnaps;  // the soft jaws' snapshot taken with each, -1 for none
     int mDexelSeg = 0;
     int mDexelSub = 0;
     std::unordered_map<int, Collision> mProbes;  // the places looked at, by probe id
@@ -320,6 +369,9 @@ public:
     vec3 holderHitColor = {0.9f, 0.15f, 0.1f};
     vec3 overcutColor = {0.9f, 0.15f, 0.1f};
     vec3 baseShapeColor = {0.7f, 0.6f, 0.5f};
+    vec3 workholdingColor = {0.45f, 0.47f, 0.52f};
+    vec3 softJawColor = {0.60f, 0.74f, 0.90f};
+    vec3 toolCutsSoftJawColor = {0.95f, 0.78f, 0.15f};
 };
 
 }  // namespace CAMSimulator

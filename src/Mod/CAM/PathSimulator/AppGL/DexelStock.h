@@ -61,6 +61,13 @@ public:
         const std::vector<unsigned short>& indices,
         float resolution
     );
+    // Set up from a mesh too big for short indices, as solid that is never cut, only looked
+    // at by probes: the workholding. On the processor.
+    bool InitSolid(
+        const std::vector<Vertex>& verts,
+        const std::vector<unsigned int>& indices,
+        float resolution
+    );
     void Free();
     bool IsValid() const
     {
@@ -173,7 +180,7 @@ private:
 
     bool InitOn(
         const std::vector<Vertex>& verts,
-        const std::vector<unsigned short>& indices,
+        const std::vector<unsigned int>& indices,
         float resolution,
         bool cpu
     );
