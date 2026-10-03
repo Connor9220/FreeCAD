@@ -95,6 +95,7 @@ SET(PathPythonMain_SRCS
     Path/Main/Job.py
     Path/Main/Workholding.py
     Path/Main/WorkholdingCheck.py
+    Path/Main/WorkholdingItems.py
     Path/Main/WorkholdingJaws.py
     Path/Main/WorkholdingLibrary.py
     Path/Main/WorkholdingParallels.py
@@ -111,7 +112,9 @@ SET(PathPythonMainGui_SRCS
     Path/Main/Gui/Job.py
     Path/Main/Gui/JobCmd.py
     Path/Main/Gui/WorkholdingCmd.py
+    Path/Main/Gui/WorkholdingItems.py
     Path/Main/Gui/WorkholdingLibraryGui.py
+    Path/Main/Gui/WorkholdingWizard.py
     Path/Main/Gui/WorkplaneCmd.py
     Path/Main/Gui/JobDlg.py
     Path/Main/Gui/PreferencesJob.py
@@ -708,6 +711,7 @@ SET(Tests_SRCS
     CAMTests/TestPathTiltedWorkPlane.py
     CAMTests/TestPathJobModelLinks.py
     CAMTests/TestPathWorkholding.py
+    CAMTests/TestPathWorkholdingItems.py
     CAMTests/TestPathWorkholdingLibrary.py
     CAMTests/TestPathSharedWorkplane.py
     CAMTests/TestProcessorOptimizations.py
