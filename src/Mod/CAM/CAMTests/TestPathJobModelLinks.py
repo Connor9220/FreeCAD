@@ -152,6 +152,56 @@ class TestPathJobModelLinks(PathTestUtils.PathTestBase):
         for obj in (placed, onFace, text):
             self.assertTrue(obj.Placement.Base.isEqual(before[obj.Name].Base, 1e-6), obj.Label)
 
+    def test06_workholding_kept_clear_of(self):
+        """A clamp in the Job's workholding is kept clear of by linking, as the model is;
+        an operation linking at a fixed height below it, over the stock, is told so."""
+        import Path
+        import Path.Base.Generator.linking as linking
+
+        self.job.Proxy.setupWorkholding(self.job)
+        clamp = self.doc.addObject("Part::Box", "Clamp")
+        clamp.Length, clamp.Width, clamp.Height = 10, 10, 80
+        clamp.Placement.Base = Vector(95, 20, 0)
+        self.job.Workholding.addObject(clamp)
+        self.doc.recompute()
+
+        class Op:
+            Label = "Op"
+            CollisionAvoidanceStrategy = "Line of Sight"
+            CollisionClearance = FreeCAD.Units.Quantity(1, FreeCAD.Units.Length)
+            SafeHeight = FreeCAD.Units.Quantity(45, FreeCAD.Units.Length)
+            ClearanceHeight = FreeCAD.Units.Quantity(50, FreeCAD.Units.Length)
+            ToolController = None
+
+        args = linking.get_linking_args(Op(), self.job)
+        tops = sorted(round(s.BoundBox.ZMax, 6) for s in args["solids"])
+        self.assertEqual(tops, [40, 80])
+        # across the clamp: over it
+        args["start_position"] = Vector(80, 25, 40)
+        args["target_position"] = Vector(115, 25, 40)
+        cmds = linking.get_linking_moves(**args)
+        self.assertRoughly(max(c.Parameters.get("Z", 0) for c in cmds), 81)
+
+        warned = []
+        warning = Path.Log.warning
+        Path.Log.warning = lambda message, *a, **k: warned.append(message)
+        try:
+            # coming in at a Clearance Height below the clamp, whatever the strategy
+            linking.get_linking_args(Op(), self.job)
+            self.assertEqual(len(warned), 1)
+            self.assertIn("Clearance Height", warned[0])
+            self.assertIn("80", warned[0])
+            Op.ClearanceHeight = FreeCAD.Units.Quantity(90, FreeCAD.Units.Length)
+            linking.get_linking_args(Op(), self.job)
+            self.assertEqual(len(warned), 1)
+            # linking at a Safe Height below it, unchecked
+            Op.CollisionAvoidanceStrategy = "Retract Height"
+            linking.get_linking_args(Op(), self.job)
+            self.assertEqual(len(warned), 2)
+            self.assertIn("Safe Height", warned[1])
+        finally:
+            Path.Log.warning = warning
+
     def test04_new_op_takes_the_plane_of_the_one_before(self):
         """A new operation takes the work plane of the one just before it, none if it has none."""
         plane = PathWorkplane.createWorkplane(self.job, placement=FreeCAD.Placement())

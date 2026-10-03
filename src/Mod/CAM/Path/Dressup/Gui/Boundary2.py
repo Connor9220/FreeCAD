@@ -175,7 +175,8 @@ class ObjectDressup:
             "start_position": None,
             "target_position": None,
             "heights_clearance": (safeHeight, clearanceHeight),
-            "solids": [inFrame(base.Shape) for base in job.Model.Group],
+            "solids": [inFrame(base.Shape) for base in job.Model.Group]
+            + linking.workholding_solids(obj, job),
             "tool_shape": None,
             "tool_diameter": None,
             "collision_clearance": collision_clearance,

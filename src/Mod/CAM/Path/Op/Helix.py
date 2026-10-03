@@ -646,7 +646,9 @@ class ObjectHelix(PathCircularHoleBase.ObjectOp):
         singleHelix = obj.SingleHelix or obj.SpiralMill
 
         # Prepare linking parameters
-        solids = [base.Shape for base in self.job.Model.Group]
+        # self.model: the model in the frame the path is made in, its work plane's
+        solids = [base.Shape for base in self.model]
+        solids += linking.workholding_solids(obj, self.job)
         linkingArgs = {
             "start_position": None,
             "target_position": None,

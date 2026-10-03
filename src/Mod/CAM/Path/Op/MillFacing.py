@@ -279,6 +279,7 @@ class ObjectMillFacing(PathOp.ObjectOp):
         # collision avoidance tests against the model in the same frame the
         # path is generated in.
         solids = [base.Shape for base in self.model]
+        solids += linking.workholding_solids(obj, self.job)
         linkingArgs = {
             "start_position": None,
             "target_position": None,

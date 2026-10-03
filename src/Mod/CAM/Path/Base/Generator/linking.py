@@ -20,6 +20,7 @@
 ################################################################################
 
 import Constants
+import FreeCAD
 import Part
 import Path
 import Path.Base.Util as PathUtil
@@ -53,6 +54,7 @@ def get_linking_args(obj, job) -> dict | None:
         if not frame.isIdentity(1e-9):
             matrix = frame.inverse().toMatrix()
             solids = [s.copy().transformShape(matrix, False, False) for s in solids]
+    solids = solids + workholding_solids(obj, job)
 
     tool = obj.ToolController.Tool if getattr(obj, "ToolController", None) else None
     clearance = obj.CollisionClearance.Value
@@ -85,6 +87,100 @@ def get_linking_args(obj, job) -> dict | None:
         args["tool_shape"] = tool.BitBody.Shape
 
     return args
+
+
+def workholding_solids(obj, job) -> list:
+    """
+    The Job's workholding in use (clamps, dogs, rails, vises and what else
+    stands on the machine with the part), where it stands, in the operation's
+    work plane frame: what linking moves keep clear of besides the model.
+
+    An operation coming in and going out at Clearance Height, or linking at a
+    fixed height, sees none of it: said so when the workholding over the stock
+    stands above that height.
+    """
+    if job is None or not hasattr(job, "Workholding"):
+        return []
+    try:
+        import Path.Main.Job as PathJob
+
+        shapes = [s for _, s in PathJob.workholdingParts(job)]
+        shapes += [s for _, s in PathJob.workholdingParts(job, cuttable=True)]
+    except Exception as e:
+        Path.Log.warning(f"Workholding not seen by linking: {e}")
+        return []
+    if not shapes:
+        return []
+    frame = PathUtil.workplaneForOp(obj)
+    if not frame.isIdentity(1e-9):
+        matrix = frame.inverse().toMatrix()
+        shapes = [s.copy().transformShape(matrix, False, False) for s in shapes]
+    _warn_fixed_height(obj, job, shapes, frame)
+    return shapes
+
+
+def _warn_fixed_height(obj, job, shapes, frame):
+    """Said when an operation travels at a fixed height through workholding over
+    its stock: at Clearance Height, as it comes in and goes out, whatever its
+    strategy; at Safe Height too, linking at Retract Height."""
+    if not hasattr(obj, "ClearanceHeight"):
+        return
+    stock = getattr(job, "Stock", None)
+    if stock is None or stock.Shape.isNull():
+        return
+    footprint = stock.Shape.copy()
+    if not frame.isIdentity(1e-9):
+        footprint.transformShape(frame.inverse().toMatrix(), False, False)
+    footprint = footprint.BoundBox
+    tops = [s.BoundBox.ZMax for s in shapes if _overlapXY(s.BoundBox, footprint)]
+    if not tops:
+        return
+    top = max(tops)
+    heights = [("Clearance Height", obj.ClearanceHeight.Value)]
+    if getattr(obj, "CollisionAvoidanceStrategy", None) == "Retract Height":
+        heights.append(("Safe Height", obj.SafeHeight.Value))
+    for name, height in heights:
+        if top > height + 1e-6:
+            Path.Log.warning(
+                f"{getattr(obj, 'Label', '')}: travel at {name} ({height:.3f}) passes through "
+                f"workholding over the stock, which stands up to {top:.3f}; raise {name} above it"
+            )
+
+
+def _overlapXY(a, b, margin=0.0):
+    return (
+        a.XMin <= b.XMax + margin
+        and b.XMin <= a.XMax + margin
+        and a.YMin <= b.YMax + margin
+        and b.YMin <= a.YMax + margin
+    )
+
+
+def _obstacles(solids) -> list:
+    """The solids to keep clear of, each on its own: a compound or a list of them."""
+    if not solids:
+        return []
+    if not isinstance(solids, (list, tuple)):
+        solids = [solids]
+    return [s for s in solids if s and not s.isNull()]
+
+
+def _clear_of(shape, obstacles, collision_clearance) -> bool:
+    """Whether shape keeps collision_clearance from every obstacle. One whose box
+    the shape's box, grown by the clearance, does not reach is clear without
+    measuring: only the obstacles a move comes near are measured."""
+    reach = shape.BoundBox
+    for obstacle in obstacles:
+        box = FreeCAD.BoundBox(obstacle.BoundBox)
+        box.enlarge(collision_clearance)
+        if not reach.intersect(box):
+            continue
+        distance = shape.distToShape(obstacle)[0]
+        if distance < collision_clearance and not Path.Geom.isRoughly(
+            distance, collision_clearance
+        ):
+            return False
+    return True
 
 
 def get_dressup_linking_moves(
@@ -152,27 +248,14 @@ def check_collision(
     if Path.Geom.pointsCoincide(start_position, target_position):
         return False
 
-    # Build collision model
-    collision_model = None
-    if solids:
-        solids = [s for s in solids if s]
-        if len(solids) == 1:
-            collision_model = solids[0]
-        elif len(solids) > 1:
-            collision_model = Part.makeCompound(solids)
-
-    if not collision_model:
+    obstacles = _obstacles(solids)
+    if not obstacles:
         return False
 
     collision_clearance = max(collision_clearance, 0) or 1
 
     # Create direct path wire
     wire = Part.Wire([Part.makeLine(start_position, target_position)])
-
-    bbDistance = wire.BoundBox.ZMin - collision_model.BoundBox.ZMax
-    if bbDistance >= collision_clearance or Path.Geom.isRoughly(bbDistance, collision_clearance):
-        # attempt to skip long time computation for simple model
-        return False
 
     if tool_shape:
         shape = _create_tool_path_shape(wire, tool_shape)
@@ -184,9 +267,7 @@ def check_collision(
     if not shape:
         return False
 
-    distance = shape.distToShape(collision_model)[0]
-
-    return distance < collision_clearance and not Path.Geom.isRoughly(distance, collision_clearance)
+    return not _clear_of(shape, obstacles, collision_clearance)
 
 
 def get_linking_moves(
@@ -223,14 +304,7 @@ def get_linking_moves(
     if retract_height_offset is not None and retract_height_offset < 0:
         raise ValueError("Retract offset must be positive")
 
-    # Collision model
-    collision_model = None
-    if solids:
-        solids = [s for s in solids if s]
-        if len(solids) == 1:
-            collision_model = solids[0]
-        elif len(solids) > 1:
-            collision_model = Part.makeCompound(solids)
+    obstacles = _obstacles(solids)
 
     # Determine candidate heights
     if isinstance(heights_clearance, (float, int)):
@@ -245,7 +319,13 @@ def get_linking_moves(
 
     collision_clearance = max(collision_clearance, 0) or 1
 
-    # Try each height
+    # Try each height, and last, over whatever stands in the way: a clamp or a
+    # vise's jaw can stand above the heights the operation was given
+    over = _height_over(
+        obstacles, start_position, target_position, tool_shape, tool_diameter, collision_clearance
+    )
+    if over is not None and over > heights[-1]:
+        heights.append(over)
     for i in range(len(heights)):
         plunge_heights = heights[: i + 1]
         if (
@@ -255,7 +335,7 @@ def get_linking_moves(
             plunge_heights = sorted(plunge_heights + [split_plunge_height])
         wire = make_linking_wire(start_position, target_position, plunge_heights)
         if is_travel_collision_free(
-            wire, collision_model, tool_shape, tool_diameter, collision_clearance
+            wire, obstacles, tool_shape, tool_diameter, collision_clearance
         ):
             commands = []
             for e in wire.Edges:
@@ -266,6 +346,29 @@ def get_linking_moves(
             return commands
 
     raise RuntimeError("No collision-free path found between start and target positions")
+
+
+def _height_over(obstacles, start, target, tool_shape, tool_diameter, collision_clearance):
+    """The height a move from start to target keeps collision_clearance over every
+    obstacle it passes over, as wide as the tool; None if it passes over none."""
+    if not obstacles:
+        return None
+    half = 0.0
+    if tool_shape:
+        half = max(tool_shape.BoundBox.XLength, tool_shape.BoundBox.YLength) / 2
+    elif tool_diameter:
+        half = tool_diameter / 2
+    path = FreeCAD.BoundBox(
+        min(start.x, target.x),
+        min(start.y, target.y),
+        0,
+        max(start.x, target.x),
+        max(start.y, target.y),
+        0,
+    )
+    margin = half + max(collision_clearance, 0)
+    tops = [o.BoundBox.ZMax for o in obstacles if _overlapXY(o.BoundBox, path, margin)]
+    return max(tops) + (max(collision_clearance, 0) or 1) if tops else None
 
 
 def make_linking_wire(start: Vector, target: Vector, heights: list) -> Part.Wire:
@@ -310,18 +413,15 @@ def is_travel_collision_free(
     collision_clearance: float = 1,
 ) -> bool:
     """
-    Check if a horizontal edge of wire would not collide with solids.
+    Check if a horizontal edge of wire would not collide with solid, a shape
+    or a list of them.
     Returns True if path is clear, False if collision detected.
     """
-    if not solid:
+    obstacles = _obstacles(solid)
+    if not obstacles:
         return True
 
     collision_clearance = max(collision_clearance, 0) or 1
-
-    bbDistance = wire.BoundBox.ZMax - solid.BoundBox.ZMax
-    if bbDistance >= collision_clearance or Path.Geom.isRoughly(bbDistance, collision_clearance):
-        # attempt to skip long time computation for simple model
-        return True
 
     if tool_shape:
         shape = _create_tool_path_shape(wire, tool_shape)
@@ -333,9 +433,7 @@ def is_travel_collision_free(
     if not shape:
         return True
 
-    distance = shape.distToShape(solid)[0]
-
-    return distance >= collision_clearance or Path.Geom.isRoughly(distance, collision_clearance)
+    return _clear_of(shape, obstacles, collision_clearance)
 
 
 def _create_horizontal_face(wire, width):

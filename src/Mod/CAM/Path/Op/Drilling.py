@@ -437,6 +437,7 @@ class ObjectDrilling(PathCircularHoleBase.ObjectOp):
         # Prepare linking parameters
         # Use self.model which is transformed when 3+2 workplane is active
         solids = [base.Shape for base in self.model]
+        solids += linking.workholding_solids(obj, self.job)
         linkingArgs = {
             "start_position": None,
             "target_position": None,

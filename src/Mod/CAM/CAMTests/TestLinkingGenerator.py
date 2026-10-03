@@ -53,29 +53,31 @@ class TestGetLinkingMoves(PathTestUtils.PathTestBase):
             )
 
     def test_03_path_blocked_by_solid(self):
+        """Blocked at every height given, the link goes over the solid, clear of it."""
         blocking_box = Part.makeBox(20, 20, 10)
         blocking_box.translate(FreeCAD.Vector(-5, -5, 0))
-        with self.assertRaises(RuntimeError):
-            generator.get_linking_moves(
-                start_position=self.start,
-                target_position=self.target,
-                heights_clearance=self.heights_clearance,
-                solids=[blocking_box],
-                tool_diameter=0,
-            )
+        cmds = generator.get_linking_moves(
+            start_position=self.start,
+            target_position=self.target,
+            heights_clearance=self.heights_clearance,
+            solids=[blocking_box],
+            tool_diameter=0,
+        )
+        self.assertRoughly(max(c.Parameters.get("Z", 0) for c in cmds), 11)
 
     def test_04_path_blocked_by_solid_with_tolerance(self):
+        """Over a solid the heights given do not clear, by the collision clearance."""
         blocking_box = Part.makeBox(1, 10, 10)
         blocking_box.translate(FreeCAD.Vector(5, -5, 0))
-        with self.assertRaises(RuntimeError):
-            generator.get_linking_moves(
-                start_position=self.start,
-                target_position=self.target,
-                heights_clearance=(5, 11),
-                collision_clearance=1.1,
-                solids=[blocking_box],
-                tool_diameter=0,
-            )
+        cmds = generator.get_linking_moves(
+            start_position=self.start,
+            target_position=self.target,
+            heights_clearance=(5, 11),
+            collision_clearance=1.1,
+            solids=[blocking_box],
+            tool_diameter=0,
+        )
+        self.assertRoughly(max(c.Parameters.get("Z", 0) for c in cmds), 11.1)
 
     def test_05_plunge_to_zero_depth(self):
         """Test that plunge moves correctly go to Z=0 (regression test for depth==0 bug)"""
@@ -147,18 +149,18 @@ class TestGetLinkingMoves(PathTestUtils.PathTestBase):
         )
         self.assertGreater(len(cmds), 0)
 
-        # Not enough space for linking
+        # Not enough space between them: over them
         blocking_box1.translate(FreeCAD.Vector(0, -1, 0))
         blocking_box2.translate(FreeCAD.Vector(0, -1, 0))
-        with self.assertRaises(RuntimeError):
-            generator.get_linking_moves(
-                start_position=self.start,
-                target_position=self.target,
-                heights_clearance=self.heights_clearance,
-                tool_diameter=self.tooldiameter,
-                collision_clearance=0.001,
-                solids=[blocking_box1, blocking_box2],
-            )
+        cmds = generator.get_linking_moves(
+            start_position=self.start,
+            target_position=self.target,
+            heights_clearance=self.heights_clearance,
+            tool_diameter=self.tooldiameter,
+            collision_clearance=0.001,
+            solids=[blocking_box1, blocking_box2],
+        )
+        self.assertRoughly(max(c.Parameters.get("Z", 0) for c in cmds), 10.001)
 
     def test_08_path_collision_by_toolshape(self):
         """Test collision using tool shape"""
@@ -178,18 +180,18 @@ class TestGetLinkingMoves(PathTestUtils.PathTestBase):
         )
         self.assertGreater(len(cmds), 0)
 
-        # Not enough space for linking
+        # Not enough space between them: over them
         blocking_box1.translate(FreeCAD.Vector(0, -1, 0))
         blocking_box2.translate(FreeCAD.Vector(0, -1, 0))
-        with self.assertRaises(RuntimeError):
-            generator.get_linking_moves(
-                start_position=self.start,
-                target_position=self.target,
-                heights_clearance=self.heights_clearance,
-                tool_shape=self.tool,
-                collision_clearance=0.001,
-                solids=[blocking_box1, blocking_box2],
-            )
+        cmds = generator.get_linking_moves(
+            start_position=self.start,
+            target_position=self.target,
+            heights_clearance=self.heights_clearance,
+            tool_shape=self.tool,
+            collision_clearance=0.001,
+            solids=[blocking_box1, blocking_box2],
+        )
+        self.assertRoughly(max(c.Parameters.get("Z", 0) for c in cmds), 10.001)
 
     def test_09_null_toolshape(self):
         """Test toolshape method with null tool shape"""
@@ -216,6 +218,55 @@ class TestGetLinkingMoves(PathTestUtils.PathTestBase):
     @unittest.skip("not yet implemented")
     def test_30_path_generated_without_local_safe(self):
         pass
+
+    def test_40_tall_solid_beside_the_path_left_alone(self):
+        """A clamp standing tall beside the path, as wide as the tool and the clearance
+        away, raises nothing: the link stays at the lowest height."""
+        clamp = Part.makeBox(4, 4, 50)
+        clamp.translate(FreeCAD.Vector(4, 5, 0))
+        cmds = generator.get_linking_moves(
+            start_position=self.start,
+            target_position=self.target,
+            heights_clearance=self.heights_clearance,
+            solids=[clamp],
+            tool_diameter=self.tooldiameter,
+            collision_clearance=1,
+        )
+        self.assertRoughly(max(c.Parameters.get("Z", 0) for c in cmds), 2)
+
+    def test_41_clamp_on_the_path_gone_over(self):
+        """A clamp on the path standing above the heights given: the link goes over it,
+        as wide as the tool and by the clearance, under each checking method."""
+        clamp = Part.makeBox(4, 4, 30)
+        clamp.translate(FreeCAD.Vector(3, -2, 0))
+        for tool in ({}, {"tool_diameter": self.tooldiameter}, {"tool_shape": self.tool}):
+            cmds = generator.get_linking_moves(
+                start_position=self.start,
+                target_position=self.target,
+                heights_clearance=self.heights_clearance,
+                solids=[clamp],
+                collision_clearance=1,
+                **tool,
+            )
+            self.assertRoughly(max(c.Parameters.get("Z", 0) for c in cmds), 31)
+
+    def test_42_compound_or_list(self):
+        """Solids given as a compound or a list keep the link the same."""
+        a = Part.makeBox(2, 2, 8)
+        a.translate(FreeCAD.Vector(4, -1, 0))
+        b = Part.makeBox(2, 2, 3)
+        b.translate(FreeCAD.Vector(4, 30, 0))
+        heights = []
+        for solids in ([a, b], [Part.makeCompound([a, b])]):
+            cmds = generator.get_linking_moves(
+                start_position=self.start,
+                target_position=self.target,
+                heights_clearance=(2.0, 5.0, 12.0),
+                solids=solids,
+            )
+            heights.append(max(c.Parameters.get("Z", 0) for c in cmds))
+        self.assertRoughly(heights[0], 12)
+        self.assertRoughly(heights[1], 12)
 
 
 class _Value:
