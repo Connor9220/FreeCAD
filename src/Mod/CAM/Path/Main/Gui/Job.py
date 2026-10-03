@@ -300,6 +300,8 @@ class ViewProvider:
             children.append(self.obj.Tools)
         if getattr(self.obj, "Workplanes", None):
             children.append(self.obj.Workplanes)
+        if getattr(self.obj, "Workholding", None):
+            children.append(self.obj.Workholding)
         return children
 
     def onDelete(self, vobj, arg2=None):

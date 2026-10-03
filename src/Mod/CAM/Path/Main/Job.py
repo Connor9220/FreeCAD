@@ -102,6 +102,58 @@ def createModelResourceClone(obj, orig):
     return createResourceClone(obj, orig, "Model", "BaseGeometry")
 
 
+def workholdingParts(job, cuttable=False):
+    """workholdingParts(job, cuttable=False) ... the pieces of the job's workholding in use, as
+    (part, shape) pairs, each shape where it stands, the part the one it shows as: a vise's parts
+    shown, hard jaw plates swapped for soft jaws being hidden, and out of the tools' way; clamps
+    and the like whole. With cuttable, only what may be cut into, soft jaws and soft parallels;
+    without, the rest."""
+    import Part
+    import Path.Main.Workholding as PathWorkholding
+
+    group = getattr(job, "Workholding", None)
+    parts = []
+    for obj in getattr(group, "Group", []) or []:
+        # what is cut into on purpose, a table's waste board, nothing is found hitting
+        if not getattr(obj, "Collides", True):
+            continue
+        # one set inactive, like an operation, is not in use
+        if not getattr(obj, "Active", True):
+            continue
+        try:
+            if hasattr(obj, "Group") and PathWorkholding.viseSetup(obj) is not None:
+                for part in obj.Group:
+                    if not part.Visibility or PathWorkholding.isCuttable(part) != cuttable:
+                        continue
+                    shape = Part.getShape(
+                        part, "", needSubElement=False, transform=True, noElementMap=True
+                    )
+                    if shape.isNull() or not shape.Solids:
+                        continue
+                    shape = shape.copy()
+                    shape.Placement = obj.Placement.multiply(shape.Placement)
+                    parts.append((part, shape))
+            elif not cuttable:
+                shape = Part.getShape(
+                    obj, "", needSubElement=False, transform=True, noElementMap=True
+                )
+                if not shape.isNull() and shape.Solids:
+                    parts.append((obj, shape))
+        except Exception as e:
+            Path.Log.warning(f"Workholding {obj.Label} has no shape: {e}")
+    return parts
+
+
+def workholdingShape(job, cuttable=False):
+    """workholdingShape(job, cuttable=False) ... the solids of the job's workholding where they
+    stand, as one compound, or None when it has none: with cuttable, only what may be cut into,
+    soft jaws and soft parallels; without, the rest."""
+    import Part
+
+    shapes = [shape for _, shape in workholdingParts(job, cuttable)]
+    return Part.makeCompound(shapes) if shapes else None
+
+
 def linksTo(target, exclude=()):
     """linksTo(target, exclude=()) ... what links target: for each link, the object and property
     holding it, the kind of link, and the sub-elements named. Operations' base geometry, work
@@ -430,6 +482,7 @@ class ObjectJob:
 
         self.setupOperations(obj)
         self.setupWorkplanes(obj)
+        self.setupWorkholding(obj)
         self.setupSetupSheet(obj)
         self.setupBaseModel(obj, models)
         self.setupToolTable(obj)
@@ -514,6 +567,30 @@ class ObjectJob:
         group.Label = "Workplanes"
         obj.Workplanes = group
         obj.setEditorMode("Workplanes", 2)  # hide
+
+    def setupWorkholding(self, obj):
+        """setupWorkholding(obj) ... set up the Workholding group for the Job.
+
+        The vises, clamps and fixture plates the stock is held with, placed where they are on
+        the machine. They are not the part: the stock is not made from them and the operations
+        do not cut them. The simulator shows them and finds where a tool or its holder hits
+        them."""
+        if not hasattr(obj, "Workholding"):
+            obj.addProperty(
+                "App::PropertyLink",
+                "Workholding",
+                "Base",
+                QT_TRANSLATE_NOOP(
+                    "App::Property", "Group of the vises, clamps and fixtures holding the stock"
+                ),
+            )
+        if getattr(obj, "Workholding", None):
+            return
+
+        group = obj.Document.addObject("App::DocumentObjectGroup", "Workholding")
+        group.Label = "Workholding"
+        obj.Workholding = group
+        obj.setEditorMode("Workholding", 2)  # hide
 
     def adoptOrphanWorkplanes(self, obj):
         """adoptOrphanWorkplanes(obj) ... file any work plane an operation links
@@ -738,6 +815,18 @@ class ObjectJob:
             doc.removeObject(obj.Workplanes.Name)
             obj.Workplanes = None
 
+        # the workholding is the user's own, left in the document
+        if getattr(obj, "Workholding", None):
+            Path.Log.debug("taking down workholding")
+            import Path.Main.Workholding as PathWorkholding
+
+            # a vise shared with other Jobs no longer shared: theirs stay where they are
+            for vise in PathWorkholding.vises(obj):
+                PathWorkholding.release(vise)
+            obj.Workholding.Group = []
+            doc.removeObject(obj.Workholding.Name)
+            obj.Workholding = None
+
         return True
 
     def fixupOperations(self, obj):
@@ -814,6 +903,7 @@ class ObjectJob:
 
         self.setupWorkplanes(obj)
         self.adoptOrphanWorkplanes(obj)
+        self.setupWorkholding(obj)
         import Path.Main.Workplane as PathWorkplane
 
         for workplane in PathWorkplane.workplanesOf(obj):

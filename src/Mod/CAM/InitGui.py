@@ -89,6 +89,7 @@ class CAMWorkbench(Workbench):
 
         from Path.Main.Gui import JobCmd as PathJobCmd
         from Path.Main.Gui import WorkplaneCmd as PathWorkplaneCmd
+        from Path.Main.Gui import WorkholdingCmd as PathWorkholdingCmd
         from Path.Main.Gui import SanityCmd as SanityCmd
         from Path.Tool.toolbit.ui import cmd as PathToolBitCmd
         from Path.Tool.library.ui import cmd as PathToolBitLibraryCmd
@@ -125,7 +126,12 @@ class CAMWorkbench(Workbench):
         Path.GuiInit.Startup()
 
         # build commands list
-        projcmdlist = ["CAM_Job", "CAM_Workplane", "CAM_Sanity"]
+        projcmdlist = [
+            "CAM_Job",
+            "CAM_Workplane",
+            "CAM_Vise",
+            "CAM_Sanity",
+        ]
         postcmdlist = ["CAM_Post", "CAM_PostSelected"]
         toolcmdlist = ["CAM_Inspect", "CAM_SelectLoop", "CAM_OpActiveToggle"]
 
@@ -408,11 +414,18 @@ class CAMWorkbench(Workbench):
                 "Path Modification", ["CAM_Array", "CAM_OperationCopy", "CAM_SimpleCopy"]
             )
         if onlyJob:
-            self.appendContextMenu("", ["CAM_OpActiveToggle", "CAM_ExportTemplate", "CAM_Sanity"])
+            self.appendContextMenu(
+                "", ["CAM_OpActiveToggle", "CAM_ExportTemplate", "CAM_Sanity", "CAM_Vise"]
+            )
         if startPoint:
             self.appendContextMenu("", ["CAM_SetStartPoint"])
         if onlyOps:
             self.appendContextMenu("", ["CAM_OpActiveToggle"])
+        # a vise or clamp of a Job's workholding: in use or not, as an operation
+        import Path.Main.Workholding as PathWorkholding
+
+        if not onlyOps and all(PathWorkholding.memberOf(sel)[1] is not None for sel in selection):
+            self.appendContextMenu("", ["CAM_OpActiveToggle", "CAM_Vise", "CAM_AddAnother"])
         if onlyOps and len(selection) == 1:
             self.appendContextMenu("", ["CAM_Inspect"])
         if onlyJob or onlyOps:

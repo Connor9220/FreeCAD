@@ -192,6 +192,12 @@ class _ToggleOperation:
         if not selection:
             return False
 
+        # workholding: a vise, a clamp, or a part of one
+        import Path.Main.Workholding as PathWorkholding
+
+        if all(PathWorkholding.memberOf(sel)[1] is not None for sel in selection):
+            return True
+
         if len(selection) == 1:
             # allows to toggle all operations in Job
             sel = selection[0]
@@ -209,6 +215,12 @@ class _ToggleOperation:
 
     def Activated(self):
         selection = FreeCADGui.Selection.getSelection()
+        import Path.Main.Workholding as PathWorkholding
+
+        members = [PathWorkholding.memberOf(sel)[1] for sel in selection]
+        if members and all(m is not None for m in members):
+            self.toggleWorkholding(list(dict.fromkeys(members)))
+            return
         if (len(selection) == 1 and hasattr(selection[0], "Group")) and (
             selection[0].Name.startswith("Job") or selection[0].Name.startswith("Operations")
         ):
@@ -237,6 +249,25 @@ class _ToggleOperation:
                 baseOp.Active = not baseOp.Active
 
         FreeCAD.ActiveDocument.recompute()
+
+    def toggleWorkholding(self, members):
+        """Workholding set in use or not, as operations are: all one way, the other way; mixed,
+        all in use. Not in use, it is hidden, and shows the inactive icon where it can."""
+        import Path.Main.Workholding as PathWorkholding
+
+        states = [PathWorkholding.isActive(m) for m in members]
+        active = not states[0] if all(s == states[0] for s in states) else True
+        doc = members[0].Document
+        doc.openTransaction(translate("CAM_OpActiveToggle", "Toggle workholding"))
+        for member in members:
+            PathWorkholding.setActive(member, active)
+            vobj = getattr(member, "ViewObject", None)
+            if vobj is not None:
+                vobj.Visibility = active
+                if hasattr(vobj, "signalChangeIcon"):
+                    vobj.signalChangeIcon()
+        doc.commitTransaction()
+        doc.recompute()
 
 
 if FreeCAD.GuiUp:

@@ -93,6 +93,11 @@ SET(PathPythonDressupGui_SRCS
 SET(PathPythonMain_SRCS
     Path/Main/__init__.py
     Path/Main/Job.py
+    Path/Main/Workholding.py
+    Path/Main/WorkholdingCheck.py
+    Path/Main/WorkholdingJaws.py
+    Path/Main/WorkholdingLibrary.py
+    Path/Main/WorkholdingParallels.py
     Path/Main/Workplane.py
     Path/Main/Stock.py
 )
@@ -105,6 +110,8 @@ SET(PathPythonMainGui_SRCS
     Path/Main/Gui/Inspect.py
     Path/Main/Gui/Job.py
     Path/Main/Gui/JobCmd.py
+    Path/Main/Gui/WorkholdingCmd.py
+    Path/Main/Gui/WorkholdingLibraryGui.py
     Path/Main/Gui/WorkplaneCmd.py
     Path/Main/Gui/JobDlg.py
     Path/Main/Gui/PreferencesJob.py
@@ -700,6 +707,8 @@ SET(Tests_SRCS
     CAMTests/TestPathWorkplaneFrame.py
     CAMTests/TestPathTiltedWorkPlane.py
     CAMTests/TestPathJobModelLinks.py
+    CAMTests/TestPathWorkholding.py
+    CAMTests/TestPathWorkholdingLibrary.py
     CAMTests/TestPathSharedWorkplane.py
     CAMTests/TestProcessorOptimizations.py
     CAMTests/TestGrblLegacyPost.py
