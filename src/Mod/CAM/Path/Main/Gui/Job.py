@@ -1850,15 +1850,16 @@ class TaskPanel:
                     for i in range(count):
                         # it seems natural to remove the last of all the base objects for a given model
                         base = [b for b in obj.Model.Group if proxy.baseObject(obj, b) == model][-1]
+                        if not self.confirmModelRemoval(model, base):
+                            continue
                         self.vproxy.forgetBaseVisibility(obj, base)
                         self.obj.Proxy.removeBase(obj, base, True)
                 # do not access any of the retired objects after this point, they don't exist anymore
 
-                # then add all rookie base models
+                # then add all rookie base models, taking up what linked them when taken out
                 for model, count in additions.items():
                     for i in range(count):
-                        base = PathJob.createModelResourceClone(obj, model)
-                        obj.Model.addObject(base)
+                        base = proxy.addModel(obj, model)
                         self.vproxy.rememberBaseVisibility(obj, base)
 
                 # refresh the view
@@ -1866,6 +1867,34 @@ class TaskPanel:
                     self.setFields()
                 else:
                     Path.Log.track("no changes to model")
+
+    def confirmModelRemoval(self, model, base):
+        """confirmModelRemoval(model, base) ... whether to take model out of the Job, asked when
+        operations or work planes are made from it: their links to it go with it, taken up again
+        if it is added back."""
+        records = self.obj.Proxy.modelLinks(self.obj, base)
+        if not records:
+            return True
+        doc = self.obj.Document
+        names = {r["obj"] for r in records}
+        objs = [doc.getObject(n) for n in names]
+        planes = sum(1 for o in objs if o and o.TypeId == "Part::LocalCoordinateSystem")
+        ops = sum(1 for o in objs if o and hasattr(o, "Path"))
+        others = len(objs) - planes - ops
+        message = translate(
+            "CAM_Job",
+            "Taking {model} out of the Job unlinks what is made from it: the base geometry of {ops} "
+            "operations, the attachments of {planes} work planes and {others} other links. They are "
+            "linked again if {model} is added back to this Job.\n\nTake it out?",
+        ).format(model=model.Label, ops=ops, planes=planes, others=others)
+        answer = QtGui.QMessageBox.question(
+            self.form,
+            translate("CAM_Job", "Take the model out"),
+            message,
+            QtGui.QMessageBox.Yes | QtGui.QMessageBox.No,
+            QtGui.QMessageBox.No,
+        )
+        return answer == QtGui.QMessageBox.Yes
 
     def tabPageChanged(self, index):
         if index == 0:

@@ -27,6 +27,7 @@ from PySide import QtCore
 from PySide.QtCore import QT_TRANSLATE_NOOP
 import FreeCAD
 import Path
+import json
 import Path.Base.SetupSheet as PathSetupSheet
 import Path.Base.Util as PathUtil
 import Path.Main.Stock as PathStock
@@ -99,6 +100,61 @@ def createResourceClone(obj, orig, name, icon):
 
 def createModelResourceClone(obj, orig):
     return createResourceClone(obj, orig, "Model", "BaseGeometry")
+
+
+def linksTo(target, exclude=()):
+    """linksTo(target, exclude=()) ... what links target: for each link, the object and property
+    holding it, the kind of link, and the sub-elements named. Operations' base geometry, work
+    planes' attachments and the like; expressions are not followed."""
+    records = []
+    for obj in target.InList:
+        if obj in exclude:
+            continue
+        for prop in obj.PropertiesList:
+            kind = obj.getTypeIdOfProperty(prop)
+            if not kind.startswith("App::PropertyLink"):
+                continue
+            try:
+                value = obj.getPropertyByName(prop)
+            except Exception:
+                continue
+            record = {"obj": obj.Name, "prop": prop}
+            if kind.startswith("App::PropertyLinkSubList"):
+                for linked, subs in value or []:
+                    if linked == target:
+                        subs = [subs] if isinstance(subs, str) else list(subs)
+                        records.append(dict(record, kind="sublist", subs=subs))
+            elif kind.startswith("App::PropertyLinkSub"):
+                if value and value[0] == target:
+                    records.append(dict(record, kind="sub", subs=list(value[1])))
+            elif kind.startswith("App::PropertyLinkList"):
+                if target in (value or []):
+                    records.append(dict(record, kind="list"))
+            elif value == target:
+                records.append(dict(record, kind="link"))
+    return records
+
+
+def relink(doc, records, target):
+    """relink(doc, records, target) ... make the links records describe, as linksTo found them,
+    to target instead. Those whose object or property is gone are left out."""
+    for record in records:
+        obj = doc.getObject(record["obj"])
+        if obj is None or not hasattr(obj, record["prop"]):
+            continue
+        prop = record["prop"]
+        value = obj.getPropertyByName(prop)
+        kind = record["kind"]
+        if kind == "sublist":
+            entries = [(o, tuple(s) if not isinstance(s, str) else (s,)) for o, s in value or []]
+            entries.append((target, tuple(record["subs"])))
+            setattr(obj, prop, entries)
+        elif kind == "sub":
+            setattr(obj, prop, (target, record["subs"]))
+        elif kind == "list":
+            setattr(obj, prop, list(value or []) + [target])
+        else:
+            setattr(obj, prop, target)
 
 
 def touchOperations(job):
@@ -482,12 +538,51 @@ class ObjectJob:
         # if obj.Stock and obj.Stock.ViewObject:
         #     obj.Stock.ViewObject.Visibility = True
 
+    def modelLinks(self, obj, base):
+        """modelLinks(obj, base) ... what links the clone base of a model: the operations' base
+        geometry, the work planes' attachments and the like, the Job's own links left out."""
+        return linksTo(base, (obj, obj.Model, obj.Stock))
+
     def removeBase(self, obj, base, removeFromModel):
         if isResourceClone(obj, base, None):
+            # What links the clone goes with it. It is remembered, for the model's clone, should
+            # the model be added to the Job again, to take up.
+            records = self.modelLinks(obj, base)
+            model = self.baseObject(obj, base)
+            if records and model is not None:
+                self.setupDetachedModelLinks(obj)
+                links = dict(obj.DetachedModelLinks)
+                links[model.Name] = json.dumps(records)
+                obj.DetachedModelLinks = links
             PathUtil.clearExpressionEngine(base)
             if removeFromModel:
                 obj.Model.removeObject(base)
             obj.Document.removeObject(base.Name)
+
+    def setupDetachedModelLinks(self, obj):
+        if not hasattr(obj, "DetachedModelLinks"):
+            obj.addProperty(
+                "App::PropertyMap",
+                "DetachedModelLinks",
+                "Base",
+                QT_TRANSLATE_NOOP(
+                    "App::Property",
+                    "The links to models taken out of the Job, for when they are added back",
+                ),
+            )
+            obj.setEditorMode("DetachedModelLinks", 2)  # hide
+
+    def addModel(self, obj, model):
+        """addModel(obj, model) ... add model to the Job, as a clone, and return the clone. A
+        model taken out before has what linked its clone then linked to the new one."""
+        base = createModelResourceClone(obj, model)
+        obj.Model.addObject(base)
+        links = dict(getattr(obj, "DetachedModelLinks", {}) or {})
+        if model.Name in links:
+            relink(obj.Document, json.loads(links.pop(model.Name)), base)
+            obj.DetachedModelLinks = links
+            obj.Document.recompute()
+        return base
 
     def modelBoundBox(self, obj):
         return PathStock.shapeBoundBox(obj.Model.Group)

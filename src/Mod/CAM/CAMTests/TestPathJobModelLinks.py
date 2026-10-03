@@ -57,6 +57,37 @@ class TestPathJobModelLinks(PathTestUtils.PathTestBase):
         self.doc.recompute()
         return op
 
+    def test00_model_added_back_is_linked_again(self):
+        """Taking the model out unlinks what is made from it; adding it back links it again."""
+        model = self._model()
+        top = self._faceNamed(model, Vector(0, 0, 1))
+        op = self._op()
+        op.addProperty("App::PropertyLinkSubListGlobal", "Faces", "Test", "")
+        op.Faces = [(model, [top])]
+        plane = PathWorkplane.createWorkplane(self.job, model, top)
+        self.doc.recompute()
+
+        self.job.Proxy.removeBase(self.job, model, True)
+        self.doc.recompute()
+        self.assertEqual(op.Faces, [])
+        self.assertFalse(plane.AttachmentSupport)
+
+        clone = self.job.Proxy.addModel(self.job, self.box)
+        self.doc.recompute()
+        self.assertEqual(len(op.Faces), 1)
+        self.assertIs(op.Faces[0][0], clone)
+        self.assertEqual(list(op.Faces[0][1]), [top])
+        self.assertIs(plane.AttachmentSupport[0][0], clone)
+        self.assertEqual(dict(self.job.DetachedModelLinks), {})
+
+    def test01_model_added_fresh_links_nothing(self):
+        """A model never taken out is added with nothing linked to it."""
+        other = self.doc.addObject("Part::Box", "Other")
+        self.doc.recompute()
+        clone = self.job.Proxy.addModel(self.job, other)
+        self.assertIn(clone, self.job.Model.Group)
+        self.assertEqual(PathJob.linksTo(clone, (self.job, self.job.Model)), [])
+
     def test02_placed_workplane_follows_the_model(self):
         """A work plane made at a placement stays where it is on the part when the model moves."""
         at = FreeCAD.Placement(Vector(10, 20, 30), FreeCAD.Rotation(Vector(0, 1, 0), -20))
