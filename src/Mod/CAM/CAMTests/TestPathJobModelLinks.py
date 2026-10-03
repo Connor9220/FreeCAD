@@ -116,3 +116,14 @@ class TestPathJobModelLinks(PathTestUtils.PathTestBase):
         self.assertIn(text, carried)
         self.assertNotIn(attached, carried)
         self.assertNotIn(self._model(), carried)
+
+    def test04_new_op_takes_the_plane_of_the_one_before(self):
+        """A new operation takes the work plane of the one just before it, none if it has none."""
+        plane = PathWorkplane.createWorkplane(self.job, placement=FreeCAD.Placement())
+        first = self._op("First")
+        first.Workplane = plane
+        second = self._op("Second")
+        self.assertIs(second.Workplane, plane)
+        second.Workplane = None
+        third = self._op("Third")
+        self.assertIsNone(third.Workplane)
