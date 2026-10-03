@@ -101,6 +101,42 @@ def createModelResourceClone(obj, orig):
     return createResourceClone(obj, orig, "Model", "BaseGeometry")
 
 
+def touchOperations(job):
+    """touchOperations(job) ... every operation of the Job to be computed again: one made from
+    the stock rather than from the model's geometry, a facing say, is not linked to what moved."""
+    for op in job.Proxy.allOperations():
+        op.touch()
+
+
+def objectsInModelFrame(job):
+    """objectsInModelFrame(job) ... what is placed on the part without being attached to it, and
+    so does not follow the model by itself when it is moved: work planes set where they are, and
+    the text, sketches and other shapes operations are made from."""
+    carried = []
+
+    def carry(obj):
+        if obj is None or obj in carried or not hasattr(obj, "Placement"):
+            return
+        if obj in job.Model.Group or obj == job.Stock:
+            return
+        if getattr(obj, "AttachmentSupport", None) and getattr(obj, "MapMode", "") != "Deactivated":
+            return
+        carried.append(obj)
+
+    for workplane in getattr(getattr(job, "Workplanes", None), "Group", []) or []:
+        carry(workplane)
+    import PathScripts.PathUtils as PathUtils
+
+    for obj in job.Document.Objects:
+        if not hasattr(obj, "Proxy") or not hasattr(obj, "Path"):
+            continue
+        if PathUtils.findParentJob(obj) != job:
+            continue
+        for shape in getattr(obj, "BaseShapes", []) or []:
+            carry(shape)
+    return carried
+
+
 class NotificationClass(QtCore.QObject):
     updateTC = QtCore.Signal(object, object)
 

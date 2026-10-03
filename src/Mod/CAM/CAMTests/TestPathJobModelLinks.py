@@ -69,3 +69,19 @@ class TestPathJobModelLinks(PathTestUtils.PathTestBase):
         self.doc.recompute()
         self.assertRoughly(plane.Placement.Base.z, 37.5)
         self.assertRoughly(plane.Placement.Base.x, 10)
+
+    def test03_unattached_things_are_carried(self):
+        """What is placed on the part without being attached to it is what a move carries."""
+        loose = PathWorkplane.createWorkplane(self.job)
+        loose.AttachmentSupport = []
+        loose.MapMode = "Deactivated"
+        attached = PathWorkplane.createWorkplane(self.job, placement=FreeCAD.Placement())
+        text = self.doc.addObject("Part::Feature", "Text")
+        op = self._op()
+        op.addProperty("App::PropertyLinkList", "BaseShapes", "Test", "")
+        op.BaseShapes = [text]
+        carried = PathJob.objectsInModelFrame(self.job)
+        self.assertIn(loose, carried)
+        self.assertIn(text, carried)
+        self.assertNotIn(attached, carried)
+        self.assertNotIn(self._model(), carried)
