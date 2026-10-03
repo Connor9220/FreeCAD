@@ -193,6 +193,88 @@ def objectsInModelFrame(job):
     return carried
 
 
+def jobOfModel(obj):
+    """jobOfModel(obj) ... the Job whose model obj is, None if it is none's."""
+    for o in obj.InList:
+        for job in o.InList:
+            if getattr(job, "Model", None) == o and hasattr(job, "Operations"):
+                return job
+    return None
+
+
+def keepToScaledModel(job, model, before, after):
+    """keepToScaledModel(job, model, before, after) ... what is made from the Job's model kept
+    where it was on the part as the model's Scale changes from before to after, each its own size:
+    what is attached to the model its offset scaled, along the model's own axes; what is set on
+    the part unattached its place."""
+    ratio = []
+    for b, a in zip(before, after):
+        if abs(b) < 1e-12:
+            return
+        ratio.append(a / b)
+    if all(abs(r - 1) < 1e-12 for r in ratio):
+        return
+
+    def scaled(v):
+        return FreeCAD.Vector(v.x * ratio[0], v.y * ratio[1], v.z * ratio[2])
+
+    turn = model.Placement.Rotation
+    for obj in model.InList:
+        support = getattr(obj, "AttachmentSupport", None) or []
+        if getattr(obj, "MapMode", "Deactivated") == "Deactivated":
+            continue
+        if not any(entry[0] == model for entry in support):
+            continue
+        # the offset along the axes of the frame it is attached to, scaled along the model's
+        offset = FreeCAD.Placement(obj.AttachmentOffset)
+        frame = obj.Placement.multiply(offset.inverse()).Rotation
+        toModel = turn.inverted().multiply(frame)
+        offset.Base = toModel.inverted().multVec(scaled(toModel.multVec(offset.Base)))
+        obj.AttachmentOffset = offset
+    inverse = model.Placement.inverse()
+    for obj in objectsInModelFrame(job):
+        placement = FreeCAD.Placement(obj.Placement)
+        placement.Base = model.Placement.multVec(scaled(inverse.multVec(placement.Base)))
+        obj.Placement = placement
+
+
+class _ModelScale:
+    """A Job's model scaled, what is made from it kept to it: the Scale a Job's clone of its model
+    has, as it was before it changed."""
+
+    def __init__(self):
+        self.before = {}
+
+    def slotBeforeChangeObject(self, obj, prop):
+        # a Job's clone of its model only, as createResourceClone marks it
+        if prop == "Scale" and getattr(obj, "PathResource", None) == "Model":
+            self.before[(obj.Document.Name, obj.Name)] = FreeCAD.Vector(obj.Scale)
+
+    def slotChangedObject(self, obj, prop):
+        if prop != "Scale":
+            return
+        before = self.before.pop((obj.Document.Name, obj.Name), None)
+        doc = obj.Document
+        if before is None or doc.Restoring or doc.Transacting:
+            return
+        job = jobOfModel(obj)
+        if job is not None:
+            keepToScaledModel(job, obj, before, obj.Scale)
+
+
+_modelScale = None
+
+
+def _watchModelScale():
+    global _modelScale
+    if _modelScale is None:
+        _modelScale = _ModelScale()
+        FreeCAD.addDocumentObserver(_modelScale)
+
+
+_watchModelScale()
+
+
 class NotificationClass(QtCore.QObject):
     updateTC = QtCore.Signal(object, object)
 

@@ -127,3 +127,38 @@ class TestPathJobModelLinks(PathTestUtils.PathTestBase):
         second.Workplane = None
         third = self._op("Third")
         self.assertIsNone(third.Workplane)
+
+    def test05_scaled_model_keeps_what_is_made_from_it(self):
+        """The model scaled: what is attached to it, by its own frame or a face, and what is set
+        on it unattached stay where they were on the part, each its own size."""
+        model = self._model()
+        top = self._faceNamed(model, Vector(0, 0, 1))
+        at = FreeCAD.Placement(Vector(10, 20, 30), FreeCAD.Rotation(Vector(0, 1, 0), -20))
+        placed = PathWorkplane.createWorkplane(self.job, placement=at)
+        onFace = PathWorkplane.createWorkplane(self.job, model, top)
+        onFace.AttachmentOffset = FreeCAD.Placement(Vector(40, 30, 0), FreeCAD.Rotation())
+        text = self.doc.addObject("Part::Feature", "Text")
+        text.Placement = FreeCAD.Placement(
+            Vector(50, 40, 40), FreeCAD.Rotation(Vector(0, 0, 1), 30)
+        )
+        op = self._op()
+        op.addProperty("App::PropertyLinkList", "BaseShapes", "Test", "")
+        op.BaseShapes = [text]
+        self.doc.recompute()
+        before = {o.Name: FreeCAD.Placement(o.Placement) for o in (placed, onFace, text)}
+
+        model.Scale = Vector(0.5, 0.5, 0.5)
+        self.doc.recompute()
+        for obj in (placed, onFace, text):
+            was = before[obj.Name]
+            self.assertTrue(obj.Placement.Base.isEqual(was.Base * 0.5, 1e-6), obj.Label)
+            self.assertTrue(obj.Placement.Rotation.isSame(was.Rotation, 1e-9), obj.Label)
+        # on the top face, now half as high
+        self.assertRoughly(onFace.Placement.Base.z, 20)
+        # scaled back, back where they were
+        self.doc.openTransaction("Scale")
+        model.Scale = Vector(1, 1, 1)
+        self.doc.commitTransaction()
+        self.doc.recompute()
+        for obj in (placed, onFace, text):
+            self.assertTrue(obj.Placement.Base.isEqual(before[obj.Name].Base, 1e-6), obj.Label)
