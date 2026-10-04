@@ -104,8 +104,8 @@ def workholding_solids(obj, job) -> list:
     try:
         import Path.Main.Job as PathJob
 
-        shapes = [s for _, s in PathJob.workholdingParts(job)]
-        shapes += [s for _, s in PathJob.workholdingParts(job, cuttable=True)]
+        # what is cut into on purpose too: a tool may not travel through it
+        shapes = [s for _, s in PathJob.workholdingParts(job, cuttable=None)]
     except Exception as e:
         Path.Log.warning(f"Workholding not seen by linking: {e}")
         return []

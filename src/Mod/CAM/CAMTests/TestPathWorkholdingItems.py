@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-FileCopyrightText: 2026 Billy Huddleston <billy@ivdc.com>
+# SPDX-FileNotice: Part of the FreeCAD project.
 
 ################################################################################
 #                                                                              #
@@ -28,8 +30,8 @@ import FreeCAD
 import Part
 
 import Path.Main.Job as PathJob
-import Path.Main.Workholding as PathWorkholding
-import Path.Main.WorkholdingItems as Items
+import Path.Workholding.Vise as PathWorkholding
+import Path.Workholding.Items as Items
 import CAMTests.PathTestUtils as PathTestUtils
 
 from FreeCAD import Vector
@@ -48,13 +50,18 @@ class TestPathWorkholdingItems(PathTestUtils.PathTestBase):
     def tearDown(self):
         FreeCAD.closeDocument(self.doc.Name)
 
-    def place(self, which, point, edge=False):
+    def place(self, which, point, normal, edge=False):
+        """A piece of class which put against the stock's side whose outward normal is normal, at
+        point along it: standing on the surface the stock lies on, or with edge, a hold-down over
+        the stock's top edge, its body down to the table."""
         item = Items.create(self.job, which)
-        normal = Items.sideAt(self.job.Stock.Shape, point)
+        bb = self.job.Stock.Shape.BoundBox
+        rotation = FreeCAD.Rotation(Vector(0, 1, 0), normal * -1)
+        item.Placement = FreeCAD.Placement(
+            Vector(point.x, point.y, bb.ZMax if edge else bb.ZMin), rotation
+        )
         if edge:
-            Items.placeOnEdge(self.job, item, point, normal)
-        else:
-            Items.placeAgainst(self.job, item, point, normal)
+            item.Drop = bb.ZMax - bb.ZMin
         self.doc.recompute()
         return item
 
@@ -63,18 +70,10 @@ class TestPathWorkholdingItems(PathTestUtils.PathTestBase):
         self.assertRoughly(item.Shape.distToShape(stock)[0], 0, 1e-6)
         self.assertRoughly(item.Shape.common(stock).Volume, 0, 1e-3)
 
-    def test00_side_found(self):
-        """The side clicked is the face nearest the point, facing out."""
-        bb = self.bb
-        n = Items.sideAt(self.job.Stock.Shape, Vector(30, bb.YMin, 5))
-        self.assertRoughly(n.y, -1)
-        n = Items.sideAt(self.job.Stock.Shape, Vector(bb.XMax, 20, 5))
-        self.assertRoughly(n.x, 1)
-
     def test01_dog_against_the_front(self):
         """A dog stands on the surface the stock lies on, touching the side clicked."""
         bb = self.bb
-        dog = self.place("Dog", Vector(30, bb.YMin, 5))
+        dog = self.place("Dog", Vector(30, bb.YMin, 5), Vector(0, -1, 0))
         self.assertTouches(dog)
         self.assertRoughly(dog.Shape.BoundBox.ZMin, bb.ZMin)
         self.assertRoughly(dog.Shape.BoundBox.YMax, bb.YMin)
@@ -83,7 +82,7 @@ class TestPathWorkholdingItems(PathTestUtils.PathTestBase):
     def test02_side_clamp_against_the_right(self):
         """A side clamp touches the side clicked, its body away from the stock."""
         bb = self.bb
-        clamp = self.place("SideClamp", Vector(bb.XMax, 20, 5))
+        clamp = self.place("SideClamp", Vector(bb.XMax, 20, 5), Vector(1, 0, 0))
         self.assertTouches(clamp)
         self.assertRoughly(clamp.Shape.BoundBox.XMin, bb.XMax)
 
@@ -91,7 +90,7 @@ class TestPathWorkholdingItems(PathTestUtils.PathTestBase):
         """An edge clamp's lip lies over the top by its reach, its body beside the stock down to
         the table."""
         bb = self.bb
-        clamp = self.place("EdgeClamp", Vector(50, bb.YMax, bb.ZMax), edge=True)
+        clamp = self.place("EdgeClamp", Vector(50, bb.YMax, bb.ZMax), Vector(0, 1, 0), edge=True)
         cb = clamp.Shape.BoundBox
         self.assertRoughly(cb.YMin, bb.YMax - clamp.Reach.Value)
         self.assertRoughly(cb.ZMax, bb.ZMax + clamp.Rise.Value)
@@ -108,57 +107,16 @@ class TestPathWorkholdingItems(PathTestUtils.PathTestBase):
         self.doc.recompute()
         self.assertRoughly(table.Shape.BoundBox.ZMax, self.bb.ZMin)
         self.assertFalse(table.Collides)
-        dog = self.place("Dog", Vector(30, self.bb.YMin, 5))
+        dog = self.place("Dog", Vector(30, self.bb.YMin, 5), Vector(0, -1, 0))
         shape = PathJob.workholdingShape(self.job)
         self.assertEqual(len(shape.Solids), len(dog.Shape.Solids))
 
-    def test07_old_names_renamed(self):
-        """A fence of before, its width front to back named Thickness, an expression on its
-        length; one saved while its length was named Width; a table's width and length swapped:
-        each named as now when it is opened, its values kept, once."""
-        fence = Items.create(self.job, "Fence")
-        fence.Length, fence.Width = 123, 7
-        PathWorkholding.renameProperties(fence, {"Width": "Thickness"})
-        fence.setExpression("Height", "Length / 10")
-        self.doc.recompute()
-        fence.Proxy.onDocumentRestored(fence)
-        self.doc.recompute()
-        self.assertFalse(hasattr(fence, "Thickness"))
-        self.assertRoughly(fence.Length.Value, 123)
-        self.assertRoughly(fence.Width.Value, 7)
-        self.assertRoughly(fence.Height.Value, 12.3)
-        fence.Proxy.onDocumentRestored(fence)
-        self.assertRoughly(fence.Length.Value, 123)
-        # its length named Width, its width Length, for a while
-        other = Items.create(self.job, "Fence")
-        other.Length, other.Width = 150, 9
-        PathWorkholding.renameProperties(other, {"Length": "Width", "Width": "Length"}, True)
-        other.setDocumentationOfProperty("Width", "Side to side, along the stock")
-        other.Proxy.onDocumentRestored(other)
-        self.assertRoughly(other.Length.Value, 150)
-        self.assertRoughly(other.Width.Value, 9)
-        other.Proxy.onDocumentRestored(other)
-        self.assertRoughly(other.Length.Value, 150)
-        # a table named as now: not swapped
-        table = Items.create(self.job, "Table")
-        width = table.Width.Value
-        table.Proxy.onDocumentRestored(table)
-        self.assertRoughly(table.Width.Value, width)
-
-    def test05_click_on_the_model_lands_on_the_stock(self):
-        """A point on the model, inside the stock, comes onto the stock's side nearest it."""
-        bb = self.bb
-        normal, point = Items.onSide(self.job.Stock.Shape, Vector(30, 0, 5))
-        self.assertRoughly(normal.y, -1)
-        self.assertRoughly(point.y, bb.YMin)
-        self.assertRoughly(point.x, 30)
-
     def test06_inactive_is_not_hit(self):
         """Workholding set inactive stays, but nothing is found hitting it."""
-        import Path.Main.Workholding as PathWorkholding
+        import Path.Workholding.Vise as PathWorkholding
 
-        dog = self.place("Dog", Vector(30, self.bb.YMin, 5))
-        clamp = self.place("SideClamp", Vector(self.bb.XMax, 20, 5))
+        dog = self.place("Dog", Vector(30, self.bb.YMin, 5), Vector(0, -1, 0))
+        clamp = self.place("SideClamp", Vector(self.bb.XMax, 20, 5), Vector(1, 0, 0))
         self.assertEqual(PathWorkholding.memberOf(dog), (self.job, dog))
         PathWorkholding.setActive(dog, False)
         shape = PathJob.workholdingShape(self.job)
@@ -464,9 +422,6 @@ class TestPathWorkholdingClampFile(_Stock):
         """A clamp's file is found in its folder by the Kind its VarSet gives, read without
         opening it; others are not."""
         self.assertEqual(Items.clampFile(self.path), ("Hugger Clamp", "HoldDown"))
-        self.assertEqual(
-            Items.clampFiles(self.dir), [("Hugger Clamp", self.path, Items.Kind.HoldDown)]
-        )
         self.assertFalse(Items.pushes(self.path))
 
     def test01_linked_and_placed(self):

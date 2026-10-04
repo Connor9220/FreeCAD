@@ -434,7 +434,7 @@ void DlgCAMSimulator::setWorkholdingShape(
 )
 {
     // face by face, a new piece where the next face would take a piece past short indices;
-    // what is added in a colour of its own starts pieces of its own
+    // what is added in a color of its own starts pieces of its own
     std::vector<SimShape>& pieces = cuttable ? mSoftJaws : mWorkholding;
     if (!append) {
         pieces.clear();

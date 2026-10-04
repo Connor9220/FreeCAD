@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-FileCopyrightText: 2026 Billy Huddleston <billy@ivdc.com>
+# SPDX-FileNotice: Part of the FreeCAD project.
 
 ################################################################################
 #                                                                              #
@@ -44,21 +46,18 @@ against one of its faces; a stop shared stays where it is, the part moving to it
 
 import math
 import os
-import zipfile
-
-from xml.etree import ElementTree
 
 import FreeCAD
 import Part
 import Path
-import Path.Main.Workholding as PathWorkholding
+import Path.Workholding.Vise as PathWorkholding
+import Path.Workholding.Source as PathSource
 
 from FreeCAD import Vector
+from Path.Workholding.Common import objectKinds, readDocumentXml, varsetProperties
 from PySide.QtCore import QT_TRANSLATE_NOOP
 
 translate = FreeCAD.Qt.translate
-
-INCH = 25.4
 
 
 class Kind:
@@ -75,10 +74,6 @@ class ObjectItem:
     # a stop: its dimension from the face touching the stock to the face opposite, the other
     # face a second Job's part touches when the stop is shared
     across = None
-    # its sizes as they were named before, now width side to side along the stock, length front
-    # to back, height up: {old: new}, or a list of them taken in turn; and whether swapped
-    renamed = {}
-    swapped = False
 
     def __init__(self, obj):
         obj.Proxy = self
@@ -107,15 +102,6 @@ class ObjectItem:
 
     def addProperties(self, obj):
         pass
-
-    def onDocumentRestored(self, obj):
-        if self.renamed and self.wasNamedBefore(obj):
-            steps = self.renamed if isinstance(self.renamed, list) else [self.renamed]
-            for renames in steps:
-                PathWorkholding.renameProperties(obj, renames, self.swapped)
-
-    def wasNamedBefore(self, obj):
-        return True
 
     def dumps(self):
         return None
@@ -155,8 +141,20 @@ class ObjectDog(ObjectItem):
     across = "Diameter"
 
     def addProperties(self, obj):
-        self._add(obj, "App::PropertyLength", "Diameter", "Across the pin", 0.75 * INCH)
-        self._add(obj, "App::PropertyLength", "Height", "Above the table", 0.5 * INCH)
+        self._add(
+            obj,
+            "App::PropertyLength",
+            "Diameter",
+            "Across the pin",
+            FreeCAD.Units.Quantity("0.75 in").Value,
+        )
+        self._add(
+            obj,
+            "App::PropertyLength",
+            "Height",
+            "Above the table",
+            FreeCAD.Units.Quantity("0.5 in").Value,
+        )
 
     def shape(self, obj):
         r = obj.Diameter.Value / 2
@@ -170,22 +168,27 @@ class ObjectFence(ObjectItem):
     across = "Width"
 
     def addProperties(self, obj):
-        self._add(obj, "App::PropertyLength", "Length", "Its longest, along the stock", 6.0 * INCH)
         self._add(
-            obj, "App::PropertyLength", "Width", "Front to back, away from the stock", 0.75 * INCH
+            obj,
+            "App::PropertyLength",
+            "Length",
+            "Its longest, along the stock",
+            FreeCAD.Units.Quantity("6.0 in").Value,
         )
-        self._add(obj, "App::PropertyLength", "Height", "Above the table", 0.5 * INCH)
-
-    def onDocumentRestored(self, obj):
-        # its width front to back named Thickness once; and, for a while, its length Width
-        if hasattr(obj, "Thickness"):
-            if hasattr(obj, "Width"):
-                PathWorkholding.renameProperties(obj, {"Width": "Length"})
-            PathWorkholding.renameProperties(obj, {"Thickness": "Width"})
-        elif hasattr(obj, "Width") and obj.getDocumentationOfProperty("Width").startswith(
-            "Side to side"
-        ):
-            PathWorkholding.renameProperties(obj, {"Width": "Length", "Length": "Width"}, True)
+        self._add(
+            obj,
+            "App::PropertyLength",
+            "Width",
+            "Front to back, away from the stock",
+            FreeCAD.Units.Quantity("0.75 in").Value,
+        )
+        self._add(
+            obj,
+            "App::PropertyLength",
+            "Height",
+            "Above the table",
+            FreeCAD.Units.Quantity("0.5 in").Value,
+        )
 
     def shape(self, obj):
         length, width = obj.Length.Value, obj.Width.Value
@@ -198,13 +201,27 @@ class ObjectSideClamp(ObjectItem):
     kind = Kind.Push
 
     def addProperties(self, obj):
-        self._add(obj, "App::PropertyLength", "Width", "Side to side, along the stock", 2.0 * INCH)
         self._add(
-            obj, "App::PropertyLength", "Length", "Front to back, away from the stock", 1.5 * INCH
+            obj,
+            "App::PropertyLength",
+            "Width",
+            "Side to side, along the stock",
+            FreeCAD.Units.Quantity("2.0 in").Value,
         )
-        self._add(obj, "App::PropertyLength", "Height", "Above the table", 0.5 * INCH)
-
-    renamed = {"Depth": "Length"}
+        self._add(
+            obj,
+            "App::PropertyLength",
+            "Length",
+            "Front to back, away from the stock",
+            FreeCAD.Units.Quantity("1.5 in").Value,
+        )
+        self._add(
+            obj,
+            "App::PropertyLength",
+            "Height",
+            "Above the table",
+            FreeCAD.Units.Quantity("0.5 in").Value,
+        )
 
     def shape(self, obj):
         w, d, h = obj.Width.Value, obj.Length.Value, obj.Height.Value
@@ -219,26 +236,40 @@ class ObjectEdgeClamp(ObjectItem):
 
     def addProperties(self, obj):
         self._add(
-            obj, "App::PropertyLength", "Width", "Side to side, along the stock's edge", 1.0 * INCH
+            obj,
+            "App::PropertyLength",
+            "Width",
+            "Side to side, along the stock's edge",
+            FreeCAD.Units.Quantity("1.0 in").Value,
         )
         self._add(
             obj,
             "App::PropertyLength",
             "Length",
             "Its body, front to back, away from the stock",
-            0.75 * INCH,
+            FreeCAD.Units.Quantity("0.75 in").Value,
         )
-        self._add(obj, "App::PropertyLength", "Reach", "Over the stock's top", 0.23 * INCH)
-        self._add(obj, "App::PropertyLength", "Rise", "Above the stock's top", 0.22 * INCH)
+        self._add(
+            obj,
+            "App::PropertyLength",
+            "Reach",
+            "Over the stock's top",
+            FreeCAD.Units.Quantity("0.23 in").Value,
+        )
+        self._add(
+            obj,
+            "App::PropertyLength",
+            "Rise",
+            "Above the stock's top",
+            FreeCAD.Units.Quantity("0.22 in").Value,
+        )
         self._add(
             obj,
             "App::PropertyLength",
             "Drop",
             "From the stock's top down to the table",
-            0.75 * INCH,
+            FreeCAD.Units.Quantity("0.75 in").Value,
         )
-
-    renamed = {"Depth": "Length"}
 
     def shape(self, obj):
         w, d = obj.Width.Value, obj.Length.Value
@@ -254,29 +285,63 @@ class ObjectTable(ObjectItem):
     as a router's: 8 ft along X by 5 ft, an inch thick, rails every 5 in."""
 
     kind = Kind.Table
-    renamed = {"Length": "Width", "Width": "Length"}
-    swapped = True
-
-    def wasNamedBefore(self, obj):
-        # its length along X then
-        return hasattr(obj, "Length") and obj.getDocumentationOfProperty("Length") == "Along X"
 
     def addProperties(self, obj):
-        self._add(obj, "App::PropertyLength", "Width", "Side to side, along X", 96 * INCH)
-        self._add(obj, "App::PropertyLength", "Length", "Front to back, along Y", 60 * INCH)
-        self._add(obj, "App::PropertyLength", "Thickness", "Of the spoilboard", 1.0 * INCH)
-        self._add(obj, "App::PropertyLength", "RailSpacing", "Between the rails, in Y", 5 * INCH)
-        self._add(obj, "App::PropertyLength", "RailWidth", "Of a rail", 0.75 * INCH)
         self._add(
-            obj, "App::PropertyLength", "HoleSpacing", "Between the dog holes, both ways", 4 * INCH
+            obj,
+            "App::PropertyLength",
+            "Width",
+            "Side to side, along X",
+            FreeCAD.Units.Quantity("96 in").Value,
         )
-        self._add(obj, "App::PropertyLength", "HoleDiameter", "Of a dog hole", 0.75 * INCH)
+        self._add(
+            obj,
+            "App::PropertyLength",
+            "Length",
+            "Front to back, along Y",
+            FreeCAD.Units.Quantity("60 in").Value,
+        )
+        self._add(
+            obj,
+            "App::PropertyLength",
+            "Thickness",
+            "Of the spoilboard",
+            FreeCAD.Units.Quantity("1.0 in").Value,
+        )
+        self._add(
+            obj,
+            "App::PropertyLength",
+            "RailSpacing",
+            "Between the rails, in Y",
+            FreeCAD.Units.Quantity("5 in").Value,
+        )
+        self._add(
+            obj,
+            "App::PropertyLength",
+            "RailWidth",
+            "Of a rail",
+            FreeCAD.Units.Quantity("0.75 in").Value,
+        )
+        self._add(
+            obj,
+            "App::PropertyLength",
+            "HoleSpacing",
+            "Between the dog holes, both ways",
+            FreeCAD.Units.Quantity("4 in").Value,
+        )
+        self._add(
+            obj,
+            "App::PropertyLength",
+            "HoleDiameter",
+            "Of a dog hole",
+            FreeCAD.Units.Quantity("0.75 in").Value,
+        )
         self._add(
             obj,
             "App::PropertyLength",
             "WasteBoard",
             "Of the sheet on the spoilboard the stock lies on, none if 0",
-            0.25 * INCH,
+            FreeCAD.Units.Quantity("0.25 in").Value,
         )
 
     def shape(self, obj):
@@ -330,41 +395,17 @@ class ObjectTable(ObjectItem):
         return Part.makeCompound(parts)
 
 
-class ObjectClamp:
+class ObjectClamp(PathWorkholding.LinkedGroup):
     """A clamp of a Job's Workholding from a clamp's own file: a group placing the parts it
     links from the file, laid out as a HoldDown or a Push is, the settings of the file's VarSet
     copied onto it, its Kind among them."""
 
-    holdsSettings = True
-
-    @staticmethod
-    def viewProvider(vobj):
-        import Path.Main.Gui.WorkholdingItems as Gui
-
-        Gui.ViewProviderClamp(vobj)
-
-    def __init__(self, obj):
-        obj.addExtension("App::GeoFeatureGroupExtensionPython")
-        obj.addProperty(
-            "App::PropertyStringList",
-            "Drives",
-            "Clamp",
-            QT_TRANSLATE_NOOP(
-                "App::Property", "The parts the settings move: a part, its property, an expression"
-            ),
-        )
-        obj.setEditorMode("Drives", ["Hidden"])
-        obj.Proxy = self
+    group = "Clamp"
+    viewProviderName = "ViewProviderClamp"
 
     def onDocumentRestored(self, obj):
         # its file looked for again if it is not found
-        PathWorkholding.recoverLater(obj.Document)
-
-    def dumps(self):
-        return None
-
-    def loads(self, state):
-        return None
+        PathSource.recoverLater(obj.Document)
 
 
 Classes = {
@@ -387,43 +428,11 @@ def create(job, which, name=None):
     obj = doc.addObject("Part::FeaturePython", name or which)
     Classes[which](obj)
     if FreeCAD.GuiUp:
-        import Path.Main.Gui.WorkholdingItems as Gui
+        import Path.Workholding.Gui.ViewProvider as Gui
 
         Gui.ViewProvider(obj.ViewObject)
     job.Workholding.addObject(obj)
     return obj
-
-
-def _stockFrame(job):
-    bb = job.Stock.Shape.BoundBox
-    return bb.ZMin, bb.ZMax
-
-
-def placeAgainst(job, item, point, normal):
-    """placeAgainst(job, item, point, normal) ... a Stop or a Push touching the stock's side
-    whose outward normal is normal, at point along it, standing on the surface the stock lies
-    on."""
-    normal = Vector(normal.x, normal.y, 0)
-    if normal.Length < 1e-9:
-        raise ValueError("A stop or a side clamp goes against a side of the stock, not its top")
-    normal.normalize()
-    bottom, _ = _stockFrame(job)
-    rotation = FreeCAD.Rotation(Vector(0, 1, 0), normal * -1)
-    item.Placement = FreeCAD.Placement(Vector(point.x, point.y, bottom), rotation)
-
-
-def placeOnEdge(job, item, point, normal):
-    """placeOnEdge(job, item, point, normal) ... a HoldDown over the stock's top edge on the
-    side whose outward normal is normal, at point along it, its body down to the table."""
-    normal = Vector(normal.x, normal.y, 0)
-    if normal.Length < 1e-9:
-        raise ValueError("A hold-down goes over an edge of the stock's top")
-    normal.normalize()
-    bottom, top = _stockFrame(job)
-    rotation = FreeCAD.Rotation(Vector(0, 1, 0), normal * -1)
-    item.Placement = FreeCAD.Placement(Vector(point.x, point.y, top), rotation)
-    if hasattr(item, "Drop"):
-        item.Drop = top - bottom
 
 
 def placeTable(job, table):
@@ -436,34 +445,8 @@ def placeTable(job, table):
     )
 
 
-def onSide(shape, point):
-    """onSide(shape, point) ... the side of shape nearest point: its outward normal, and point
-    brought onto it. A click on the model, inside the stock, lands on the stock's side."""
-    normal = sideAt(shape, point)
-    best = min(shape.Faces, key=lambda f: f.distToShape(Part.Vertex(point))[0])
-    on = best.distToShape(Part.Vertex(point))[1][0][0]
-    # along the side where clicked, on its plane
-    return normal, point + normal * (on - point).dot(normal)
-
-
-def sideAt(shape, point):
-    """sideAt(shape, point) ... the outward normal of the face of shape nearest point."""
-    best = None
-    for face in shape.Faces:
-        d = face.distToShape(Part.Vertex(point))[0]
-        if best is None or d < best[0]:
-            best = (d, face)
-    face = best[1]
-    u, v = face.Surface.parameter(point)
-    n = face.normalAt(u, v)
-    # outward: away from the shape's middle, whichever way the face is oriented
-    if n.dot(point - shape.BoundBox.Center) < 0:
-        n = n * -1
-    return n
-
-
 # The part's own sides, as the vise panel names them: the Job's axis each faces out along as the
-# part is modelled, -Y its front, +X its right
+# part is modeled, -Y its front, +X its right
 AllSides = ["-Z", "+Z", "-Y", "+Y", "-X", "+X"]
 
 
@@ -573,7 +556,7 @@ def itemsOf(job):
     """itemsOf(job) ... the stops, clamps and tables of the Job's Workholding: all of it but its
     vises, placed by side or not."""
     group = getattr(job, "Workholding", None)
-    return [o for o in getattr(group, "Group", []) or [] if PathWorkholding.viseSetup(o) is None]
+    return [o for o in getattr(group, "Group", []) or [] if not PathWorkholding.isVise(o)]
 
 
 def _on(job, test, side=None):
@@ -1041,49 +1024,22 @@ def addTable(job):
     return table
 
 
-def clampFolder():
-    """clampFolder() ... the folder clamps' own files are found in: Workholding/Clamps of the CAM
-    assets, beside the vises."""
-    import Path.Preferences
-
-    return str(Path.Preferences.getAssetPath() / "Workholding" / "Clamps")
-
-
 def clampFile(path):
     """clampFile(path) ... the clamp a clamp's own file holds, read from the file without opening
     it: its name, the file's, and its Kind, HoldDown or Push. None if it holds none: no part, or
     no VarSet saying it is one of those."""
-    try:
-        with zipfile.ZipFile(path) as archive:
-            root = ElementTree.fromstring(archive.read("Document.xml"))
-    except (OSError, KeyError, zipfile.BadZipFile, ElementTree.ParseError):
+    root = readDocumentXml(path)
+    if root is None:
         return None
-    types = {o.get("name"): o.get("type") for o in root.iter("Object") if o.get("type")}
+    types = objectKinds(root)
     kind = None
-    data = root.find("ObjectData")
-    for obj in data.findall("Object") if data is not None else []:
-        if types.get(obj.get("name")) != "App::VarSet":
-            continue
-        for prop in obj.iter("Property"):
-            if prop.get("name") == "Kind" and prop.find("String") is not None:
-                kind = prop.find("String").get("value")
+    for _, props in varsetProperties(root, types):
+        prop = props.get("Kind")
+        if prop is not None and prop.find("String") is not None:
+            kind = prop.find("String").get("value")
     if kind not in (Kind.HoldDown, Kind.Push) or "App::Part" not in types.values():
         return None
     return os.path.splitext(os.path.basename(path))[0].replace("_", " "), kind
-
-
-def clampFiles(folder=None):
-    """clampFiles(folder=None) ... the clamps' own files to choose from, (name, path, kind), by
-    name: those in folder, clampFolder() when None."""
-    folder = folder or clampFolder()
-    found = []
-    if os.path.isdir(folder):
-        for name in os.listdir(folder):
-            path = os.path.join(folder, name)
-            clamp = clampFile(path) if name.lower().endswith(".fcstd") else None
-            if clamp is not None:
-                found.append((clamp[0], path, clamp[1]))
-    return sorted(found, key=lambda c: c[0].lower())
 
 
 def _kindIn(container):
@@ -1105,27 +1061,11 @@ def clampIn(doc):
     return None
 
 
-def _openSource(path, job):
-    """The document of a clamp's own file, opened without a view if it is not open, the Job's
-    left the active one. One open only in part is opened again whole."""
-    for doc in FreeCAD.listDocuments().values():
-        if doc.FileName and os.path.exists(doc.FileName) and os.path.samefile(doc.FileName, path):
-            if not doc.Partial:
-                return doc
-    doc = FreeCAD.openDocument(path, hidden=True)
-    FreeCAD.setActiveDocument(job.Document.Name)
-    if FreeCAD.GuiUp:
-        import FreeCADGui
-
-        FreeCADGui.setActiveDocument(job.Document.Name)
-    return doc
-
-
 def addClamp(job, path):
     """addClamp(job, path) ... a clamp put in the Job's Workholding from the clamp's own file at
     path, as a vise is: its parts linked from the file, its settings copied onto it. setClamps
     places it. Returns it."""
-    source = clampIn(_openSource(path, job))
+    source = clampIn(PathSource.openFile(path, job.Document)[0])
     if source is None:
         raise ValueError(
             translate("CAM", "%s holds no clamp: a part with a VarSet giving its Kind")

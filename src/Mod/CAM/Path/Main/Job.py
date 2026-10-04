@@ -27,7 +27,6 @@ from PySide import QtCore
 from PySide.QtCore import QT_TRANSLATE_NOOP
 import FreeCAD
 import Path
-import json
 import Path.Base.SetupSheet as PathSetupSheet
 import Path.Base.Util as PathUtil
 import Path.Main.Stock as PathStock
@@ -108,9 +107,10 @@ def workholdingParts(job, cuttable=False):
     shown, hard jaw plates swapped for soft jaws being hidden, and out of the tools' way; a clamp
     from a file of its own by its parts too; clamps and the like whole; and the stock of the other
     Jobs sharing a vise, in its other stations, or a stop, on its other side. With cuttable, only
-    what may be cut into, soft jaws and soft parallels; without, the rest."""
+    what may be cut into, soft jaws and soft parallels; without, the rest; with cuttable None,
+    all of it."""
     import Part
-    import Path.Main.Workholding as PathWorkholding
+    import Path.Workholding.Vise as PathWorkholding
 
     group = getattr(job, "Workholding", None)
     parts = []
@@ -125,7 +125,9 @@ def workholdingParts(job, cuttable=False):
         try:
             if hasattr(obj, "Group") and obj.hasExtension("App::GeoFeatureGroupExtension"):
                 for part in obj.Group:
-                    if not part.Visibility or PathWorkholding.isCuttable(part) != cuttable:
+                    if not part.Visibility:
+                        continue
+                    if cuttable is not None and PathWorkholding.isCuttable(part) != cuttable:
                         continue
                     shape = Part.getShape(
                         part, "", needSubElement=False, transform=True, noElementMap=True
@@ -827,7 +829,7 @@ class ObjectJob:
         # the workholding is the user's own, left in the document
         if getattr(obj, "Workholding", None):
             Path.Log.debug("taking down workholding")
-            import Path.Main.Workholding as PathWorkholding
+            import Path.Workholding.Vise as PathWorkholding
 
             # a vise or a stop shared with other Jobs no longer shared: theirs stay where they are
             for member in list(obj.Workholding.Group):

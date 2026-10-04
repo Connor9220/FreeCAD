@@ -88,7 +88,7 @@ bool Dummy3DViewer::updateNaviCube()
     }
 
     // The cube alone, drawn into this viewer's own buffer, where Coin's caches for it live: on
-    // black, then on white, the two giving each pixel's colour and how opaque it is. Its drawing
+    // black, then on white, the two giving each pixel's color and how opaque it is. Its drawing
     // sets its own fields, which is no change to it.
     naviSensor.detach();
     glw->makeCurrent();
@@ -137,7 +137,7 @@ bool Dummy3DViewer::updateNaviCube()
         naviImage = QImage();
         return had;
     }
-    // over black the colour is already weighted by its opacity; white shows how much of the
+    // over black the color is already weighted by its opacity; white shows how much of the
     // background comes through
     QImage image(w, h, QImage::Format_RGBA8888_Premultiplied);
     for (int row = 0; row < h; row++) {

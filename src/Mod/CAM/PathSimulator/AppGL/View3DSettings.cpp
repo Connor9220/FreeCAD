@@ -36,7 +36,7 @@ using namespace Gui;
 namespace CAMSimulator
 {
 
-// the colours FreeCAD gives its axes and its origin, as the view preferences keep them
+// the colors FreeCAD gives its axes and its origin, as the view preferences keep them
 static void applyAxisColors(const ParameterGrp& rGrp, DlgCAMSimulator& dlg)
 {
     dlg.setAxisColors(

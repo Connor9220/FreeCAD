@@ -1220,8 +1220,8 @@ void MillSimulation::RenderBaseShape()
     glPolygonOffset(0, -2);
     glEnable(GL_POLYGON_OFFSET_FILL);
     // Over the dexel stock, the model red where the cuts went in past it; compared alone, also
-    // in the cut colour where they left material on it. Within half a ray step or a tenth of a
-    // millimetre it is as cut.
+    // in the cut color where they left material on it. Within half a ray step or a tenth of a
+    // millimeter it is as cut.
     const bool overStock = (mViewItems & (VIEWITEM_SIMULATION | VIEWITEM_COMPARE)) != 0;
     if (overStock && mDexelEngine && mDexel.IsValid() && mDexel.PrepareLookup()) {
         Shader& shader = simDisplay.StartCompareGeometryPass(baseShapeColor);
@@ -1502,7 +1502,7 @@ void MillSimulation::SetSoftJaws(
 
 bool MillSimulation::PrepareWorkholding()
 {
-    // their dexels set up once the stock's are, half a millimetre apart or the stock's spacing:
+    // their dexels set up once the stock's are, half a millimeter apart or the stock's spacing:
     // the workholding's, and the soft jaws'
     if (!mDexel.IsValid()) {
         return false;
@@ -1545,7 +1545,7 @@ bool MillSimulation::PrepareWorkholding()
 
 void MillSimulation::RenderWorkholding(bool dexel)
 {
-    // each piece in its own colour, the vise's as the model shows it, else the workholding's
+    // each piece in its own color, the vise's as the model shows it, else the workholding's
     const float* drawn = nullptr;
     for (size_t i = 0; i < mWorkholdingShapes.size(); i++) {
         const Color& color = mWorkholdingColors[i];
@@ -1657,7 +1657,7 @@ bool MillSimulation::PrepareDexel()
 {
     // the dexels are set up from the stock's mesh the first time they are drawn, the rays a
     // sixtieth of the stock's longest side apart for each step of quality, but no closer than
-    // half a millimetre over the quality: on a small stock they would be finer than anything
+    // half a millimeter over the quality: on a small stock they would be finer than anything
     // seen, each cut and each mesh many times the work
     if (mDexel.IsValid()) {
         return true;
@@ -1696,7 +1696,7 @@ void MillSimulation::FlushDexel()
 void MillSimulation::ProbeAlong(MillPathSegment* p, int fromStep, int toStep, int kind)
 {
     // The holder, or the tool on a rapid, at its places over steps (fromStep, toStep] of the
-    // segment being cut, every millimetre or so, closer for a small tool, and at the last, each
+    // segment being cut, every millimeter or so, closer for a small tool, and at the last, each
     // looked at against the stock as the cuts before it leave it: the holder's after the
     // segment's cut, the tool's before it, the rapid's own cut being what it drags through.
     const EndMill* tool = p->endmill;
@@ -2285,7 +2285,7 @@ void MillSimulation::RenderAxes()
             }
             vec3 dir;
             quat_mul_vec3(dir, rot, axis.axis);
-            // in the colour of the linear axis it turns about
+            // in the color of the linear axis it turns about
             int color = 0;
             for (int c = 1; c < 3; c++) {
                 if (std::fabs(axis.axis[c]) > std::fabs(axis.axis[color])) {

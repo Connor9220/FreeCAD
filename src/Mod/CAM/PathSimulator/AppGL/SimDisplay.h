@@ -77,7 +77,7 @@ public:
         return mViewVersion;
     }
 
-    // what the dexel stock draws with: the view, the projection, and the pixels a millimetre
+    // what the dexel stock draws with: the view, the projection, and the pixels a millimeter
     // covers, at unit depth when the camera is perspective
     void GetDexelView(mat4x4 view, mat4x4 projection, float& pointScale, bool& perspective) const;
     // For drawing over the result: from the machine's space to the screen (the camera alone),

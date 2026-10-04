@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-FileCopyrightText: 2026 Billy Huddleston <billy@ivdc.com>
+# SPDX-FileNotice: Part of the FreeCAD project.
 
 ################################################################################
 #                                                                              #
@@ -25,7 +27,7 @@ import tempfile
 
 import FreeCAD
 import Part
-import Path.Main.WorkholdingLibrary as PathLibrary
+import Path.Workholding.Library as PathLibrary
 import CAMTests.PathTestUtils as PathTestUtils
 
 
@@ -72,7 +74,7 @@ class TestPathWorkholdingLibrary(PathTestUtils.PathTestBase):
             "size": len(data),
             "sha256": hashlib.sha256(data).hexdigest(),
             "label": name,
-            "licence": "CC-BY-4.0",
+            "license": "CC-BY-4.0",
         }
         item.update(changes)
         return item
@@ -187,7 +189,7 @@ class TestPathWorkholdingLibrary(PathTestUtils.PathTestBase):
                 PathLibrary.indexAddress(PathLibrary.sources()[0]),
                 "https://raw.githubusercontent.com/Owner/Lib/dev/index.json",
             )
-            PathLibrary.setSources([repo])
+            PathLibrary.setLibraries([(repo, "")])
             self.assertEqual(PathLibrary.libraries(), [(repo, "")])
             self.assertEqual(PathLibrary.withBranch(repo + "/tree/old", "new"), repo + "/tree/new")
             self.assertEqual(PathLibrary.withBranch("/x/index.json", "dev"), "/x/index.json")
@@ -308,11 +310,11 @@ class TestPathWorkholdingLibrary(PathTestUtils.PathTestBase):
 
     def test05_sources_kept(self):
         """The libraries looked in, a preference; none, the default."""
-        before = PathLibrary.sources()
+        before = PathLibrary.libraries()
         try:
-            PathLibrary.setSources(["a", " ", "b "])
+            PathLibrary.setLibraries([("a", ""), (" ", ""), ("b ", "")])
             self.assertEqual(PathLibrary.sources(), ["a", "b"])
-            PathLibrary.setSources([])
+            PathLibrary.setLibraries([])
             self.assertEqual(PathLibrary.sources(), PathLibrary.DefaultSources)
         finally:
-            PathLibrary.setSources(before)
+            PathLibrary.setLibraries(before)

@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-FileCopyrightText: 2026 Billy Huddleston <billy@ivdc.com>
+# SPDX-FileNotice: Part of the FreeCAD project.
 
 ################################################################################
 #                                                                              #
@@ -32,41 +34,43 @@ import Part
 import Path
 
 from FreeCAD import Vector
+from Path.Workholding.Common import SidePart
+from Path.Workholding.Constants import ALUMINUM_COLOR, GRIP_COLOR, GRIP_JAW_COLOR
 from PySide.QtCore import QT_TRANSLATE_NOOP
 
 translate = FreeCAD.Qt.translate
 
-Sides = ["Fixed", "Moving"]
-
-INCH = 25.4
 # grip jaws, sized as common ones for a 6 in. vise: a soft steel jaw, a groove along its
 # top a little behind its face, and hardened grips in the groove standing proud of its top. The
 # stock sits on the jaw's top against the grips' teeth, which bite into it.
 GripJaw = {
-    "thickness": 0.990 * INCH,
-    "height": 1.724 * INCH,
-    "grip": 0.060 * INCH,  # how far the grips stand above the jaw's top: what is held
-    "setback": 0.120 * INCH,  # the grips' teeth behind the jaw's face
-    "bite": 0.015 * INCH,  # how far they bite into the stock
+    "thickness": FreeCAD.Units.Quantity("0.990 in").Value,
+    "height": FreeCAD.Units.Quantity("1.724 in").Value,
+    "grip": FreeCAD.Units.Quantity(
+        "0.060 in"
+    ).Value,  # how far the grips stand above the jaw's top: what is held
+    "setback": FreeCAD.Units.Quantity("0.120 in").Value,  # the grips' teeth behind the jaw's face
+    "bite": FreeCAD.Units.Quantity("0.015 in").Value,  # how far they bite into the stock
     "grips": 2,  # on each jaw
-    "gripLength": 0.75 * INCH,
-    "gripWidth": 0.5 * INCH,
-    "grooveDepth": 0.190 * INCH,
+    "gripLength": FreeCAD.Units.Quantity("0.75 in").Value,
+    "gripWidth": FreeCAD.Units.Quantity("0.5 in").Value,
+    "grooveDepth": FreeCAD.Units.Quantity("0.190 in").Value,
 }
 
 
-def parseSteps(entries):
-    """parseSteps(entries) ... the steps a vise's Steps say, (height, depth) pairs in mm: height
-    down from the soft jaw's top, depth in from its face. One that is not two numbers is left out,
-    and said so."""
+def parseSteps(entries, quiet=False):
+    """parseSteps(entries, quiet=False) ... the steps a vise's Steps say, (height, depth) pairs in
+    mm: height down from the soft jaw's top, depth in from its face. One that is not two numbers
+    is left out, and said so unless quiet."""
     steps = []
     for entry in entries or []:
         try:
             height, depth = (float(v) for v in str(entry).split(","))
         except ValueError:
-            Path.Log.warning(
-                translate("CAM", "A step is its height and depth, '5,3': not '%s'") % entry
-            )
+            if not quiet:
+                Path.Log.warning(
+                    translate("CAM", "A step is its height and depth, '5,3': not '%s'") % entry
+                )
             continue
         steps.append((height, depth))
     return steps
@@ -121,120 +125,64 @@ def gripShape(size, thickness, height, grip, setback, count, index, side):
     plate, plateHeight, low, high = size
     face = plate - thickness
     top = -plateHeight + height
-    centre = low + (high - low) * (index + 0.5) / count
+    center = low + (high - low) * (index + 0.5) / count
     shape = Part.makeBox(
         GripJaw["gripLength"],
         GripJaw["gripWidth"],
         GripJaw["grooveDepth"] + grip,
-        Vector(centre - GripJaw["gripLength"] / 2, face + setback, top - GripJaw["grooveDepth"]),
+        Vector(center - GripJaw["gripLength"] / 2, face + setback, top - GripJaw["grooveDepth"]),
     )
     if side == "Moving":
         shape = shape.mirror(Vector(0, 0, 0), Vector(0, 1, 0))
     return shape
 
 
-class ObjectSoftJaw:
+class ObjectSoftJaw(SidePart):
     """A soft jaw of a vise of a Job's Workholding, made from the vise's settings: its jaws, the
     hard plate it stands for, and the side it is on."""
 
-    def __init__(self, obj, side):
-        obj.addProperty(
-            "App::PropertyEnumeration",
-            "Side",
-            "Jaw",
-            QT_TRANSLATE_NOOP("App::Property", "The vise's jaw it is on"),
-        )
-        obj.Side = Sides
-        obj.Side = side
-        obj.setEditorMode("Side", ["ReadOnly"])
-        obj.Proxy = self
+    group = "Jaw"
 
-    def onDocumentRestored(self, obj):
-        # one made before it had a view provider of its own showed nothing
-        _viewed(obj)
+    def shape(self, obj, vise):
+        import Path.Workholding.Vise as PathWorkholding
 
-    def dumps(self):
-        return None
-
-    def loads(self, state):
-        return None
-
-    def execute(self, obj):
-        import Path.Main.Workholding as PathWorkholding
-
-        vise = obj.getParentGeoFeatureGroup()
-        size = PathWorkholding.plateSize(vise) if vise is not None else None
+        size = PathWorkholding.plateSize(vise)
         if size is None or not hasattr(vise, "SoftThickness"):
-            return
+            return None
         if getattr(vise, "Jaws", "") == "Grip":
-            shape = gripJawShape(
+            return gripJawShape(
                 size,
                 vise.SoftThickness.Value,
                 vise.SoftHeight.Value,
                 vise.GripSetback.Value,
                 obj.Side,
             )
-        else:
-            shape = softJawShape(
-                size,
-                vise.SoftThickness.Value,
-                vise.SoftHeight.Value,
-                parseSteps(vise.Steps),
-                obj.Side,
-            )
-        shape.Placement = obj.Placement
-        obj.Shape = shape
+        return softJawShape(
+            size,
+            vise.SoftThickness.Value,
+            vise.SoftHeight.Value,
+            parseSteps(vise.Steps),
+            obj.Side,
+        )
 
 
-def _unselectable(vobj):
-    """Not picked in the 3D view, nor lit when picked in the tree: there to be seen and missed."""
-    if vobj is not None and "Selectable" in vobj.PropertiesList:
-        vobj.Selectable = False
-
-
-class ViewProviderSoftJaw:
-    """A soft jaw as Part shows its shapes, in aluminium."""
-
-    def __init__(self, vobj):
-        vobj.Proxy = self
-
-    def attach(self, vobj):
-        self.Object = vobj.Object
-        self.vobj = vobj
-        _unselectable(vobj)
-
-    def finishRestoring(self):
-        # one saved before it was so: not picked in the 3D view either
-        _unselectable(getattr(self, "vobj", None))
-
-    def dumps(self):
-        return None
-
-    def loads(self, state):
-        return None
-
-
-def _viewed(obj):
-    """obj shown: given a view provider of its own if it has none."""
+def _viewed(obj, color=ALUMINUM_COLOR):
+    """obj shown, given a view provider of its own if it has none: in color, aluminum for a
+    soft jaw, its edges drawn thin."""
     if not FreeCAD.GuiUp or obj.ViewObject is None:
         return
-    if not isinstance(getattr(obj.ViewObject, "Proxy", None), ViewProviderSoftJaw):
-        ViewProviderSoftJaw(obj.ViewObject)
-        # the jaws' edges drawn, thin: they help to see the jaws
-        obj.ViewObject.DisplayMode = "Flat Lines"
-        obj.ViewObject.LineWidth = 1
-        obj.ViewObject.PointSize = 1
-        # its points the colour of its edges, not drawn over them
-        obj.ViewObject.PointColor = obj.ViewObject.LineColor
-        # aluminium, apart from the vise's steel
-        obj.ViewObject.ShapeColor = (0.60, 0.74, 0.90)
+    import Path.Workholding.Gui.ViewProvider as Gui
+
+    if not isinstance(getattr(obj.ViewObject, "Proxy", None), Gui.ViewProviderSoftJaw):
+        Gui.ViewProviderSoftJaw(obj.ViewObject)
+        obj.ViewObject.ShapeColor = color
 
 
-def colour(obj, kind):
-    """A jaw coloured as its kind is made: soft ones aluminium, grip ones steel."""
+def color(obj, kind):
+    """A jaw colored as its kind is made: soft ones aluminum, grip ones steel."""
     if not FreeCAD.GuiUp or obj.ViewObject is None:
         return
-    obj.ViewObject.ShapeColor = (0.62, 0.64, 0.68) if kind == "Grip" else (0.60, 0.74, 0.90)
+    obj.ViewObject.ShapeColor = GRIP_JAW_COLOR if kind == "Grip" else ALUMINUM_COLOR
 
 
 def isSoftJaw(obj):
@@ -256,19 +204,14 @@ def create(vise, side):
     return obj
 
 
-class ObjectGrip:
+class ObjectGrip(SidePart):
     """A hardened grip of a grip jaw of a vise, made from the vise's settings: the side it is
     on and which of the jaw's grips it is. A tool in it is a crash."""
 
+    group = "Grip"
+
     def __init__(self, obj, side, index):
-        obj.addProperty(
-            "App::PropertyEnumeration",
-            "Side",
-            "Grip",
-            QT_TRANSLATE_NOOP("App::Property", "The vise's jaw it is on"),
-        )
-        obj.Side = Sides
-        obj.Side = side
+        super().__init__(obj, side)
         obj.addProperty(
             "App::PropertyInteger",
             "Index",
@@ -276,27 +219,15 @@ class ObjectGrip:
             QT_TRANSLATE_NOOP("App::Property", "Which of the jaw's grips it is, across it"),
         )
         obj.Index = index
-        for name in ("Side", "Index"):
-            obj.setEditorMode(name, ["ReadOnly"])
-        obj.Proxy = self
+        obj.setEditorMode("Index", ["ReadOnly"])
 
-    def onDocumentRestored(self, obj):
-        _viewedGrip(obj)
+    def shape(self, obj, vise):
+        import Path.Workholding.Vise as PathWorkholding
 
-    def dumps(self):
-        return None
-
-    def loads(self, state):
-        return None
-
-    def execute(self, obj):
-        import Path.Main.Workholding as PathWorkholding
-
-        vise = obj.getParentGeoFeatureGroup()
-        size = PathWorkholding.plateSize(vise) if vise is not None else None
+        size = PathWorkholding.plateSize(vise)
         if size is None or not hasattr(vise, "GripHeight"):
-            return
-        shape = gripShape(
+            return None
+        return gripShape(
             size,
             vise.SoftThickness.Value,
             vise.SoftHeight.Value,
@@ -306,23 +237,6 @@ class ObjectGrip:
             obj.Index,
             obj.Side,
         )
-        shape.Placement = obj.Placement
-        obj.Shape = shape
-
-
-def _viewedGrip(obj):
-    """A grip shown dark, hardened, apart from the jaw it sits in."""
-    if not FreeCAD.GuiUp or obj.ViewObject is None:
-        return
-    if not isinstance(getattr(obj.ViewObject, "Proxy", None), ViewProviderSoftJaw):
-        ViewProviderSoftJaw(obj.ViewObject)
-        # the jaws' edges drawn, thin: they help to see the jaws
-        obj.ViewObject.DisplayMode = "Flat Lines"
-        obj.ViewObject.LineWidth = 1
-        obj.ViewObject.PointSize = 1
-        # its points the colour of its edges, not drawn over them
-        obj.ViewObject.PointColor = obj.ViewObject.LineColor
-        obj.ViewObject.ShapeColor = (0.22, 0.22, 0.25)
 
 
 def isGrip(obj):
@@ -338,6 +252,6 @@ def createGrip(vise, side, index):
         translate("CAM", "Fixed") if side == "Fixed" else translate("CAM", "Moving"),
         index + 1,
     )
-    _viewedGrip(obj)
+    _viewed(obj, GRIP_COLOR)
     vise.addObject(obj)
     return obj

@@ -68,7 +68,7 @@ void unpackNormal(float packed, float n[3])
     n[2] = z / len;
 }
 
-// x minimising the squared distances to the crossings' planes, drawn a little towards their
+// x minimizing the squared distances to the crossings' planes, drawn a little toward their
 // middle so a flat or a straight run of them still has one answer
 void solveQef(const std::vector<const Hermite*>& hs, float out[3])
 {
@@ -538,7 +538,7 @@ void DexelMesher::BuildTile(int key, const Grid grids[3], Built& out) const
     // A corner of a face turned from its vertex's normal by more than this is a crease: the
     // face keeps its own normal there, and the edge stays sharp rather than shaded round.
     const float creaseCos = 0.8f;
-    // and its colour: a crease between the stock's own face and a cut one runs along it
+    // and its color: a crease between the stock's own face and a cut one runs along it
     // the corner's normal then the faces' round the vertex on the face's own side of the crease
     auto corner = [&](int i, const float* fn, bool faceStock) {
         CellVertex& v = verts[i];

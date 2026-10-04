@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-FileCopyrightText: 2026 Billy Huddleston <billy@ivdc.com>
+# SPDX-FileNotice: Part of the FreeCAD project.
 
 ################################################################################
 #                                                                              #
@@ -18,7 +20,7 @@
 ################################################################################
 
 """Libraries of workholding to download vises and clamps from: each an index.json, at a web
-address or in a folder, listing its vises and clamps, their files, settings, licences and the
+address or in a folder, listing its vises and clamps, their files, settings, licenses and the
 sha256 each is checked
 against; a GitHub repository's address stands for the index.json at its top. The libraries looked
 in are a preference, one address a line; a vise downloaded is
@@ -37,7 +39,9 @@ import urllib.request
 
 import FreeCAD
 import Path
-import Path.Main.WorkholdingCheck as PathCheck
+import Path.Workholding.Check as PathCheck
+
+from Path.Workholding.Common import objectKinds, objectProperties, readDocumentXml, readMember
 
 translate = FreeCAD.Qt.translate
 
@@ -76,32 +80,44 @@ def setLibraries(pairs):
     _prefs().SetString("WorkholdingSources", "\n".join(lines))
 
 
+# the hosts of a GitHub repository's pages, and of its files served raw
+GitHub = ("github.com", "www.github.com")
+GitHubRaw = "raw.githubusercontent.com"
+
+
+def _github(address, hosts=GitHub):
+    """A GitHub repository's address taken apart, its host one of hosts: (owner, repo, rest), the
+    repository's name without .git and the parts of the path after it; None for any other."""
+    parsed = urllib.parse.urlparse(address)
+    parts = [p for p in parsed.path.split("/") if p]
+    if parsed.netloc.lower() not in hosts or len(parts) < 2:
+        return None
+    repo = parts[1][: -len(".git")] if parts[1].endswith(".git") else parts[1]
+    return parts[0], repo, parts[2:]
+
+
 def withBranch(address, branch):
     """withBranch(address, branch) ... a library's address on a branch: a GitHub repository's
     https://github.com/owner/repo/tree/branch; any other, or no branch, as it is."""
-    parsed = urllib.parse.urlparse(address)
-    parts = [p for p in parsed.path.split("/") if p]
-    if (
-        not branch
-        or parsed.netloc.lower() not in ("github.com", "www.github.com")
-        or len(parts) < 2
-    ):
+    found = _github(address) if branch else None
+    if found is None:
         return address
-    return "https://github.com/%s/%s/tree/%s" % (parts[0], parts[1], branch)
+    return "https://github.com/%s/%s/tree/%s" % (found[0], found[1], branch)
 
 
 def libraryName(address):
     """libraryName(address) ... a library's name to show: a GitHub repository's name, with its
     branch if one is given; a folder's or an index's folder's name."""
+    found = _github(address)
+    if found is not None:
+        _, name, rest = found
+        if len(rest) >= 2 and rest[0] == "tree":
+            return "%s (%s)" % (name, rest[1])
+        return name
     parsed = urllib.parse.urlparse(address)
     host = parsed.netloc.lower()
     parts = [p for p in parsed.path.split("/") if p]
-    if host in ("github.com", "www.github.com") and len(parts) >= 2:
-        name = parts[1][: -len(".git")] if parts[1].endswith(".git") else parts[1]
-        if len(parts) >= 4 and parts[2] == "tree":
-            return "%s (%s)" % (name, parts[3])
-        return name
-    if host == "raw.githubusercontent.com" and len(parts) >= 3:
+    if host == GitHubRaw and len(parts) >= 3:
         return parts[1] if parts[2] in ("HEAD", "main", "master") else "%s (%s)" % tuple(parts[1:3])
     path = urllib.request.url2pathname(parsed.path) if parsed.scheme == "file" else address
     if parsed.scheme in ("http", "https"):
@@ -115,12 +131,6 @@ def libraryName(address):
 def sources():
     """sources() ... the libraries to look in, their addresses with their branches."""
     return [withBranch(address, branch) for address, branch in libraries()]
-
-
-def setSources(addresses):
-    """setSources(addresses) ... the libraries to look in, kept, on their default branches; none,
-    the default again."""
-    setLibraries([(a, "") for a in addresses])
 
 
 def folder(kind="vise"):
@@ -159,29 +169,18 @@ def indexAddress(address):
     branch and folder, and /blob/... its file, as GitHub serves it raw; a folder's, the index.json
     in it; any other as it is."""
     parsed = urllib.parse.urlparse(address)
-    if parsed.scheme in ("http", "https") and parsed.netloc.lower() in (
-        "github.com",
-        "www.github.com",
-    ):
-        parts = [p for p in parsed.path.split("/") if p]
-        if len(parts) >= 2:
-            owner, repo = parts[0], parts[1]
-            if repo.endswith(".git"):
-                repo = repo[: -len(".git")]
-            rest = parts[2:]
-            if rest[:1] in (["tree"], ["blob"]) and len(rest) >= 2:
-                ref, path = rest[1], rest[2:]
-            else:
-                ref, path = "HEAD", []
-            if not path or not path[-1].endswith(".json"):
-                path = path + ["index.json"]
-            return "https://raw.githubusercontent.com/%s/%s/%s/%s" % (
-                owner,
-                repo,
-                ref,
-                "/".join(path),
-            )
-        return address
+    if parsed.scheme in ("http", "https") and parsed.netloc.lower() in GitHub:
+        found = _github(address)
+        if found is None:
+            return address
+        owner, repo, rest = found
+        if rest[:1] in (["tree"], ["blob"]) and len(rest) >= 2:
+            ref, path = rest[1], rest[2:]
+        else:
+            ref, path = "HEAD", []
+        if not path or not path[-1].endswith(".json"):
+            path = path + ["index.json"]
+        return "https://%s/%s/%s/%s/%s" % (GitHubRaw, owner, repo, ref, "/".join(path))
     if not parsed.scheme and os.path.isdir(os.path.expanduser(address)):
         return os.path.join(os.path.expanduser(address), "index.json")
     return address
@@ -263,6 +262,27 @@ def loadIndex(address, kind="vise", online=True):
     return items
 
 
+class IndexCache:
+    """IndexCache(online=True, said=None) ... the libraries' indexes, each read once by
+    loadIndex, online or only as kept: items(address, kind) its items; one that cannot be read
+    none, why said to said, a function, when given."""
+
+    def __init__(self, online=True, said=None):
+        self.online = online
+        self.said = said
+        self.indexes = {}
+
+    def items(self, address, kind=None):
+        if (address, kind) not in self.indexes:
+            try:
+                self.indexes[(address, kind)] = loadIndex(address, kind, online=self.online)
+            except ValueError as e:
+                if self.said is not None:
+                    self.said(str(e))
+                self.indexes[(address, kind)] = []
+        return self.indexes[(address, kind)]
+
+
 def localPath(item, where=None):
     """localPath(item, where=None) ... where an index's vise or clamp is, or would be, saved."""
     return os.path.join(where or folder(item.get("kind", "vise")), os.path.basename(item["file"]))
@@ -296,12 +316,9 @@ def status(item, where=None):
 def libraryKey(address):
     """libraryKey(address) ... what tells two addresses of a library the same one: a GitHub
     repository's owner and name, on any branch; any other's index's address."""
-    parsed = urllib.parse.urlparse(address)
-    parts = [p for p in parsed.path.split("/") if p]
-    host = parsed.netloc.lower()
-    if host in ("github.com", "www.github.com", "raw.githubusercontent.com") and len(parts) >= 2:
-        name = parts[1][: -len(".git")] if parts[1].endswith(".git") else parts[1]
-        return "github:%s/%s" % (parts[0].lower(), name.lower())
+    found = _github(address, GitHub + (GitHubRaw,))
+    if found is not None:
+        return "github:%s/%s" % (found[0].lower(), found[1].lower())
     return indexAddress(address)
 
 
@@ -315,16 +332,7 @@ def localStates(items, addresses=None):
     keys = {}
     for address in addresses:
         keys.setdefault(libraryKey(address), address)
-    indexes = {}
-
-    def index(address, kind):
-        if (address, kind) not in indexes:
-            try:
-                indexes[(address, kind)] = loadIndex(address, kind, online=False)
-            except ValueError:
-                indexes[(address, kind)] = []
-        return indexes[(address, kind)]
-
+    index = IndexCache(online=False).items
     found = []
     for item in items:
         sha = fileSha256(item["path"])
@@ -394,15 +402,12 @@ def download(item, where=None):
 
 def _checkClamp(path):
     """What is wrong with a clamp's file: Python in it, run when it is opened; no clamp in it."""
-    import Path.Main.WorkholdingItems as PathItems
+    import Path.Workholding.Items as PathItems
 
     errors = []
     found = PathCheck.pythonObjects(path)
     if found:
-        errors.append(
-            translate("CAM", "Holds Python, run when opened: %s")
-            % ", ".join("%s (%s)" % f for f in found)
-        )
+        errors.append(PathCheck.pythonMessage(found))
     if PathItems.clampFile(path) is None:
         errors.append(translate("CAM", "No clamp: no part, or no VarSet saying what kind it is"))
     return errors
@@ -417,7 +422,7 @@ AboutFields = {
     "Type": "type",
     "Maker": "maker",
     "Model": "model",
-    "Licence": "licence",
+    "License": "license",
     "Attribution": "attribution",
     "Source": "source",
 }
@@ -426,26 +431,18 @@ AboutFields = {
 def about(path):
     """about(path) ... what the vise's or clamp's file at path says of itself, read from it
     without opening it: label, its part's, and as stamped where it was published library, the
-    library's address, id, type, maker, model, licence, attribution and source; kind, "vise" or
+    library's address, id, type, maker, model, license, attribution and source; kind, "vise" or
     "clamp", and its settings, a vise's jawWidth and maxOpening in mm. Those not stamped are
     missing; {} for a file that cannot be read or holds no vise or clamp."""
-    from xml.etree import ElementTree
-    import zipfile
-
-    try:
-        with zipfile.ZipFile(path) as archive:
-            root = ElementTree.fromstring(archive.read("Document.xml"))
-    except (OSError, KeyError, zipfile.BadZipFile, ElementTree.ParseError):
+    root = readDocumentXml(path)
+    if root is None:
         return {}
-    kinds = {o.get("name"): o.get("type") for o in root.iter("Object") if o.get("type")}
+    kinds = objectKinds(root)
     found = {}
     labels = {}
     groups = {}
     settings = None
-    data = root.find("ObjectData")
-    for obj in data.findall("Object") if data is not None else []:
-        name = obj.get("name")
-        props = {p.get("name"): p for p in obj.iter("Property")}
+    for name, props in objectProperties(root):
         label = props.get("Label")
         if label is not None and label.find("String") is not None:
             labels[name] = label.find("String").get("value")
@@ -485,13 +482,7 @@ def about(path):
 
 def thumbnail(path):
     """thumbnail(path) ... the thumbnail a FreeCAD file keeps, as PNG bytes; None if none."""
-    import zipfile
-
-    try:
-        with zipfile.ZipFile(path) as archive:
-            return archive.read("thumbnails/Thumbnail.png")
-    except (OSError, KeyError, zipfile.BadZipFile):
-        return None
+    return readMember(path, "thumbnails/Thumbnail.png")
 
 
 def localItems(kind="vise", folders=None):

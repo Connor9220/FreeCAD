@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-FileCopyrightText: 2026 Billy Huddleston <billy@ivdc.com>
+# SPDX-FileNotice: Part of the FreeCAD project.
 
 ################################################################################
 #                                                                              #
@@ -23,7 +25,7 @@ opened, and that it is laid out as a vise must be for a Job to seat stock in it.
 A library of vises runs check on each file it takes; a vise downloaded is checked before it is
 opened. From a shell:
 
-    FreeCADCmd -c "import Path.Main.WorkholdingCheck as C; C.main(['vise.FCStd'])"
+    FreeCADCmd -c "import Path.Workholding.Check as C; C.main(['vise.FCStd'])"
 """
 
 import os
@@ -33,9 +35,10 @@ import zipfile
 from xml.etree import ElementTree
 
 import FreeCAD
-import Path
-import Path.Main.Workholding as PathWorkholding
-import Path.Main.WorkholdingJaws as PathJaws
+import Path.Workholding.Vise as PathWorkholding
+import Path.Workholding.Source as PathSource
+
+from Path.Workholding.Common import objectKinds, readDocumentXml, varsetProperties
 
 translate = FreeCAD.Qt.translate
 
@@ -45,9 +48,13 @@ TOLERANCE = 0.05
 
 def pythonObjects(path):
     """pythonObjects(path) ... the objects in the FreeCAD file at path that would import Python
-    when it is opened, as (name, type) pairs: none in a file that is safe to open."""
-    with zipfile.ZipFile(path) as archive:
-        root = ElementTree.fromstring(archive.read("Document.xml"))
+    when it is opened, as (name, type) pairs: none in a file that is safe to open. Raises for a
+    file that cannot be read."""
+    return _pythonIn(readDocumentXml(path, strict=True))
+
+
+def _pythonIn(root):
+    """The objects and properties of a Document.xml that would import Python, (name, type)."""
     found = []
     for obj in root.iter("Object"):
         kind = obj.get("type", "")
@@ -59,33 +66,33 @@ def pythonObjects(path):
     return found
 
 
+def pythonMessage(found):
+    """pythonMessage(found) ... what is said of a file holding Python, found as pythonObjects
+    gives it."""
+    return translate("CAM", "Holds Python, run when opened: %s") % ", ".join(
+        "%s (%s)" % f for f in found
+    )
+
+
 def checkZip(path):
     """checkZip(path) ... what is wrong with a vise's file, read as the zip it is, never opened as
     a document: Python in it, run when it is opened; no part, or no VarSet with the settings a
     vise has, a vise of several stations each station's frame and opening; laid out for a newer
     FreeCAD. None wrong, an empty list."""
     try:
-        with zipfile.ZipFile(path) as archive:
-            root = ElementTree.fromstring(archive.read("Document.xml"))
+        root = readDocumentXml(path, strict=True)
     except (OSError, KeyError, zipfile.BadZipFile, ElementTree.ParseError) as e:
         return [translate("CAM", "Not a FreeCAD file: %s") % e]
     errors = []
-    found = pythonObjects(path)
+    found = _pythonIn(root)
     if found:
-        errors.append(
-            translate("CAM", "Holds Python, run when opened: %s")
-            % ", ".join("%s (%s)" % f for f in found)
-        )
-    kinds = {o.get("name"): o.get("type") for o in root.iter("Object") if o.get("type")}
+        errors.append(pythonMessage(found))
+    kinds = objectKinds(root)
     if "App::Part" not in kinds.values():
         errors.append(translate("CAM", "No vise: no part holding it"))
     settings = {}
-    data = root.find("ObjectData")
-    for obj in data.findall("Object") if data is not None else []:
-        if kinds.get(obj.get("name")) != "App::VarSet":
-            continue
-        for prop in obj.iter("Property"):
-            settings[prop.get("name")] = prop
+    for _, props in varsetProperties(root, kinds):
+        settings.update(props)
     for name in ("Opening", "JawHeight", "MaxOpening"):
         if name not in settings:
             errors.append(translate("CAM", "No %s: not laid out as a vise") % name)
@@ -266,20 +273,12 @@ def check(path):
     is not opened."""
     found = pythonObjects(path)
     if found:
-        return [
-            translate("CAM", "Holds Python, run when opened: %s")
-            % ", ".join("%s (%s)" % f for f in found)
-        ], []
-    path = os.path.abspath(path)
-    opened = None
-    for doc in FreeCAD.listDocuments().values():
-        if doc.FileName and os.path.abspath(doc.FileName) == path:
-            opened = doc
-    doc = opened or FreeCAD.openDocument(path, hidden=True)
+        return [pythonMessage(found)], []
+    doc, opened = PathSource.openFile(os.path.abspath(path))
     try:
         return checkDocument(doc)
     finally:
-        if opened is None:
+        if opened:
             FreeCAD.closeDocument(doc.Name)
 
 

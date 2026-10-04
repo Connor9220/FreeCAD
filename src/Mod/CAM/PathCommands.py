@@ -193,9 +193,9 @@ class _ToggleOperation:
             return False
 
         # workholding: a vise, a clamp, or a part of one
-        import Path.Main.Workholding as PathWorkholding
+        import Path.Workholding.Vise as PathWorkholding
 
-        if all(PathWorkholding.memberOf(sel)[1] is not None for sel in selection):
+        if all(PathWorkholding.isMember(sel) for sel in selection):
             return True
 
         if len(selection) == 1:
@@ -215,7 +215,7 @@ class _ToggleOperation:
 
     def Activated(self):
         selection = FreeCADGui.Selection.getSelection()
-        import Path.Main.Workholding as PathWorkholding
+        import Path.Workholding.Vise as PathWorkholding
 
         members = [PathWorkholding.memberOf(sel)[1] for sel in selection]
         if members and all(m is not None for m in members):
@@ -253,7 +253,7 @@ class _ToggleOperation:
     def toggleWorkholding(self, members):
         """Workholding set in use or not, as operations are: all one way, the other way; mixed,
         all in use. Not in use, it is hidden, and shows the inactive icon where it can."""
-        import Path.Main.Workholding as PathWorkholding
+        import Path.Workholding.Vise as PathWorkholding
 
         states = [PathWorkholding.isActive(m) for m in members]
         active = not states[0] if all(s == states[0] for s in states) else True

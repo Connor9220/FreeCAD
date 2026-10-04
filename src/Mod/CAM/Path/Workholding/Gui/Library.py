@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-FileCopyrightText: 2026 Billy Huddleston <billy@ivdc.com>
+# SPDX-FileNotice: Part of the FreeCAD project.
 
 ################################################################################
 #                                                                              #
@@ -18,15 +20,17 @@
 ################################################################################
 
 """The vises or clamps on this computer and in the libraries, to choose one to add to a Job: what
-each is, where it came from, its licence, whether it is here; one a library has downloaded."""
+each is, where it came from, its license, whether it is here; one a library has downloaded."""
 
 import os
 import threading
 
 import FreeCAD
 import FreeCADGui
-import Path.Main.WorkholdingLibrary as PathLibrary
+import Path.Workholding.Library as PathLibrary
 
+from Path.Workholding.Common import userLength
+from Path.Workholding.Constants import BADGE_COLOR, BADGE_INK_COLOR
 from PySide import QtCore, QtGui, QtWidgets
 
 translate = FreeCAD.Qt.translate
@@ -57,8 +61,8 @@ def _badged(icon):
     painter.setRenderHint(QtGui.QPainter.Antialiasing)
     size = max(18, pixmap.width() // 3)
     disc = QtCore.QRectF(pixmap.width() - size - 1, 1, size, size)
-    painter.setPen(QtGui.QPen(QtGui.QColor("#ffffff"), 1.5))
-    painter.setBrush(QtGui.QColor("#f08c00"))
+    painter.setPen(QtGui.QPen(QtGui.QColor(BADGE_INK_COLOR), 1.5))
+    painter.setBrush(QtGui.QColor(BADGE_COLOR))
     painter.drawEllipse(disc)
     c = disc.center()
     h = size * 0.28
@@ -74,19 +78,15 @@ def _badged(icon):
         ]
     )
     painter.setPen(QtCore.Qt.NoPen)
-    painter.setBrush(QtGui.QColor("#ffffff"))
+    painter.setBrush(QtGui.QColor(BADGE_INK_COLOR))
     painter.drawPolygon(arrow)
     painter.end()
     return QtGui.QIcon(pixmap)
 
 
-def _length(mm):
-    return FreeCAD.Units.Quantity(mm, FreeCAD.Units.Length).UserString
-
-
 def _nominal(item):
     """A vise's size as it is sold: its jaw width to the nearest inch."""
-    return max(1, round(item.get("settings", {}).get("jawWidth", 0) / 25.4))
+    return max(1, round(item.get("settings", {}).get("jawWidth", 0) / FreeCAD.Units.Inch.Value))
 
 
 def _words(kind):
@@ -282,11 +282,15 @@ class LibrariesDialog(QtWidgets.QDialog):
 
 class LibraryDialog(QtWidgets.QDialog):
     """The vises, or clamps, on this computer, by the library each came from, or a library's,
-    listed: one chosen, downloaded first if it is not here, its path in downloaded."""
+    listed: one chosen, downloaded first if it is not here, its path in downloaded. To manage
+    them, nothing chosen: a library's installed, or updated, the dialog left open."""
 
-    def __init__(self, parent=None, kind="vise"):
+    def __init__(self, parent=None, kind="vise", manage=False):
         super().__init__(parent or FreeCADGui.getMainWindow())
         self.kind = kind
+        self.manage = manage
+        # told when the libraries are changed here, for another browser to list them too
+        self.librariesChanged = None
         self.words = _words(kind)
         self.setWindowTitle(self.words["title"])
         self.setWindowIcon(QtGui.QIcon(self.words["icon"]))
@@ -340,6 +344,14 @@ class LibraryDialog(QtWidgets.QDialog):
         self.list.itemDoubleClicked.connect(
             lambda *args: self.download() if self.get.isEnabled() else None
         )
+        # every update waiting, above the list
+        self.updateAllButton = QtWidgets.QPushButton()
+        self.updateAllButton.setToolTip(
+            translate("CAM_AddVise", "Download every update the libraries have published")
+        )
+        self.updateAllButton.clicked.connect(self.updateEvery)
+        self.updateAllButton.setVisible(False)
+        layout.addWidget(self.updateAllButton)
         layout.addWidget(self.list, 1)
         self.details = QtWidgets.QLabel()
         self.details.setWordWrap(True)
@@ -347,18 +359,36 @@ class LibraryDialog(QtWidgets.QDialog):
         self.details.setTextFormat(QtCore.Qt.RichText)
         layout.addWidget(self.details)
         buttons = QtWidgets.QDialogButtonBox()
-        other = buttons.addButton(
-            translate("CAM_AddVise", "Other file…"), QtWidgets.QDialogButtonBox.ActionRole
+        self.buttons = buttons
+        if not manage:
+            other = buttons.addButton(
+                translate("CAM_AddVise", "Other file…"), QtWidgets.QDialogButtonBox.ActionRole
+            )
+            other.setToolTip(
+                translate("CAM_AddVise", "One kept somewhere else, found on this computer")
+            )
+            other.setIcon(QtGui.QIcon.fromTheme("edit-find", QtGui.QIcon(":/icons/zoom-in.svg")))
+            other.clicked.connect(self.otherFile)
+        self.updateButton = buttons.addButton(
+            translate("CAM_AddVise", "Update"), QtWidgets.QDialogButtonBox.ActionRole
         )
-        other.setToolTip(
-            translate("CAM_AddVise", "One kept somewhere else, found on this computer")
+        self.updateButton.setToolTip(
+            translate("CAM_AddVise", "Download the library's newer file in place of this one")
         )
-        other.setIcon(QtGui.QIcon.fromTheme("edit-find", QtGui.QIcon(":/icons/zoom-in.svg")))
-        other.clicked.connect(self.otherFile)
-        self.get = buttons.addButton(
-            translate("CAM_AddVise", "Add"), QtWidgets.QDialogButtonBox.AcceptRole
-        )
-        buttons.addButton(QtWidgets.QDialogButtonBox.Cancel)
+        self.updateButton.setEnabled(False)
+        self.updateButton.clicked.connect(self.updatePicked)
+        if manage:
+            self.get = buttons.addButton(
+                translate("CAM_AddVise", "Install"), QtWidgets.QDialogButtonBox.ActionRole
+            )
+            self.get.setToolTip(
+                translate("CAM_AddVise", "Download the library's file to this computer")
+            )
+        else:
+            self.get = buttons.addButton(
+                translate("CAM_AddVise", "Add"), QtWidgets.QDialogButtonBox.AcceptRole
+            )
+            buttons.addButton(QtWidgets.QDialogButtonBox.Cancel)
         self.get.clicked.connect(self.download)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -417,6 +447,8 @@ class LibraryDialog(QtWidgets.QDialog):
             PathLibrary.setLibraries(dialog.libraries())
             self.fillSources()
             self.load()
+            if self.librariesChanged is not None:
+                self.librariesChanged()
 
     def load(self):
         """Those on this computer read, or a library's fetched, listed when they come, their
@@ -429,6 +461,10 @@ class LibraryDialog(QtWidgets.QDialog):
         self.fillFilters()
         self.count.setText("")
         self.get.setEnabled(False)
+        # those on this computer have nothing to install
+        self.get.setVisible(not self.manage or self.source.currentData() is not None)
+        self.updateButton.setEnabled(False)
+        self.updateAllButton.setVisible(False)
         self.loading += 1
         self.showing = self.source.currentData()
         if self.local():
@@ -548,8 +584,8 @@ class LibraryDialog(QtWidgets.QDialog):
                         (
                             translate("CAM_AddVise", "%s jaws, opens %s")
                             % (
-                                _length(settings.get("jawWidth", 0)),
-                                _length(settings.get("maxOpening", 0)),
+                                userLength(settings.get("jawWidth", 0)),
+                                userLength(settings.get("maxOpening", 0)),
                             )
                             if self.kind == "vise" and settings.get("jawWidth")
                             else ""
@@ -573,6 +609,9 @@ class LibraryDialog(QtWidgets.QDialog):
         self.list.blockSignals(False)
         if self.items:
             self.count.setText(translate("CAM_AddVise", "%d of %d") % (len(found), len(self.items)))
+        waiting = len(self.waiting())
+        self.updateAllButton.setText(translate("CAM_AddVise", "Update All (%d)") % waiting)
+        self.updateAllButton.setVisible(waiting > 0)
         self.showPicked()
 
     def pictured(self, number, index, data):
@@ -609,7 +648,7 @@ class LibraryDialog(QtWidgets.QDialog):
         super().done(result)
 
     def showPicked(self):
-        """What the one picked is, where it came from, its licence, and whether it is here."""
+        """What the one picked is, where it came from, its license, and whether it is here."""
         index = self.pickedIndex()
         if index is None:
             if self.items:
@@ -618,31 +657,42 @@ class LibraryDialog(QtWidgets.QDialog):
                     if self.list.count()
                     else self.words["nomatch"]
                 )
-            self.get.setText(translate("CAM_AddVise", "Add"))
+            self.get.setText(
+                translate("CAM_AddVise", "Install")
+                if self.manage
+                else translate("CAM_AddVise", "Add")
+            )
             self.get.setEnabled(False)
+            self.updateButton.setEnabled(False)
             return
         item = self.items[index]
-        # the library's put in first: one here that is older, or a library's that differs here;
-        # a library's already here as it has it, nothing to get
-        updating = self.states[index] == "update" or (
-            not self.local() and self.states[index] == "modified"
-        )
+        # updated first, then added: one here that is older, or a library's that differs here;
+        # a library's already here as it has it is added from On this computer
+        updating = self.updatable(index)
         installed = not self.local() and self.states[index] == "current"
-        self.get.setEnabled(not installed)
-        self.get.setText(
-            translate("CAM_AddVise", "Installed")
-            if installed
-            else (
-                translate("CAM_AddVise", "Update") if updating else translate("CAM_AddVise", "Add")
+        self.updateButton.setEnabled(updating)
+        if self.manage:
+            # only a library's not here yet to install
+            self.get.setEnabled(not self.local() and self.states[index] == "missing")
+            self.get.setText(
+                translate("CAM_AddVise", "Installed")
+                if installed
+                else translate("CAM_AddVise", "Install")
             )
-        )
+        else:
+            self.get.setEnabled(not installed and not updating)
+            self.get.setText(
+                translate("CAM_AddVise", "Installed")
+                if installed
+                else translate("CAM_AddVise", "Add")
+            )
         source = item.get("source", "")
         lines = ["<b>%s</b>" % item.get("label", item["id"])]
         made = "%s %s" % (item.get("maker", ""), item.get("model", ""))
         if made.strip():
             lines.append(made)
-        if item.get("licence"):
-            lines.append("%s: %s" % (translate("CAM_AddVise", "Licence"), item["licence"]))
+        if item.get("license"):
+            lines.append("%s: %s" % (translate("CAM_AddVise", "License"), item["license"]))
         if item.get("attribution"):
             lines.append(item["attribution"])
         if source:
@@ -679,29 +729,27 @@ class LibraryDialog(QtWidgets.QDialog):
         self.downloaded = path
         self.accept()
 
-    def download(self):
-        """The one picked chosen: one on this computer as it is; a library's saved where they
-        are kept first, one already here used as it is, one changed here replaced only if the
-        user says so."""
-        index = self.pickedIndex()
-        if index is None:
-            return
-        item = self.items[index]
+    def updatable(self, index):
+        """Whether the library has a file for one in place of the one here: one here that is
+        older; a library's whose file here is older, or changed here."""
         state = self.states[index]
+        return state == "update" or (not self.local() and state == "modified")
+
+    def waiting(self):
+        """Where in the list of items those are whose library has published a newer file, not
+        changed here."""
+        return [index for index, state in enumerate(self.states) if state == "update"]
+
+    def fetchNewer(self, index):
+        """The library's file for one put in place of the one here: its path, or None if the
+        user keeps the one here or the download fails."""
+        item = self.items[index]
         where = None
         if item.get("path"):
-            if state != "update":
-                self.downloaded = item["path"]
-                self.accept()
-                return
-            # the library's newer one put in its place
+            # the library's newer one put where this one is
             where = os.path.dirname(item["path"])
             item = self.updates[index]
-        elif state == "current":
-            self.downloaded = PathLibrary.localPath(item)
-            self.accept()
-            return
-        if state == "modified":
+        elif self.states[index] == "modified":
             answer = QtWidgets.QMessageBox.question(
                 self,
                 self.words["update"],
@@ -713,16 +761,175 @@ class LibraryDialog(QtWidgets.QDialog):
                 % PathLibrary.localPath(item),
             )
             if answer != QtWidgets.QMessageBox.Yes:
-                return
+                return None
+        try:
+            return PathLibrary.download(item, where)
+        except (OSError, ValueError) as e:
+            QtWidgets.QMessageBox.warning(self, self.words["title"], str(e))
+            return None
+
+    def retell(self):
+        """Each one's state told again once files here have changed, the one picked kept."""
+        picked = self.picked()
+        key = None if picked is None else (picked.get("path"), picked.get("id"))
+        if self.local():
+            self.items = PathLibrary.localItems(self.kind)
+            self.icons = {}
+            for index, item in enumerate(self.items):
+                data = PathLibrary.thumbnail(item["path"])
+                pixmap = QtGui.QPixmap()
+                if data and pixmap.loadFromData(data):
+                    self.icons[index] = QtGui.QIcon(
+                        pixmap.scaled(THUMBNAIL, THUMBNAIL, QtCore.Qt.KeepAspectRatio)
+                    )
+            self.tellLocal()
+        else:
+            self.states = [PathLibrary.status(item) for item in self.items]
+        self.refilter()
+        if key is None:
+            return
+        for row in range(self.list.count()):
+            entry = self.list.item(row)
+            index = entry.data(QtCore.Qt.UserRole)
+            if index is None:
+                continue
+            item = self.items[index]
+            if (item.get("path"), item.get("id")) == key:
+                self.list.setCurrentItem(entry)
+                break
+
+    def updatePicked(self):
+        """The one picked updated from its library, the dialog left open."""
+        index = self.pickedIndex()
+        if index is None or not self.updatable(index):
+            return
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         try:
-            self.downloaded = PathLibrary.download(item, where)
+            self.fetchNewer(index)
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        self.retell()
+
+    def updateEvery(self):
+        """Every one with a newer file in its library updated, the dialog left open."""
+        indexes = self.waiting()
+        if not indexes:
+            return
+        progress = QtWidgets.QProgressDialog(
+            translate("CAM_AddVise", "Updating…"),
+            translate("CAM_AddVise", "Stop"),
+            0,
+            len(indexes),
+            self,
+        )
+        progress.setWindowModality(QtCore.Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        # one width throughout, each name cut short to fit, not the dialog widened to each
+        labels = [self.items[index].get("label", self.items[index]["id"]) for index in indexes]
+        metrics = progress.fontMetrics()
+        width = min(480, max(320, max(metrics.horizontalAdvance(label) for label in labels) + 60))
+        progress.setFixedWidth(width)
+        for done, (index, label) in enumerate(zip(indexes, labels)):
+            progress.setValue(done)
+            progress.setLabelText(metrics.elidedText(label, QtCore.Qt.ElideMiddle, width - 60))
+            QtWidgets.QApplication.processEvents()
+            if progress.wasCanceled():
+                break
+            self.fetchNewer(index)
+        progress.setValue(len(indexes))
+        progress.deleteLater()
+        self.retell()
+
+    def download(self):
+        """The one picked chosen and the dialog closed: one on this computer as it is; a
+        library's saved where they are kept first."""
+        index = self.pickedIndex()
+        if index is None or self.updatable(index):
+            return
+        if self.manage:
+            self.install(index)
+            return
+        item = self.items[index]
+        if item.get("path"):
+            self.downloaded = item["path"]
+        elif self.states[index] == "current":
+            self.downloaded = PathLibrary.localPath(item)
+        else:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            try:
+                self.downloaded = PathLibrary.download(item)
+            except (OSError, ValueError) as e:
+                QtWidgets.QApplication.restoreOverrideCursor()
+                QtWidgets.QMessageBox.warning(self, self.words["title"], str(e))
+                return
+            QtWidgets.QApplication.restoreOverrideCursor()
+        self.accept()
+
+    def install(self, index):
+        """A library's one not here yet downloaded, the dialog left open."""
+        if self.local() or self.states[index] != "missing":
+            return
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        try:
+            PathLibrary.download(self.items[index])
         except (OSError, ValueError) as e:
             QtWidgets.QApplication.restoreOverrideCursor()
             QtWidgets.QMessageBox.warning(self, self.words["title"], str(e))
             return
         QtWidgets.QApplication.restoreOverrideCursor()
-        self.accept()
+        self.retell()
+
+
+class LibraryWindow(QtWidgets.QDialog):
+    """The vises and clamps, each a tab, to install from a library or update, without a Job."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent or FreeCADGui.getMainWindow())
+        self.setWindowTitle(translate("CAM_AddVise", "Workholding Library"))
+        self.setWindowIcon(QtGui.QIcon(":/icons/CAM_Vise.svg"))
+        self.resize(600, 620)
+        layout = QtWidgets.QVBoxLayout(self)
+        self.tabs = QtWidgets.QTabWidget()
+        self.browsers = []
+        for kind, text in (
+            ("vise", translate("CAM_AddVise", "Vises")),
+            ("clamp", translate("CAM_AddVise", "Clamps")),
+        ):
+            browser = LibraryDialog(self, kind=kind, manage=True)
+            browser.setWindowFlags(QtCore.Qt.Widget)
+            browser.librariesChanged = self.librariesChanged
+            self.browsers.append(browser)
+            self.tabs.addTab(browser, QtGui.QIcon(_words(kind)["icon"]), text)
+        layout.addWidget(self.tabs, 1)
+        # the tab's own buttons beside Close, on one row
+        row = QtWidgets.QHBoxLayout()
+        self.actions = QtWidgets.QStackedWidget()
+        for browser in self.browsers:
+            browser.layout().removeWidget(browser.buttons)
+            self.actions.addWidget(browser.buttons)
+        self.tabs.currentChanged.connect(self.actions.setCurrentIndex)
+        row.addWidget(self.actions, 1)
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
+        buttons.rejected.connect(self.reject)
+        row.addWidget(buttons)
+        layout.addLayout(row)
+
+    def librariesChanged(self):
+        """The libraries changed in one tab: every tab lists them."""
+        for browser in self.browsers:
+            browser.fillSources()
+            browser.load()
+
+    def done(self, result):
+        for browser in self.browsers:
+            browser.done(result)
+        super().done(result)
+
+
+def showLibrary(parent=None):
+    """showLibrary(parent=None) ... the Workholding Library window, to install vises and clamps
+    from a library or update them."""
+    LibraryWindow(parent).exec()
 
 
 def getVise(parent=None):

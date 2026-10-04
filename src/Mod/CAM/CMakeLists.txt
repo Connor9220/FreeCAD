@@ -93,14 +93,32 @@ SET(PathPythonDressupGui_SRCS
 SET(PathPythonMain_SRCS
     Path/Main/__init__.py
     Path/Main/Job.py
-    Path/Main/Workholding.py
-    Path/Main/WorkholdingCheck.py
-    Path/Main/WorkholdingItems.py
-    Path/Main/WorkholdingJaws.py
-    Path/Main/WorkholdingLibrary.py
-    Path/Main/WorkholdingParallels.py
     Path/Main/Workplane.py
     Path/Main/Stock.py
+)
+
+SET(PathPythonWorkholding_SRCS
+    Path/Workholding/__init__.py
+    Path/Workholding/Check.py
+    Path/Workholding/Common.py
+    Path/Workholding/Constants.py
+    Path/Workholding/Items.py
+    Path/Workholding/Jaws.py
+    Path/Workholding/Library.py
+    Path/Workholding/Parallels.py
+    Path/Workholding/Source.py
+    Path/Workholding/Vise.py
+)
+
+SET(PathPythonWorkholdingGui_SRCS
+    Path/Workholding/Gui/__init__.py
+    Path/Workholding/Gui/Command.py
+    Path/Workholding/Gui/Items.py
+    Path/Workholding/Gui/Library.py
+    Path/Workholding/Gui/Source.py
+    Path/Workholding/Gui/ViewProvider.py
+    Path/Workholding/Gui/Vise.py
+    Path/Workholding/Gui/Widgets.py
 )
 
 SET(PathPythonMainGui_SRCS
@@ -111,9 +129,6 @@ SET(PathPythonMainGui_SRCS
     Path/Main/Gui/Inspect.py
     Path/Main/Gui/Job.py
     Path/Main/Gui/JobCmd.py
-    Path/Main/Gui/WorkholdingCmd.py
-    Path/Main/Gui/WorkholdingItems.py
-    Path/Main/Gui/WorkholdingLibraryGui.py
     Path/Main/Gui/WorkplaneCmd.py
     Path/Main/Gui/JobDlg.py
     Path/Main/Gui/PreferencesJob.py
@@ -805,6 +820,8 @@ SET(all_files
     ${PathPythonDressupGui_SRCS}
     ${PathPythonMain_SRCS}
     ${PathPythonMainGui_SRCS}
+    ${PathPythonWorkholding_SRCS}
+    ${PathPythonWorkholdingGui_SRCS}
     ${PathPythonMainSanity_SRCS}
     ${PathPythonOp_SRCS}
     ${PathPythonOpGui_SRCS}
@@ -930,6 +947,18 @@ INSTALL(
         ${PathPythonMainGui_SRCS}
     DESTINATION
         Mod/CAM/Path/Main/Gui
+)
+INSTALL(
+    FILES
+        ${PathPythonWorkholding_SRCS}
+    DESTINATION
+        Mod/CAM/Path/Workholding
+)
+INSTALL(
+    FILES
+        ${PathPythonWorkholdingGui_SRCS}
+    DESTINATION
+        Mod/CAM/Path/Workholding/Gui
 )
 INSTALL(
     FILES

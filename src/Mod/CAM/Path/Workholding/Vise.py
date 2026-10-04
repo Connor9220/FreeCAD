@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-FileCopyrightText: 2026 Billy Huddleston <billy@ivdc.com>
+# SPDX-FileNotice: Part of the FreeCAD project.
 
 ################################################################################
 #                                                                              #
@@ -20,7 +22,7 @@
 """The workholding a Job's stock is held in, and seating the stock in a vise.
 
 A vise is a container in the Job's Workholding group laid out one way: its origin on the fixed
-jaw's face, at the top of the jaws and centred across them, the jaws closing along its -Y, its
+jaw's face, at the top of the jaws and centered across them, the jaws closing along its -Y, its
 +Z up. Its settings carry Opening, the gap between the jaw faces that drives the moving jaw, and
 JawHeight, from the floor to the jaw tops: in a vise's own file on a VarSet, in a vise put in a
 Job on the vise itself. Seating puts the stock against the fixed jaw, held as deep as asked, and
@@ -37,14 +39,16 @@ it in one station of a vise, its Station; Jobs share such a vise, each with a vi
 its Workholding, the others' placed by expression where the first Job's, the owner's, is."""
 
 import FreeCAD
-import os
 import Path
 import re
 
-import Path.Main.WorkholdingJaws as PathJaws
-import Path.Main.WorkholdingParallels as PathParallels
+import Path.Workholding.Jaws as PathJaws
+import Path.Workholding.Parallels as PathParallels
+import Path.Workholding.Source as PathSource
 
 from FreeCAD import Vector
+from Path.Workholding.Common import userLength
+from Path.Workholding.Constants import Sides
 from PySide.QtCore import QT_TRANSLATE_NOOP
 
 translate = FreeCAD.Qt.translate
@@ -52,11 +56,6 @@ translate = FreeCAD.Qt.translate
 # The layout of a vise's own file this FreeCAD knows: a file says which it follows in its
 # ViseSchema, none being the first; the second adds stations
 ViseSchema = 2
-
-
-def _length(value):
-    """A length in mm, as the document's units show it."""
-    return FreeCAD.Units.Quantity(value, FreeCAD.Units.Length).UserString
 
 
 def _varsets(container):
@@ -71,6 +70,21 @@ def _varsets(container):
                 if s.TypeId == "App::VarSet" and s not in linked:
                     linked.append(s)
     return held + linked
+
+
+def _holderOf(container, name):
+    """What holds the setting name of a vise or a clamp: the container itself, else the first of
+    its VarSets with it; None if none does."""
+    for holder in [container] + _varsets(container):
+        if hasattr(holder, name):
+            return holder
+    return None
+
+
+def _setting(container, name, default=None):
+    """The setting name of a vise or a clamp, as _holderOf finds it; default if none has it."""
+    holder = _holderOf(container, name)
+    return getattr(holder, name) if holder is not None else default
 
 
 def viseSetup(container):
@@ -93,6 +107,12 @@ def viseSetup(container):
     return {"opening": opening, "jawHeight": jawHeight, "maxOpening": maxOpening}
 
 
+def isVise(obj):
+    """isVise(obj) ... whether obj is a vise: it, or a VarSet it holds or its parts' file has,
+    holds an Opening."""
+    return viseSetup(obj) is not None
+
+
 def _expressionNames(expression, names):
     """The expression with each object name in names, a dict, swapped for its new one."""
     for old, new in names.items():
@@ -100,33 +120,51 @@ def _expressionNames(expression, names):
     return expression
 
 
-class ObjectVise:
-    """A vise of a Job's Workholding: a group placing the parts it links from the vise's file,
-    the settings of the vise's VarSet copied onto it. A part cannot be driven by an expression on
-    the group holding it, so the vise drives them itself: Drives, a part's name, a property of it
-    and the expression it follows, each set again when a setting changes."""
+class LinkedGroup:
+    """A piece of a Job's Workholding from a file of its own, a vise or a clamp: a group placing
+    the parts it links from the file, the settings of the file's VarSet copied onto it. A part
+    cannot be driven by an expression on the group holding it, so the group drives them itself:
+    Drives, a part's name, a property of it and the expression it follows, each set again when a
+    setting changes. Drives is in the group named group; the view provider, in the GUI, the one
+    of Gui.ViewProvider named viewProviderName."""
 
     # the settings of its file copied onto it, its parts linked
     holdsSettings = True
+    group = None
+    viewProviderName = None
 
-    @staticmethod
-    def viewProvider(vobj):
-        import Path.Main.Gui.WorkholdingCmd as WorkholdingCmd
+    @classmethod
+    def viewProvider(cls, vobj):
+        import Path.Workholding.Gui.ViewProvider as Gui
 
-        WorkholdingCmd.ViewProviderVise(vobj)
+        getattr(Gui, cls.viewProviderName)(vobj)
 
     def __init__(self, obj):
         obj.addExtension("App::GeoFeatureGroupExtensionPython")
         obj.addProperty(
             "App::PropertyStringList",
             "Drives",
-            "Vise",
+            self.group,
             QT_TRANSLATE_NOOP(
                 "App::Property", "The parts the settings move: a part, its property, an expression"
             ),
         )
         obj.setEditorMode("Drives", ["Hidden"])
         obj.Proxy = self
+
+    def dumps(self):
+        return None
+
+    def loads(self, state):
+        return None
+
+
+class ObjectVise(LinkedGroup):
+    """A vise of a Job's Workholding: a group placing the parts it links from the vise's file,
+    the settings of the vise's VarSet copied onto it."""
+
+    group = "Vise"
+    viewProviderName = "ViewProviderVise"
 
     def onBeforeChange(self, obj, prop):
         if prop == "Placement":
@@ -155,7 +193,7 @@ class ObjectVise:
             return
         if prop == "ParallelsCuttable":
             for parallel in parallelsOf(obj).values():
-                PathParallels.colour(parallel)
+                PathParallels.color(parallel)
             return
         if prop == "CloseJaw" and _held(obj) and obj.CloseJaw:
             _closeJaw(obj)
@@ -179,21 +217,13 @@ class ObjectVise:
             drive(obj)
 
     def onDocumentRestored(self, obj):
-        # saved while the parallels' length was named their width
-        renameProperties(obj, {"ParallelWidth": "ParallelLength"})
         # brought up to date with its file, if that is open by now; its file looked for again
         # if it is not found
         try:
             refreshSettings(obj)
         except Exception as e:
             Path.Log.warning("%s: %s" % (obj.Label, e))
-        recoverLater(obj.Document)
-
-    def dumps(self):
-        return None
-
-    def loads(self, state):
-        return None
+        PathSource.recoverLater(obj.Document)
 
 
 class _Free:
@@ -220,7 +250,16 @@ def _held(vise):
 def _bottom(job, placement):
     """The stock's bottom in the frame of placement, from its origin, along its +Z."""
     up = placement.Rotation.multVec(Vector(0, 0, 1))
-    return min((v.Point - placement.Base).dot(up) for v in job.Stock.Shape.Vertexes)
+    return _extents(job.Stock.Shape, placement.Base, up)[0]
+
+
+def _stockIn(job, placement):
+    """The stock's extents in the frame of placement, from its origin, each (lowest, highest):
+    along its -Y, the way the jaws close; along its X, across them; along its Z, up."""
+    return [
+        _extents(job.Stock.Shape, placement.Base, placement.Rotation.multVec(direction))
+        for direction in (Vector(0, -1, 0), Vector(1, 0, 0), Vector(0, 0, 1))
+    ]
 
 
 def _seatStep(vise, frame):
@@ -331,7 +370,7 @@ def _closeJaw(vise):
     if selfCentering(vise):
         placement = stationPlacement(vise)
         closing = placement.Rotation.multVec(Vector(0, -1, 0))
-        near, far = _extents(job.Stock.Shape, placement.Base, closing)
+        near, far = _stockIn(job, placement)[0]
         moveModel(job, closing * (openingOf(vise) - near - far) / 2)
 
 
@@ -468,9 +507,9 @@ def _instance(job, label, members, placement, proxy=None, name="Vise"):
         link = doc.addObject("App::LinkPython", name + "Link")
         link.LinkedObject = obj.LinkedObject if obj.isDerivedFrom("App::Link") else obj
         if FreeCAD.GuiUp:
-            import Path.Main.Gui.WorkholdingCmd as WorkholdingCmd
+            import Path.Workholding.Gui.ViewProvider as Gui
 
-            WorkholdingCmd.ViewProviderViseMember(link.ViewObject)
+            Gui.ViewProviderViseMember(link.ViewObject)
         link.Label = obj.Label
         link.Placement = obj.Placement
         container.addObject(link)
@@ -488,99 +527,15 @@ def _instance(job, label, members, placement, proxy=None, name="Vise"):
         ),
         None,
     )
-    keepSource(container, path, like)
+    PathSource.keepSource(container, path, like)
     return container
-
-
-# where a vise's or clamp's file came from, kept on it, hidden
-SourceProperties = (
-    ("SourceFile", QT_TRANSLATE_NOOP("App::Property", "The file it was added from")),
-    (
-        "SourceLibrary",
-        QT_TRANSLATE_NOOP(
-            "App::Property",
-            "The library its file is stamped as published in; none when it is not",
-        ),
-    ),
-    ("SourceItem", QT_TRANSLATE_NOOP("App::Property", "Its file's id in that library")),
-    (
-        "SourceSha256",
-        QT_TRANSLATE_NOOP("App::Property", "Its file's sha256 when it was added, to tell a change"),
-    ),
-)
-
-
-def renameProperties(obj, renames, swap=False):
-    """renameProperties(obj, renames, swap=False) ... obj's properties named anew, {old: new}: each
-    kind, group, documentation, editor mode, value and expression kept, and an expression naming
-    an old one naming the new. One obj has not, or has the new one of already, let be; with swap
-    the names are exchanged, both there. Returns whether any was."""
-    moves = [
-        (o, n) for o, n in renames.items() if hasattr(obj, o) and (swap or not hasattr(obj, n))
-    ]
-    if not moves:
-        return False
-    names = dict(moves)
-    kept = {
-        old: (
-            obj.getTypeIdOfProperty(old),
-            obj.getGroupOfProperty(old),
-            obj.getDocumentationOfProperty(old),
-            obj.getEditorMode(old),
-            getattr(obj, old),
-        )
-        for old in names
-    }
-    expressions = list(obj.ExpressionEngine)
-    for path, _ in expressions:
-        obj.setExpression(path, None)
-    for old in names:
-        obj.removeProperty(old)
-    for old, new in moves:
-        kind, group, doc, mode, value = kept[old]
-        obj.addProperty(kind, new, group, doc)
-        obj.setEditorMode(new, mode)
-        setattr(obj, new, value)
-    for path, expression in expressions:
-        if not swap:
-            for old, new in names.items():
-                # another's property after its name, its own bare
-                expression = re.sub(r"\.%s\b" % old, "." + new, expression)
-                expression = re.sub(r"(?<![\w.])%s\b(?!\s*\()" % old, new, expression)
-        obj.setExpression(names.get(path, path), expression)
-    return True
-
-
-def keepSource(row, path=None, like=None):
-    """keepSource(row, path=None, like=None) ... where the row's file came from kept on it,
-    hidden: as like, a row it is another of, has it; else the file at path, its sha256, and the
-    library and its id there the file is stamped with."""
-    import Path.Main.WorkholdingLibrary as PathLibrary
-
-    if like is not None and getattr(like, "SourceFile", ""):
-        values = {name: getattr(like, name, "") for name, _ in SourceProperties}
-    elif path:
-        stamp = PathLibrary.about(path)
-        values = {
-            "SourceFile": path,
-            "SourceLibrary": stamp.get("library", ""),
-            "SourceItem": stamp.get("id", ""),
-            "SourceSha256": PathLibrary.fileSha256(path),
-        }
-    else:
-        return
-    for name, doc in SourceProperties:
-        if not hasattr(row, name):
-            row.addProperty("App::PropertyString", name, "Source", doc)
-            row.setEditorMode(name, ["Hidden"])
-        setattr(row, name, values.get(name, "") or "")
 
 
 def addVise(job, source, placement=None):
     """addVise(job, source, placement=None) ... a vise put in the Job's Workholding from source,
     the container in a vise's own file: its settings copied in, so this one opens on its own,
     its parts linked from the file. Returns the new vise."""
-    if viseSetup(source) is None:
+    if not isVise(source):
         raise ValueError("%s is not a vise: it has no Opening" % source.Label)
     if schemaOf(source) > ViseSchema:
         raise ValueError(
@@ -609,20 +564,7 @@ def sourceMembers(source):
 def schemaOf(container):
     """schemaOf(container) ... the layout a vise or its file follows, its ViseSchema, 1 where it
     does not say."""
-    for holder in [container] + _varsets(container):
-        if hasattr(holder, "ViseSchema"):
-            return int(holder.ViseSchema)
-    return 1
-
-
-def _sourceOf(vise):
-    """The container in the vise's own file its parts are linked from, None if that file is not
-    open."""
-    for o in getattr(vise, "Group", []) or []:
-        linked = getattr(o, "LinkedObject", None) if o.isDerivedFrom("App::Link") else None
-        if linked is not None and linked.Document != vise.Document:
-            return viseIn(linked.Document)
-    return None
+    return int(_setting(container, "ViseSchema", 1))
 
 
 def _same(a, b):
@@ -636,7 +578,9 @@ def refreshSettings(vise):
     of the settings that changed, none when the file is not open or has not changed."""
     if not isinstance(getattr(vise, "Proxy", None), ObjectVise):
         return []
-    source = _sourceOf(vise)
+    # the container in the vise's own file its parts are linked from, if that file is open
+    files = PathSource.linkedDocuments(vise)
+    source = viseIn(files[0]) if files else None
     if source is None:
         return []
     changed = []
@@ -689,7 +633,7 @@ def viseIn(doc):
     """viseIn(doc) ... the vise a vise's own file holds: its outermost container with an
     Opening, or None."""
     for obj in doc.RootObjects:
-        if _isGroup(obj) and viseSetup(obj) is not None:
+        if _isGroup(obj) and isVise(obj):
             return obj
     return None
 
@@ -713,7 +657,7 @@ def addAnother(member, offset=None):
         offset = where.Rotation.multVec(Vector(width + 25.0, 0, 0))
     placement = FreeCAD.Placement(member.Placement)
     placement.move(offset)
-    if _isGroup(member) and (viseSetup(member) is not None or _holdsSettings(member)):
+    if _isGroup(member) and (isVise(member) or _holdsSettings(member)):
         # its soft jaws are made from its settings, not linked; a clamp from a file of its own
         # made as it is
         if _holdsSettings(member):
@@ -763,13 +707,7 @@ def opening(job, vise, step=None):
     the most it opens (None if it does not say), and how far for the stock turned a quarter
     round: held on step of its jaws, as it was last seated when None. In the station its stock
     is in."""
-    placement = stationPlacement(vise)
-    closing = placement.Rotation.multVec(Vector(0, -1, 0))
-    across = placement.Rotation.multVec(Vector(1, 0, 0))
-    stock = job.Stock.Shape
-    near, far = _extents(stock, placement.Base, closing)
-    low, high = _extents(stock, placement.Base, across)
-    bottom, _ = _extents(stock, placement.Base, placement.Rotation.multVec(Vector(0, 0, 1)))
+    (near, far), (low, high), (bottom, _) = _stockIn(job, stationPlacement(vise))
     frame = _jawFrame(vise)
     if step is None:
         step = _seatStep(vise, frame)
@@ -783,7 +721,7 @@ def opening(job, vise, step=None):
 def vises(job):
     """vises(job) ... the vises in the Job's Workholding group."""
     group = getattr(job, "Workholding", None)
-    return [o for o in getattr(group, "Group", []) or [] if viseSetup(o) is not None]
+    return [o for o in getattr(group, "Group", []) or [] if isVise(o)]
 
 
 def memberOf(obj):
@@ -803,6 +741,11 @@ def memberOf(obj):
                 if owner is None or not (obj == owner or obj in owner.OutListRecursive):
                     found = (job, member)
     return found
+
+
+def isMember(obj):
+    """isMember(obj) ... whether obj is a piece of a Job's workholding, or a part of one."""
+    return memberOf(obj)[1] is not None
 
 
 def isActive(member):
@@ -858,19 +801,19 @@ def moveModel(job, offset):
 
 def partTurn(job):
     """partTurn(job) ... how the Job's part is turned, its model's rotation: the sides a vise
-    names, Bottom, Front and so on, are the part's own, as it is modelled."""
+    names, Bottom, Front and so on, are the part's own, as it is modeled."""
     models = getattr(getattr(job, "Model", None), "Group", None) or []
     return FreeCAD.Rotation(models[0].Placement.Rotation) if models else FreeCAD.Rotation()
 
 
-def turnModel(job, rotation, centre):
-    """turnModel(job, rotation, centre) ... the Job's part turned by rotation about centre, as
+def turnModel(job, rotation, center):
+    """turnModel(job, rotation, center) ... the Job's part turned by rotation about center, as
     moveModel moves it: its models, what is placed on it without being attached to it, and its
     stock; a stock made from the models' box made about them again where they now are."""
     import Path.Main.Job as PathJob
     import Path.Main.Stock as PathStock
 
-    turn = FreeCAD.Placement(Vector(), rotation, centre)
+    turn = FreeCAD.Placement(Vector(), rotation, center)
     carried = PathJob.objectsInModelFrame(job)
     stock = job.Stock
     fromBase = isinstance(getattr(stock, "Proxy", None), PathStock.StockFromBase)
@@ -936,7 +879,7 @@ def _remember(vise, onParallels, close, parallels, step=0, kit=None):
             "App::PropertyBool",
             QT_TRANSLATE_NOOP(
                 "App::Property",
-                "Soft parallels, aluminium or plastic: a tool cutting them is warned of, not a "
+                "Soft parallels, aluminum or plastic: a tool cutting them is warned of, not a "
                 "crash",
             ),
         ),
@@ -964,9 +907,9 @@ def _remember(vise, onParallels, close, parallels, step=0, kit=None):
             vise.addProperty(kind, name, "Seat", doc)
             if name == "ParallelThickness":
                 # a standard set's, until one is chosen
-                vise.ParallelThickness = PathParallels.INCH / 8
+                vise.ParallelThickness = PathParallels.DefaultThickness
             elif name == "ParallelLength":
-                vise.ParallelLength = 6 * PathParallels.INCH
+                vise.ParallelLength = PathParallels.DefaultLength
     # kept before, found from the placement now
     for name in ("Grip", "Offset"):
         if hasattr(vise, name) and vise.getGroupOfProperty(name) == "Seat":
@@ -1029,7 +972,7 @@ def _makeParallels(vise):
     names = [o.Name for o in parallels.values()]
     drives = [e for e in vise.Drives if e.split("\t")[0] not in names]
     if getattr(vise, "OnParallels", False) and vise.Parallels.Value > 0:
-        for side in PathParallels.Sides:
+        for side in Sides:
             if side not in parallels:
                 parallels[side] = PathParallels.create(vise, side)
         # in the station the stock is in, the moving one with its moving jaw
@@ -1044,9 +987,9 @@ def _makeParallels(vise):
             vise.Drives = drives
         drive(vise)
         for parallel in parallels.values():
-            PathParallels.colour(parallel)
+            PathParallels.color(parallel)
             parallel.touch()
-        return [parallels[side] for side in PathParallels.Sides]
+        return [parallels[side] for side in Sides]
     if drives != list(vise.Drives):
         vise.Drives = drives
     for parallel in parallels.values():
@@ -1068,20 +1011,14 @@ def isCuttable(obj):
 def takesParallels(container):
     """takesParallels(container) ... whether stock can stand on parallels in the vise: not where
     its file says TakesParallels is false, as on a vise whose parallels are built in."""
-    for holder in [container] + _varsets(container):
-        if hasattr(holder, "TakesParallels"):
-            return bool(holder.TakesParallels)
-    return True
+    return bool(_setting(container, "TakesParallels", True))
 
 
 def selfCentering(container):
     """selfCentering(container) ... whether both of the vise's jaws close, about the middle of its
     body, as its file says SelfCentering: its body then moves half as far as its moving jaw, and
     stays put as the vise opens and closes."""
-    for holder in [container] + _varsets(container):
-        if hasattr(holder, "SelfCentering"):
-            return bool(holder.SelfCentering)
-    return False
+    return bool(_setting(container, "SelfCentering", False))
 
 
 def _isOpening(name):
@@ -1093,14 +1030,10 @@ def stations(container):
     """stations(container) ... the frames of the vise's stations in its own, the first its own
     origin: as many as its file's Stations, from its StationFrames; one, the vise's own frame,
     where it does not say."""
-    count, frames = None, None
-    for holder in [container] + _varsets(container):
-        if count is None and hasattr(holder, "Stations"):
-            count = int(holder.Stations)
-        if frames is None and hasattr(holder, "StationFrames"):
-            frames = [FreeCAD.Placement(p) for p in holder.StationFrames]
+    count = _setting(container, "Stations")
+    frames = [FreeCAD.Placement(p) for p in _setting(container, "StationFrames", [])]
     frames = frames or [FreeCAD.Placement()]
-    count = len(frames) if count is None else max(1, count)
+    count = len(frames) if count is None else max(1, int(count))
     return (frames + [FreeCAD.Placement()] * count)[:count]
 
 
@@ -1120,7 +1053,7 @@ def stationFrame(vise, number=None):
 def stationPlacement(vise, number=None):
     """stationPlacement(vise, number=None) ... where station number of the vise stands in the
     document, the one its stock is in when None: its origin on that station's fixed jaw's face,
-    at the jaw tops, centred across them, its jaws closing along its -Y, as a vise of one
+    at the jaw tops, centered across them, its jaws closing along its -Y, as a vise of one
     station is laid out."""
     return placementOf(vise).multiply(stationFrame(vise, number))
 
@@ -1134,11 +1067,7 @@ def openingName(vise, number=None):
 
 def _openingHolder(vise, number=None):
     """What holds the opening of the vise's station, the vise or a VarSet; None if none does."""
-    name = openingName(vise, number)
-    for holder in [vise] + _varsets(vise):
-        if hasattr(holder, name):
-            return holder
-    return None
+    return _holderOf(vise, openingName(vise, number))
 
 
 def openingOf(vise, number=None):
@@ -1352,16 +1281,11 @@ def _shareOpening(vise, name):
 
 def seating(job, vise):
     """seating(job, vise) ... how the stock sits in the vise now: its grip, from the jaw tops,
-    how far off the jaws' centre it is across them, and, as it was last seated, whether on
+    how far off the jaws' center it is across them, and, as it was last seated, whether on
     parallels, the step it stands on (0 for none) and whether the jaw was closed on it; and the
     vise's jaws, as jawFrame says them. In the station its stock is in."""
     placement = stationPlacement(vise)
-    origin = placement.Base
-    across = placement.Rotation.multVec(Vector(1, 0, 0))
-    up = placement.Rotation.multVec(Vector(0, 0, 1))
-    stock = job.Stock.Shape
-    lowA, highA = _extents(stock, origin, across)
-    bottom, _ = _extents(stock, origin, up)
+    _, (lowA, highA), (bottom, _) = _stockIn(job, placement)
     frame = _jawFrame(vise)
     return {
         "grip": frame["top"] - bottom,
@@ -1379,7 +1303,7 @@ def seat(
     vise,
     grip=None,
     offset=0.0,
-    centre=True,
+    center=True,
     close=True,
     moveVise=False,
     parallels=None,
@@ -1387,11 +1311,11 @@ def seat(
     quiet=False,
     step=0,
 ):
-    """seat(job, vise, grip=None, offset=0.0, centre=True, close=True, moveVise=False,
+    """seat(job, vise, grip=None, offset=0.0, center=True, close=True, moveVise=False,
     parallels=None, rotation=None, step=0) ... put the stock in vise, the vise first turned to
     rotation if given, as orientation names it in the part's own sides: against the fixed jaw, its bottom grip below the jaw tops (as it is now
     when None), or with parallels standing that high off the vise's floor, or, step a step of
-    its jaws counted from 1, on that step's floor and against its wall; across the jaws centred
+    its jaws counted from 1, on that step's floor and against its wall; across the jaws centered
     and then offset, or offset from where it is, and the moving jaw closed on it. The part moves,
     the vise staying, or with moveVise the vise moves. A vise of several stations seats it in
     the station its Station says, as a vise of one in its own frame.
@@ -1432,16 +1356,11 @@ def seat(
             vise.Placement = FreeCAD.Placement(
                 vise.Placement.Base, rotation.multiply(stationAt.Rotation.inverted())
             )
-    stock = job.Stock.Shape
     placement = stationPlacement(vise)
-    origin = placement.Base
     closing = placement.Rotation.multVec(Vector(0, -1, 0))
     across = placement.Rotation.multVec(Vector(1, 0, 0))
     up = placement.Rotation.multVec(Vector(0, 0, 1))
-
-    nearC, farC = _extents(stock, origin, closing)
-    lowA, highA = _extents(stock, origin, across)
-    bottom, _ = _extents(stock, origin, up)
+    (nearC, farC), (lowA, highA), (bottom, _) = _stockIn(job, placement)
     jawHeight = setup["jawHeight"]
     # the grip from the jaw tops
     top, floor = frame["top"], frame["floor"]
@@ -1466,7 +1385,7 @@ def seat(
     if floor is not None and grip > top - floor + 1e-6 and not quiet:
         Path.Log.warning(
             translate("CAM", "%s: a grip of %s is deeper than the jaws, %s")
-            % (vise.Label, _length(grip), _length(top - floor))
+            % (vise.Label, userLength(grip), userLength(top - floor))
         )
 
     # the moving jaw's face, or its step's wall, against the stock's far side
@@ -1476,12 +1395,8 @@ def seat(
     if close and selfCentering(vise):
         # both jaws close about the body, which stays: the fixed jaw where they meet the stock
         setOpening(vise, opening if fits else maxOpening)
-        placement = stationPlacement(vise)
-        origin = placement.Base
-        nearC, farC = _extents(stock, origin, closing)
-        lowA, highA = _extents(stock, origin, across)
-        bottom, _ = _extents(stock, origin, up)
-    shiftA = (-(lowA + highA) / 2 if centre else 0.0) + offset
+        (nearC, farC), (lowA, highA), (bottom, _) = _stockIn(job, stationPlacement(vise))
+    shiftA = (-(lowA + highA) / 2 if center else 0.0) + offset
     move = closing * (-wall - nearC) + across * shiftA + up * (top - grip - bottom)
     if moveVise:
         placement = FreeCAD.Placement(vise.Placement)
@@ -1493,7 +1408,7 @@ def seat(
     if not fits and not quiet:
         Path.Log.warning(
             translate("CAM", "%s opens %s: too little for the stock, %s between the jaws")
-            % (vise.Label, _length(maxOpening), _length(opening))
+            % (vise.Label, userLength(maxOpening), userLength(opening))
         )
     if close:
         setOpening(vise, opening if fits else maxOpening)
@@ -1579,11 +1494,8 @@ def gripJawsOf(vise):
 
 def _jawWidth(vise):
     """How wide the vise's jaws are in mm, as its settings say, else None."""
-    for holder in [vise] + _varsets(vise):
-        width = getattr(holder, "JawWidth", None)
-        if width is not None:
-            return getattr(width, "Value", width)
-    return None
+    width = _setting(vise, "JawWidth")
+    return getattr(width, "Value", width)
 
 
 def builtInSteps(vise):
@@ -1634,7 +1546,7 @@ def jawFrame(vise):
     step's floor and wall on the fixed jaw, (z, y); gapLoss, what the jaws take of the Opening
     beyond the hard plates, both together; width, across the jaws, None where it does not say.
     None if vise is not a vise or does not say how tall its jaws are."""
-    if viseSetup(vise) is None:
+    if not isVise(vise):
         return None
     frame = _jawFrame(vise)
     return frame if frame["floor"] is not None else None
@@ -1812,7 +1724,7 @@ def _makeJaws(vise):
         if key[1] >= count:
             vise.Document.removeObject(grip.Name)
             del grips[key]
-    for side in PathJaws.Sides:
+    for side in Sides:
         for index in range(count):
             if (side, index) not in grips:
                 grips[(side, index)] = PathJaws.createGrip(vise, side, index)
@@ -1821,10 +1733,10 @@ def _makeJaws(vise):
                     "\t".join((grips[(side, index)].Name, ".Placement.Base.y", expression))
                 )
     if vise.Jaws in ("Soft", "Grip"):
-        for side in PathJaws.Sides:
+        for side in Sides:
             if side not in jaws:
                 jaws[side] = PathJaws.create(vise, side)
-            PathJaws.colour(jaws[side], vise.Jaws)
+            PathJaws.color(jaws[side], vise.Jaws)
         for plate in plates:
             plate.Visibility = False
         drives.append("\t".join((jaws["Moving"].Name, ".Placement.Base.y", expression)))
@@ -1832,253 +1744,10 @@ def _makeJaws(vise):
         drive(vise)
         for part in list(jaws.values()) + list(grips.values()):
             part.touch()
-        return [jaws[side] for side in PathJaws.Sides]
+        return [jaws[side] for side in Sides]
     vise.Drives = drives
     for jaw in jaws.values():
         vise.Document.removeObject(jaw.Name)
     for plate in plates:
         plate.Visibility = True
     return []
-
-
-# a document whose vises' or clamps' files are not where they were: found again, or got from the
-# library
-
-
-def _savedLinks(doc):
-    """What each link of the document points at as its file was saved: the link's name, the file
-    and the name of the object in it. Of a link whose file is not found, FreeCAD keeps them only
-    there."""
-    import zipfile
-    from xml.etree import ElementTree
-
-    found = {}
-    path = doc.FileName
-    if not path or not os.path.exists(path):
-        return found
-    try:
-        with zipfile.ZipFile(path) as z:
-            root = ElementTree.fromstring(z.read("Document.xml"))
-    except (OSError, KeyError, zipfile.BadZipFile, ElementTree.ParseError):
-        return found
-    for obj in root.iter("Object"):
-        for prop in obj.iter("Property"):
-            if prop.get("name") != "LinkedObject":
-                continue
-            link = prop.find("XLink")
-            if link is not None and link.get("file"):
-                found[obj.get("name")] = (link.get("file"), link.get("name"))
-    return found
-
-
-def lostParts(doc):
-    """lostParts(doc) ... the parts of the document's vises and clamps whose files are not found,
-    by the file each was linked from, as it was saved: {file: [(part, the name of its object in
-    the file), ...]}."""
-    saved = None
-    lost = {}
-    for row in doc.Objects:
-        if not (_isGroup(row) and hasattr(row, "Drives")):
-            continue
-        for part in getattr(row, "Group", []) or []:
-            if not part.isDerivedFrom("App::Link") or part.LinkedObject is not None:
-                continue
-            if saved is None:
-                saved = _savedLinks(doc)
-            where = saved.get(part.Name)
-            if where:
-                lost.setdefault(where[0], []).append((part, where[1]))
-    return lost
-
-
-def workholdingFolders():
-    """workholdingFolders() ... where vises' and clamps' files are looked for: the CAM assets'
-    Workholding/Vises and Workholding/Clamps, Workholding itself, where vises were kept before,
-    and the CAM assets' own folder."""
-    import Path.Main.WorkholdingLibrary as PathLibrary
-    import Path.Preferences
-
-    assets = str(Path.Preferences.getAssetPath())
-    root = os.path.join(assets, "Workholding")
-    return [PathLibrary.folder(), os.path.join(root, "Clamps"), root, assets]
-
-
-def _findFile(name, folders):
-    base = os.path.basename(name.replace("\\", "/"))
-    for folder in folders:
-        path = os.path.join(folder, base)
-        if os.path.isfile(path):
-            return path
-    return None
-
-
-def _openFile(path):
-    """The document of the file at path, opened without a view if it is not open whole."""
-    for doc in FreeCAD.listDocuments().values():
-        if doc.FileName and os.path.exists(doc.FileName) and os.path.samefile(doc.FileName, path):
-            if not doc.Partial:
-                return doc
-    return FreeCAD.openDocument(path, hidden=True)
-
-
-def relinkParts(parts, path):
-    """relinkParts(parts, path) ... parts, (part, name) pairs, linked again to the objects of those
-    names in the file at path, their vises brought up to date with it. Returns how many were."""
-    source = _openFile(path)
-    done = 0
-    rows = []
-    for part, name in parts:
-        target = source.getObject(name)
-        if target is None:
-            continue
-        part.LinkedObject = target
-        done += 1
-        row = part.getParentGeoFeatureGroup()
-        if row is not None and row not in rows:
-            rows.append(row)
-    for row in rows:
-        try:
-            refreshSettings(row)
-        except Exception as e:
-            Path.Log.warning("%s: %s" % (row.Label, e))
-        drive(row)
-        row.touch()
-    return done
-
-
-def _libraryItem(parts, base, sources, indexes):
-    """The library's item for the file parts were linked from: in the library their vise or clamp
-    came from first, by its id there, then in sources, the user's libraries when None, by the
-    file's name. indexes keeps the indexes read, by address."""
-    import Path.Main.WorkholdingLibrary as PathLibrary
-
-    rows = {p.getParentGeoFeatureGroup() for p, _ in parts} - {None}
-    own = [getattr(r, "SourceLibrary", "") for r in rows if getattr(r, "SourceLibrary", "")]
-    ids = {getattr(r, "SourceItem", "") for r in rows} - {""}
-    addresses = own + [a for a in (PathLibrary.sources() if sources is None else sources)]
-
-    def items(address):
-        if address not in indexes:
-            try:
-                indexes[address] = PathLibrary.loadIndex(address, kind=None)
-            except ValueError as e:
-                Path.Log.info(str(e))
-                indexes[address] = []
-        return indexes[address]
-
-    for address in own:
-        for item in items(address):
-            if item["id"] in ids:
-                return item
-    for address in dict.fromkeys(addresses):
-        for item in items(address):
-            if os.path.basename(item["file"]) == base:
-                return item
-    return None
-
-
-def recoverParts(doc, folders=None, library=None, askLibrary=None, askFile=None):
-    """recoverParts(doc, folders=None, library=None, askLibrary=None, askFile=None) ... the
-    document's vises and clamps whose files are not found linked again: to a file of the same
-    name in folders, workholdingFolders when None; else to the file askFile(file) gives; else,
-    when askLibrary(file, item) says so, to the library's, downloaded into the first of folders,
-    or where its kind is kept when folders is None, the libraries looked in library's index
-    addresses, the user's when None. Those left are said so. Returns {file: the path linked to,
-    or None}."""
-    lost = lostParts(doc)
-    if not lost:
-        return {}
-    import Path.Main.WorkholdingLibrary as PathLibrary
-
-    into = folders[0] if folders else None
-    folders = workholdingFolders() if folders is None else folders
-    indexes = {}
-    found = {}
-    for name, parts in lost.items():
-        base = os.path.basename(name.replace("\\", "/"))
-        path = _findFile(name, folders)
-        if path is None and askFile is not None:
-            path = askFile(name)
-        if path is None and askLibrary is not None:
-            item = _libraryItem(parts, base, library, indexes)
-            if item is not None:
-                # the library's copy not the one the Job was made with: said so when asked
-                used = {getattr(r, "SourceSha256", "") for r in _rows(parts)} - {""}
-                item = dict(item, changed=bool(used) and item["sha256"] not in used)
-            if item is not None and askLibrary(name, item):
-                try:
-                    path = PathLibrary.download(item, into)
-                except (OSError, ValueError) as e:
-                    Path.Log.warning(str(e))
-        if path:
-            count = relinkParts(parts, path)
-            for row in _rows(parts):
-                # the sha256 the Job was made with kept: a file that differs is told of after;
-                # the library and id it was from kept where the file found says none
-                was = {
-                    n: getattr(row, n, "") for n in ("SourceSha256", "SourceLibrary", "SourceItem")
-                }
-                keepSource(row, path)
-                for prop, value in was.items():
-                    if value and (prop == "SourceSha256" or not getattr(row, prop, "")):
-                        setattr(row, prop, value)
-            Path.Log.info(
-                translate("CAM", "%s: %d parts linked again to %s") % (doc.Label, count, path)
-            )
-        else:
-            Path.Log.warning(
-                translate("CAM", "%s: %s not found; its vise or clamp has no parts")
-                % (doc.Label, base)
-            )
-        found[name] = path
-    if any(found.values()):
-        doc.recompute()
-    return found
-
-
-def _rows(parts):
-    return {p.getParentGeoFeatureGroup() for p, _ in parts} - {None}
-
-
-def _fileOf(row):
-    """The file the row's parts are linked from, None if they are not."""
-    for part in getattr(row, "Group", []) or []:
-        if part.isDerivedFrom("App::Link") and part.LinkedObject is not None:
-            linked = part.LinkedObject.Document
-            if linked != row.Document and linked.FileName:
-                return linked.FileName
-    return None
-
-
-def changedSources(doc):
-    """changedSources(doc) ... the document's vises and clamps whose file is not the one they
-    were added with, its sha256 another: (row, path) pairs. The Job's toolpaths were made against
-    the one it was."""
-    changed = []
-    for row in doc.Objects:
-        used = getattr(row, "SourceSha256", "")
-        if not used or not _isGroup(row):
-            continue
-        path = _fileOf(row)
-        if path and os.path.exists(path):
-            import Path.Main.WorkholdingLibrary as PathLibrary
-
-            if PathLibrary.fileSha256(path) != used:
-                changed.append((row, path))
-    return changed
-
-
-def acceptChanged(changed):
-    """acceptChanged(changed) ... (row, path) pairs, each row's file as it is now taken as the
-    one it uses."""
-    for row, path in changed:
-        keepSource(row, path)
-
-
-def recoverLater(doc):
-    """recoverLater(doc) ... the document's vises and clamps whose files are not found recovered
-    once it is loaded and nothing else is asking: in the GUI, which may ask; not without it."""
-    if FreeCAD.GuiUp:
-        import Path.Main.Gui.WorkholdingCmd as WorkholdingCmd
-
-        WorkholdingCmd.recoverWhenIdle(doc)

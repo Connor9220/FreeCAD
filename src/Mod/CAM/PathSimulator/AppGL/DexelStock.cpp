@@ -434,7 +434,7 @@ static const char* FragShaderDexelPoints = R"(
 )";
 
 // The surface as a mesh, into the geometry buffer as the other meshes go: the stock's own faces
-// in its colour, the cut ones in theirs.
+// in its color, the cut ones in theirs.
 static const char* VertShaderDexelMesh = R"(
     #version 120
 
@@ -671,7 +671,7 @@ bool DexelStock::InitOn(
     }
     mCpu = cpu;
 
-    // what the card takes: six float colour targets for the subtraction
+    // what the card takes: six float color targets for the subtraction
     GLint maxDrawBuffers = 0;
     glGetIntegerv(GL_MAX_DRAW_BUFFERS, &maxDrawBuffers);
     if (!mCpu && maxDrawBuffers < 6) {
@@ -844,7 +844,7 @@ bool DexelStock::InitOn(
             continue;
         }
 
-        // the textures, two sets, and the stock's first stretch for its colour
+        // the textures, two sets, and the stock's first stretch for its color
         for (int set = 0; set < 2; set++) {
             for (unsigned int& t : g.tex[set]) {
                 t = makeFloatTexture(g.w, g.h, nullptr);

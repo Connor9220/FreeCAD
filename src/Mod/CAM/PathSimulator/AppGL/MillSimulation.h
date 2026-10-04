@@ -42,7 +42,7 @@
 
 #define VIEWITEM_SIMULATION 1
 #define VIEWITEM_BASE_SHAPE 2
-#define VIEWITEM_COMPARE 4  // the model alone, coloured where the cut stock differs from it
+#define VIEWITEM_COMPARE 4  // the model alone, colored where the cut stock differs from it
 #define VIEWITEM_MAX 8
 
 namespace CAMSimulator
@@ -183,7 +183,7 @@ public:
     void SetBaseObject(const std::vector<Vertex>& verts, const std::vector<GLushort>& indices);
     // the vises, clamps and fixtures, in pieces each within short indices: shown, and found
     // where a tool or its holder hits them
-    // a piece's colour, where it has one of its own
+    // a piece's color, where it has one of its own
     struct Color
     {
         bool own = false;
@@ -208,7 +208,7 @@ public:
     void EnableIncremental(bool b);
     void EnableDexel(bool b);
     void EnableAxes(bool b);
-    // FreeCAD's axis colours and the origin's, 0xRRGGBBAA
+    // FreeCAD's axis colors and the origin's, 0xRRGGBBAA
     void SetAxisColors(unsigned long x, unsigned long y, unsigned long z, unsigned long origin);
     // pixels a screen point, for the indicators' sizes
     void SetPixelRatio(float ratio);

@@ -118,8 +118,8 @@ public:
     // touched meshed again, for about budgetMs. True when it is up to date.
     bool Sync(double budgetMs);
 
-    // Draw the stock's surface into the bound geometry buffer: colour, position and normal, as
-    // the mesh. pointScale is the pixels a millimetre covers at unit depth (perspective) or
+    // Draw the stock's surface into the bound geometry buffer: color, position and normal, as
+    // the mesh. pointScale is the pixels a millimeter covers at unit depth (perspective) or
     // anywhere (orthographic), for drawing the rays' ends as discs instead, to look at them.
     void Render(
         const mat4x4 view,
@@ -162,7 +162,7 @@ private:
         int h = 0;
         unsigned int tex[2][6] = {};  // two sets: ends 0-3, 4-7, 8-11, then their normals
         unsigned int fbo[2] = {};
-        unsigned int initTex = 0;  // each ray's first stretch as set up, for the stock's colour
+        unsigned int initTex = 0;  // each ray's first stretch as set up, for the stock's color
         unsigned int pointVbo = 0;
         int nPoints = 0;
         std::vector<float> initEnds;     // stride a ray, for Reset

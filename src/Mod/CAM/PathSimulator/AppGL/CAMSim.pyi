@@ -74,7 +74,7 @@ class CAMSim(BaseClass):
         its holder hits them, never cut. With cuttable, what may be cut into, soft jaws: the
         tool cutting them a warning that does not stop the simulation, its holder still a hit.
         Drawn in color, red, green and blue from 0 to 1, else the simulator's own; with append,
-        added to what was set before, so each colour of the workholding can be set in turn
+        added to what was set before, so each color of the workholding can be set in turn
         """
         ...
 

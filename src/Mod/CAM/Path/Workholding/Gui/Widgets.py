@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-FileCopyrightText: 2026 Billy Huddleston <billy@ivdc.com>
+# SPDX-FileNotice: Part of the FreeCAD project.
+
+################################################################################
+#                                                                              #
+#   FreeCAD is free software: you can redistribute it and/or modify            #
+#   it under the terms of the GNU Lesser General Public License as             #
+#   published by the Free Software Foundation, either version 2.1              #
+#   of the License, or (at your option) any later version.                     #
+#                                                                              #
+#   FreeCAD is distributed in the hope that it will be useful,                 #
+#   but WITHOUT ANY WARRANTY; without even the implied warranty                #
+#   of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.                    #
+#   See the GNU Lesser General Public License for more details.                #
+#                                                                              #
+#   You should have received a copy of the GNU Lesser General Public           #
+#   License along with FreeCAD. If not, see https://www.gnu.org/licenses       #
+#                                                                              #
+################################################################################
+
+"""The widgets the sections of the workholding panel share: drop-downs, notes, length boxes, the
+browse button and the part's sides."""
+
+import FreeCAD
+
+from Path.Workholding.Constants import ICON_BLACK, ICON_SWAP, ICON_WHITE
+
+if FreeCAD.GuiUp:
+    from PySide import QtCore, QtGui, QtWidgets
+
+translate = FreeCAD.Qt.translate
+
+
+def mmBox(ui, tip=None, value=None, step=None, minimum=None):
+    """mmBox(ui, tip=None, value=None, step=None, minimum=None) ... a box for a length in mm, as
+    the user's units show it, made by ui, a FreeCADGui.UiLoader: its tooltip, value, the step a
+    click takes and its minimum where given."""
+    box = ui.createWidget("Gui::QuantitySpinBox")
+    box.setProperty("unit", "mm")
+    if minimum is not None:
+        box.setProperty("minimum", minimum)
+    if step is not None:
+        box.setProperty("singleStep", step)
+    if value is not None:
+        box.setProperty("rawValue", value)
+    if tip is not None:
+        box.setToolTip(tip)
+    return box
+
+
+def browseButton(tip):
+    """browseButton(tip) ... a button opening the workholding browser, to choose another."""
+    button = QtWidgets.QPushButton(translate("CAM_Vise", "Browse…"))
+    button.setIcon(QtGui.QIcon.fromTheme("edit-find", QtGui.QIcon(":/icons/zoom-in.svg")))
+    button.setToolTip(tip)
+    return button
+
+
+def themedIcon(resource, size=32):
+    """themedIcon(resource, size=32) ... a black icon of the Job panel's, white on a dark theme as the Job panel shows it."""
+    import Path.Base.Gui.Theme as PathGuiTheme
+
+    if not PathGuiTheme.is_dark_theme():
+        return QtGui.QIcon(resource)
+    f = QtCore.QFile(resource)
+    if not f.open(QtCore.QFile.ReadOnly):
+        return QtGui.QIcon(resource)
+    # black and white swapped
+    content = bytes(f.readAll())
+    content = content.replace(ICON_BLACK, ICON_SWAP).replace(ICON_WHITE, ICON_BLACK)
+    content = content.replace(ICON_SWAP, ICON_WHITE)
+    f.close()
+    from PySide import QtSvg
+
+    pixmap = QtGui.QPixmap(size, size)
+    pixmap.fill(QtCore.Qt.transparent)
+    painter = QtGui.QPainter(pixmap)
+    QtSvg.QSvgRenderer(QtCore.QByteArray(content)).render(painter)
+    painter.end()
+    return QtGui.QIcon(pixmap)
+
+
+def sides():
+    """sides() ... the sides of a part, as the view cube names them, and the Job's axis each faces out."""
+    return [
+        (translate("CAM_Vise", "Bottom"), "-Z"),
+        (translate("CAM_Vise", "Top"), "+Z"),
+        (translate("CAM_Vise", "Front"), "-Y"),
+        (translate("CAM_Vise", "Back"), "+Y"),
+        (translate("CAM_Vise", "Left"), "-X"),
+        (translate("CAM_Vise", "Right"), "+X"),
+    ]
+
+
+class Note(QtWidgets.QLabel if FreeCAD.GuiUp else object):
+    """A line of the panel saying how things stand: wrapped, and gone while it says nothing."""
+
+    def __init__(self):
+        super().__init__()
+        self.setWordWrap(True)
+        self.setVisible(False)
+
+    def setText(self, text):
+        super().setText(text)
+        self.setVisible(bool(text))
+
+
+def combo(wide=False):
+    """combo(wide=False) ... a drop-down that drops down below itself as a list; a wide one no wider than its shortest
+    choices in the panel, its list as wide as its longest."""
+    combo = QtWidgets.QComboBox()
+    combo.setStyleSheet("QComboBox { combobox-popup: 0; }")
+    combo.setMaxVisibleItems(16)
+    if wide:
+        combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(6)
+    return combo
+
+
+def fitList(combo):
+    """fitList(combo) ... the drop-down's list as wide as its longest choice."""
+    view = combo.view()
+    view.setMinimumWidth(view.sizeHintForColumn(0) + 2 * view.frameWidth() + 24)

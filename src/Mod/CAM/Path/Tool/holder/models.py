@@ -24,7 +24,7 @@
 """Tool holders: the part of the spindle's nose a bit sticks out of.
 
 A holder is kept as data, the outline that matters for cutting: points of
-(radius, height) in millimetres, revolved about the tool's axis, from the face
+(radius, height) in millimeters, revolved about the tool's axis, from the face
 the bit comes out of upward. A bit's stickout is measured from that face. The
 outline is all a simulation or a collision check needs, so no model is opened
 or recomputed to use one.

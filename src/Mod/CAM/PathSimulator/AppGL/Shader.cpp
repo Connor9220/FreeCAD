@@ -527,9 +527,9 @@ const char* FragShaderGeom = R"(
     }
 )";
 
-// The model's surface against the cut stock: as the geometric shader, its colour where the
+// The model's surface against the cut stock: as the geometric shader, its color where the
 // material left meets its surface; red where the cuts went in past it, and, when comparing, the
-// cut colour where material is left on it. Along the rays most square to the surface, the four
+// cut color where material is left on it. Along the rays most square to the surface, the four
 // round the point, each saying how far the material reaches beyond the surface, or how far in
 // the cuts went; all four must agree, the rays being a step apart.
 const char* VertShaderGeomCompare = R"(

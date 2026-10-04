@@ -252,7 +252,7 @@ void AxisOverlay::Glyph(char c, const float at[2], float size, float width, cons
         default:
             return;
     }
-    // centred on at
+    // centered on at
     for (int i = 0; i < n; i++) {
         const float a[2] = {at[0] + (strokes[i].x0 - 0.35f) * size, at[1] + (strokes[i].y0 - 0.5f) * size};
         const float b[2] = {at[0] + (strokes[i].x1 - 0.35f) * size, at[1] + (strokes[i].y1 - 0.5f) * size};
@@ -322,7 +322,7 @@ void AxisOverlay::Triad(const mat4x4 clip, const vec3 origin, const vec3 axes[3]
         }
         float color[4];
         for (int c = 0; c < 4; c++) {
-            // a local frame in lighter shades of the same colours
+            // a local frame in lighter shades of the same colors
             color[c] = local && c < 3 ? mColors[i][c] + (1 - mColors[i][c]) * 0.45f : mColors[i][c];
         }
         Arrow(o, tips[i], (local ? 2.f : 3.f) * s, (local ? 9.f : 11.f) * s, color);
@@ -381,7 +381,7 @@ void AxisOverlay::Rotary(
             Segment(sa, sb, 1.5f * s, faint);
         }
     }
-    // the arrow round the axis at its positive end: from u towards v is a positive turn
+    // the arrow round the axis at its positive end: from u toward v is a positive turn
     vec3 e = {1, 0, 0};
     if (std::fabs(d[0]) > 0.6f) {
         e[0] = 0;

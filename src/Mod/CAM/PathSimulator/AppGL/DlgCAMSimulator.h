@@ -81,7 +81,7 @@ public:
     std::vector<Vertex> verts;
     std::vector<GLushort> indices;
     bool needsUpdate = false;
-    // the colour it is drawn in, where it has one of its own
+    // the color it is drawn in, where it has one of its own
     bool colored = false;
     float color[3] = {0, 0, 0};
 };
@@ -160,7 +160,7 @@ public:
     void setRotateEnabled(bool b);
 
     void setBackgroundColor(const QColor& c);
-    // FreeCAD's axis colours and the origin's, 0xRRGGBBAA
+    // FreeCAD's axis colors and the origin's, 0xRRGGBBAA
     void setAxisColors(unsigned long x, unsigned long y, unsigned long z, unsigned long origin);
     void setPathColor(const QColor& normal, const QColor& rapid);
 

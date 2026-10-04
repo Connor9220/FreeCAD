@@ -490,7 +490,6 @@ class CAMSimulation:
             self.baseShape = Part.makeCompound([o.Shape for o in j.Model.OutList])
         else:
             self.baseShape = None
-        self.workholdingShape = PathJob.workholdingShape(j)
         self.workholdingLook = workholdingLook(j)
         self.softJawShape = PathJob.workholdingShape(j, cuttable=True)
 
@@ -603,14 +602,10 @@ class CAMSimulation:
         self.millSim.BeginSimulation(self.stock, self.quality)
         if self.baseShape is not None:
             self.millSim.SetBaseShape(self.baseShape, 1)
-        # the vises and clamps, shown and hit, never cut, in the colours the model has them;
+        # the vises and clamps, shown and hit, never cut, in the colors the model has them;
         # soft jaws, cut into with a warning
-        look = getattr(self, "workholdingLook", None)
-        if look:
-            for i, (shape, colour) in enumerate(look):
-                self.millSim.SetWorkholding(shape, 1, color=colour, append=i > 0)
-        elif getattr(self, "workholdingShape", None) is not None:
-            self.millSim.SetWorkholding(self.workholdingShape, 1)
+        for i, (shape, color) in enumerate(getattr(self, "workholdingLook", None) or []):
+            self.millSim.SetWorkholding(shape, 1, color=color, append=i > 0)
         if getattr(self, "softJawShape", None) is not None:
             self.millSim.SetWorkholding(self.softJawShape, 1, cuttable=True)
 
@@ -618,8 +613,8 @@ class CAMSimulation:
         """Cancel the simulation"""
 
 
-def _faceColours(part, count):
-    """The colours of a piece of workholding's faces, as the model shows them: a linked part's
+def _faceColors(part, count):
+    """The colors of a piece of workholding's faces, as the model shows them: a linked part's
     those of what it links to; None for each where it has none."""
     target = part
     if part.isDerivedFrom("App::Link") and getattr(part, "LinkedObject", None) is not None:
@@ -627,24 +622,24 @@ def _faceColours(part, count):
     view = getattr(target, "ViewObject", None)
     if view is None:
         return [None] * count
-    colours = [tuple(c[:3]) for c in getattr(view, "DiffuseColor", []) or []]
-    if len(colours) != count:
+    colors = [tuple(c[:3]) for c in getattr(view, "DiffuseColor", []) or []]
+    if len(colors) != count:
         shape = getattr(view, "ShapeColor", None)
-        colours = [tuple(shape[:3]) if shape else None] * count
-    return colours
+        colors = [tuple(shape[:3]) if shape else None] * count
+    return colors
 
 
 def workholdingLook(job):
     """workholdingLook(job) ... the job's hard workholding as the simulator draws it: its faces
-    grouped by the colour the model shows them in, (compound, colour) pairs, colour None for
+    grouped by the color the model shows them in, (compound, color) pairs, color None for
     those with none of their own; none at all when it has no workholding."""
     groups = {}
     for part, shape in PathJob.workholdingParts(job):
         faces = shape.Faces
-        for face, colour in zip(faces, _faceColours(part, len(faces))):
-            key = tuple(round(c, 3) for c in colour) if colour else None
+        for face, color in zip(faces, _faceColors(part, len(faces))):
+            key = tuple(round(c, 3) for c in color) if color else None
             groups.setdefault(key, []).append(face)
-    return [(Part.makeCompound(faces), colour) for colour, faces in groups.items()]
+    return [(Part.makeCompound(faces), color) for color, faces in groups.items()]
 
 
 class CommandCAMSimulate:

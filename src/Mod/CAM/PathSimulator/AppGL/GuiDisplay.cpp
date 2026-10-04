@@ -42,7 +42,7 @@
 namespace CAMSimulator
 {
 
-// The colour a rotary axis is shown in: its turns under the slider and its name in the label
+// The color a rotary axis is shown in: its turns under the slider and its name in the label
 static QColor axisColor(int axis)
 {
     static const QColor colors[] = {
@@ -193,7 +193,7 @@ private:
     std::vector<SimTimeSpan> spans;
 };
 
-// Bars under the stage slider for when the rotary axes turn, a row and a colour for each axis
+// Bars under the stage slider for when the rotary axes turn, a row and a color for each axis
 class IndexTimeline: public QWidget
 {
 public:
@@ -218,7 +218,7 @@ public:
         spans = s;
         axisNames = names;
 
-        // the legend: each axis's name in its colour
+        // the legend: each axis's name in its color
         QString tip = QObject::tr("When the rotary axes turn:");
         for (int k = 0; k < names.size(); k++) {
             tip += QStringLiteral(" <b style='color:%1'>%2</b>").arg(axisColor(k).name(), names[k]);
@@ -241,7 +241,7 @@ protected:
         const int rowHeight = std::max(2, (height() - 1) / rows);
         QPainter painter(this);
 
-        // each row's axis, named in its colour at the left
+        // each row's axis, named in its color at the left
         QFont font = painter.font();
         font.setBold(true);
         font.setPixelSize(std::max(6, rowHeight));
@@ -421,7 +421,7 @@ void GuiDisplay::setIndexSpans(const std::vector<SimTimeSpan>& spans, const QStr
 
 void GuiDisplay::setIndexAngles(const QStringList& axisNames, const std::vector<float>& angles)
 {
-    // while the rotaries turn, their positions in place of the feed, each in its axis's colour
+    // while the rotaries turn, their positions in place of the feed, each in its axis's color
     QString text = tr("Index");
     for (size_t k = 0; k < angles.size() && (int)k < axisNames.size(); k++) {
         text += QStringLiteral(" &nbsp;<b style='color:%1'>%2</b> %3°")
@@ -584,7 +584,7 @@ void GuiDisplay::showView()
         text = tr("Compare");
         tip = tr(
             "The model compared with the cut stock: red where the cuts went past it, the cut "
-            "colour where stock is left on it. Click for the stock."
+            "color where stock is left on it. Click for the stock."
         );
     }
     else if (stockVisible && baseVisible) {

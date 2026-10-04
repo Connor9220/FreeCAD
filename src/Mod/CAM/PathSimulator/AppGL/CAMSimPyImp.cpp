@@ -220,7 +220,7 @@ PyObject* CAMSimPy::SetWorkholding(PyObject* args, PyObject* kwds)
         )) {
         return nullptr;
     }
-    // the colour it is drawn in, red, green and blue from 0 to 1; none, the simulator's own
+    // the color it is drawn in, red, green and blue from 0 to 1; none, the simulator's own
     float color[3] = {0, 0, 0};
     bool colored = pColor != Py_None;
     if (colored

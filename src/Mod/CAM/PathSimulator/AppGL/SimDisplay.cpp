@@ -702,7 +702,7 @@ void SimDisplay::UpdateCameraProjection(const SoCamera& camera)
 #endif
 
     // How deep the scene goes past the stock's middle: the tool and its holder, the vise, stand
-    // well beyond a small stock, so no less than a metre.
+    // well beyond a small stock, so no less than a meter.
     const float depth = std::max(mMaxStockDimension * 10.0f, 1000.0f);
 
     if (perspective) {

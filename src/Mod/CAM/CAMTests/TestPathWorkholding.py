@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-FileCopyrightText: 2026 Billy Huddleston <billy@ivdc.com>
+# SPDX-FileNotice: Part of the FreeCAD project.
 
 ################################################################################
 #                                                                              #
@@ -27,9 +29,10 @@ import tempfile
 
 import Part
 import Path.Main.Job as PathJob
-import Path.Main.Workholding as PathWorkholding
-import Path.Main.WorkholdingCheck as PathWorkholdingCheck
-import Path.Main.WorkholdingParallels as PathParallels
+import Path.Workholding.Vise as PathWorkholding
+import Path.Workholding.Source as PathSource
+import Path.Workholding.Check as PathWorkholdingCheck
+import Path.Workholding.Parallels as PathParallels
 import CAMTests.PathTestUtils as PathTestUtils
 
 from FreeCAD import Vector
@@ -70,7 +73,7 @@ class TestPathWorkholding(PathTestUtils.PathTestBase):
         self.assertEqual(PathWorkholding.viseSetup(self.vise)["jawHeight"], 30)
 
     def test01_part_moves_into_the_vise(self):
-        """The stock goes against the fixed jaw, centred across, held as deep as asked."""
+        """The stock goes against the fixed jaw, centered across, held as deep as asked."""
         length = self.stock().XLength
         done = PathWorkholding.seat(self.job, self.vise, grip=12)
         bb = self.stock()
@@ -94,7 +97,7 @@ class TestPathWorkholding(PathTestUtils.PathTestBase):
         self.assertRoughly(self.vise.Placement.Base.z, before.ZMin + 12)
 
     def test03_offset_along_the_jaws(self):
-        """Offset moves the stock along the jaws from the centre."""
+        """Offset moves the stock along the jaws from the center."""
         PathWorkholding.seat(self.job, self.vise, grip=5, offset=10)
         bb = self.stock()
         self.assertRoughly((bb.YMin + bb.YMax) / 2, 60)
@@ -591,7 +594,7 @@ class TestPathWorkholdingAdd(PathTestUtils.PathTestBase):
         the moving one following the jaw; hard ones crashed into, soft ones cut; on the floor,
         gone."""
         vise = PathWorkholding.addVise(self.job, self.part)
-        inch = PathParallels.INCH
+        inch = FreeCAD.Units.Inch.Value
         entry = [s for s in PathParallels.Sets if s["unit"] == "Imperial"][0]
         kit = PathParallels.parallels(entry, inch / 8, 0.5 * inch, 5 * inch)
         self.assertEqual(kit.name, 'Imperial, Standard, 1/8", 1/2", 5" long')
@@ -695,19 +698,19 @@ class TestPathWorkholdingAdd(PathTestUtils.PathTestBase):
 
     def test18_parallel_sizes_named(self):
         """Sizes named as a set has them: inches as a machinist writes them, else mm."""
-        inch = PathParallels.INCH
+        inch = FreeCAD.Units.Inch.Value
         self.assertEqual(PathParallels.label(1.1875 * inch, "Imperial"), '1-3/16"')
         self.assertEqual(PathParallels.label(inch / 32, "Imperial"), '1/32"')
         self.assertEqual(PathParallels.label(2 * inch, "Imperial"), '2"')
         self.assertEqual(PathParallels.label(14.0, "Metric"), "14 mm")
-        units = {s["unit"] for s in PathParallels.catalogue()}
+        units = {s["unit"] for s in PathParallels.catalog()}
         self.assertEqual(units, {"Imperial", "Metric"})
 
     def test19_grip_jaws(self):
         """grip jaws in place of the plates: steel jaws, hardened grips standing proud of their
         tops; the stock on the jaws' tops, the grips' teeth bitten into it. The jaws
         are cut, the grips crashed into; they follow the moving jaw, and go with hard jaws."""
-        import Path.Main.WorkholdingJaws as PathJaws
+        import Path.Workholding.Jaws as PathJaws
 
         vise = PathWorkholding.addVise(self.job, self.part)
         defaults = PathJaws.GripJaw
@@ -759,12 +762,12 @@ class TestPathWorkholdingStations(PathTestUtils.PathTestBase):
     """A vise of two stations: its stock seated in either, the vise shared by two Jobs, each in
     a station of its own."""
 
-    # the centre jaw's thickness: station 2's fixed face on its far side, turned to face away
-    centre = 20.0
+    # the center jaw's thickness: station 2's fixed face on its far side, turned to face away
+    center = 20.0
 
     def setUp(self):
         # a vise's own file: station 1 the vise's own frame, its moving jaw driven by Opening;
-        # station 2 turned about Z on the centre jaw's far side, its moving jaw driven by
+        # station 2 turned about Z on the center jaw's far side, its moving jaw driven by
         # Opening2, both drawn closed
         self.source = FreeCAD.newDocument("TestStationsSource")
         part = self.source.addObject("App::Part", "Vise")
@@ -772,12 +775,12 @@ class TestPathWorkholdingStations(PathTestUtils.PathTestBase):
         body = self.source.addObject("Part::Box", "Body")
         body.Length, body.Width, body.Height = 100, 300, 10
         body.Placement.Base = Vector(-50, -150, -40)
-        centre = self.source.addObject("Part::Feature", "CentreJaw")
-        centre.Shape = Part.makeBox(100, self.centre, 25, Vector(-50, 0, -25))
+        center = self.source.addObject("Part::Feature", "CenterJaw")
+        center.Shape = Part.makeBox(100, self.center, 25, Vector(-50, 0, -25))
         moving = self.source.addObject("Part::Feature", "MovingJaw")
         moving.Shape = Part.makeBox(100, 10, 25, Vector(-50, -10, -25))
         moving2 = self.source.addObject("Part::Feature", "MovingJaw2")
-        moving2.Shape = Part.makeBox(100, 10, 25, Vector(-50, self.centre, -25))
+        moving2.Shape = Part.makeBox(100, 10, 25, Vector(-50, self.center, -25))
         settings = self.source.addObject("App::VarSet", "Settings")
         for name in ("Opening", "Opening2", "JawHeight", "MaxOpening"):
             settings.addProperty("App::PropertyLength", name, "Vise", "")
@@ -788,13 +791,13 @@ class TestPathWorkholdingStations(PathTestUtils.PathTestBase):
         settings.JawHeight, settings.MaxOpening = 30, 150
         settings.Stations = 2
         self.frame2 = FreeCAD.Placement(
-            Vector(0, self.centre, 0), FreeCAD.Rotation(Vector(0, 0, 1), 180)
+            Vector(0, self.center, 0), FreeCAD.Rotation(Vector(0, 0, 1), 180)
         )
         settings.StationFrames = [FreeCAD.Placement(), self.frame2]
         settings.ViseSchema = 2
         for name in ("JawHeight", "MaxOpening", "Stations", "StationFrames", "ViseSchema"):
             settings.setEditorMode(name, ["ReadOnly"])
-        part.addObjects([body, centre, moving, moving2, settings])
+        part.addObjects([body, center, moving, moving2, settings])
         moving.setExpression(".Placement.Base.y", "-%s.Opening" % settings.Name)
         moving2.setExpression(".Placement.Base.y", "%s.Opening2" % settings.Name)
         self.source.recompute()
@@ -842,14 +845,14 @@ class TestPathWorkholdingStations(PathTestUtils.PathTestBase):
         self.assertEqual(len(PathWorkholding.stations(self.job.Stock)), 1)
 
     def test01_seated_in_station_two_part_moves(self):
-        """In station 2 the stock goes against its fixed face, on the centre jaw's far side,
+        """In station 2 the stock goes against its fixed face, on the center jaw's far side,
         and Opening2 closes on it; station 1 stays as it was."""
         vise = PathWorkholding.addVise(self.job, self.part)
         PathWorkholding.setStation(vise, 2)
         length = self.stock().YLength
         done = PathWorkholding.seat(self.job, vise, grip=5)
         bb = self.stock()
-        self.assertRoughly(bb.YMin, self.centre)
+        self.assertRoughly(bb.YMin, self.center)
         self.assertRoughly((bb.XMin + bb.XMax) / 2, 0)
         self.assertRoughly(bb.ZMin, -5)
         self.assertRoughly(vise.Opening2.Value, length)
@@ -878,7 +881,7 @@ class TestPathWorkholdingStations(PathTestUtils.PathTestBase):
         self.assertRoughly(station.Base.y, before.YMin)
         self.assertRoughly(station.Base.x, (before.XMin + before.XMax) / 2)
         self.assertRoughly(station.Base.z, before.ZMin + 5)
-        self.assertRoughly(vise.Placement.Base.y, before.YMin - self.centre)
+        self.assertRoughly(vise.Placement.Base.y, before.YMin - self.center)
         self.assertRoughly(vise.Opening2.Value, before.YLength)
         # turned: the station as asked, the vise with it
         turn = PathWorkholding.orientation("+Z", "+X")
@@ -899,14 +902,14 @@ class TestPathWorkholdingStations(PathTestUtils.PathTestBase):
         made = PathWorkholding.parallelsOf(vise)
         thick = vise.ParallelThickness.Value
         fixed = made["Fixed"].Shape.BoundBox
-        self.assertRoughly(fixed.YMin, self.centre)
-        self.assertRoughly(fixed.YMax, self.centre + thick)
+        self.assertRoughly(fixed.YMin, self.center)
+        self.assertRoughly(fixed.YMax, self.center + thick)
         self.assertRoughly(fixed.ZMin, -30)
         vise.Opening2 = 50
         self.doc.recompute()
         moving = made["Moving"].Shape.BoundBox
-        self.assertRoughly(moving.YMax, self.centre + 50)
-        self.assertRoughly(moving.YMin, self.centre + 50 - thick)
+        self.assertRoughly(moving.YMax, self.center + 50)
+        self.assertRoughly(moving.YMin, self.center + 50 - thick)
         self.assertRoughly(self.stock().ZMin, -20)
 
     def test04_shared(self):
@@ -1019,7 +1022,7 @@ class TestPathWorkholdingStations(PathTestUtils.PathTestBase):
         self.doc.recompute()
         self.assertTrue(owner.Placement.isSame(placement, 1e-9))
         self.assertEqual(PathWorkholding.seating(other, follower)["orientation"], ("-Z", "+Y"))
-        # turned back as modelled
+        # turned back as modeled
         PathWorkholding.seat(
             self.job, owner, grip=5, rotation=PathWorkholding.orientation("+Z", "+Y")
         )
@@ -1137,7 +1140,7 @@ class TestPathWorkholdingRecover(PathTestUtils.PathTestBase):
 
     def test00_lost(self):
         """Its parts unlinked, by the file and the object each was linked to."""
-        lost = PathWorkholding.lostParts(self.doc)
+        lost = PathSource.lostParts(self.doc)
         self.assertEqual(list(lost), ["vise.FCStd"])
         self.assertEqual(
             sorted(n for _, n in lost["vise.FCStd"]),
@@ -1147,13 +1150,13 @@ class TestPathWorkholdingRecover(PathTestUtils.PathTestBase):
     def test01_found_in_a_folder(self):
         """Found by its name in a folder vises are kept in: linked again, nothing asked."""
         asked = []
-        found = PathWorkholding.recoverParts(
+        found = PathSource.recoverParts(
             self.doc, folders=[self.moved], library=[], askFile=lambda f: asked.append(f)
         )
         self.assertEqual(found, {"vise.FCStd": os.path.join(self.moved, "vise.FCStd")})
         self.assertEqual(asked, [])
         self.assertLinked(self.reopened())
-        self.assertEqual(PathWorkholding.lostParts(self.doc), {})
+        self.assertEqual(PathSource.lostParts(self.doc), {})
 
     def test02_got_from_a_library(self):
         """Not in the folders and not found by the user, but a library has it: downloaded into the
@@ -1177,7 +1180,7 @@ class TestPathWorkholdingRecover(PathTestUtils.PathTestBase):
             json.dump({"format": 1, "items": [item]}, f)
         here = os.path.join(self.dir, "here")
         asked = []
-        found = PathWorkholding.recoverParts(
+        found = PathSource.recoverParts(
             self.doc,
             folders=[here],
             library=[index],
@@ -1190,7 +1193,7 @@ class TestPathWorkholdingRecover(PathTestUtils.PathTestBase):
 
     def test03_picked(self):
         """Not found anywhere: the file picked."""
-        found = PathWorkholding.recoverParts(
+        found = PathSource.recoverParts(
             self.doc,
             folders=[os.path.join(self.dir, "nowhere")],
             library=[],
@@ -1233,7 +1236,7 @@ class TestPathWorkholdingRecover(PathTestUtils.PathTestBase):
         vise.SourceLibrary = index
         vise.SourceItem = "the-vise"
         here = os.path.join(self.dir, "here")
-        found = PathWorkholding.recoverParts(
+        found = PathSource.recoverParts(
             self.doc, folders=[here], library=[], askLibrary=lambda f, i: True
         )
         self.assertEqual(found["vise.FCStd"], os.path.join(here, "renamed.FCStd"))
@@ -1255,18 +1258,18 @@ class TestPathWorkholdingRecover(PathTestUtils.PathTestBase):
             setattr(settings, name, value)
         source.save()
         FreeCAD.closeDocument(source.Name)
-        found = PathWorkholding.recoverParts(self.doc, folders=[self.moved], library=[])
+        found = PathSource.recoverParts(self.doc, folders=[self.moved], library=[])
         self.assertEqual(found["vise.FCStd"], path)
         self.assertLinked(vise)
         self.assertEqual(vise.SourceSha256, added)
         self.assertEqual(
             (vise.SourceLibrary, vise.SourceItem), ("https://example.com/lib", "the-vise")
         )
-        changed = PathWorkholding.changedSources(self.doc)
+        changed = PathSource.changedSources(self.doc)
         self.assertEqual(changed, [(vise, path)])
-        PathWorkholding.acceptChanged(changed)
+        PathSource.acceptChanged(changed)
         self.assertNotEqual(vise.SourceSha256, added)
-        self.assertEqual(PathWorkholding.changedSources(self.doc), [])
+        self.assertEqual(PathSource.changedSources(self.doc), [])
 
     def test07_library_copy_changed(self):
         """The library's copy is not the one it was added with: said so when it is offered."""
@@ -1292,7 +1295,7 @@ class TestPathWorkholdingRecover(PathTestUtils.PathTestBase):
                 f,
             )
         offered = []
-        PathWorkholding.recoverParts(
+        PathSource.recoverParts(
             self.doc,
             folders=[os.path.join(self.dir, "here")],
             library=[index],
@@ -1302,10 +1305,10 @@ class TestPathWorkholdingRecover(PathTestUtils.PathTestBase):
 
     def test04_left_lost(self):
         """Nothing found or picked: left as it is, its settings kept."""
-        found = PathWorkholding.recoverParts(
+        found = PathSource.recoverParts(
             self.doc, folders=[], library=[], askLibrary=lambda f, i: False, askFile=lambda f: None
         )
         self.assertEqual(found, {"vise.FCStd": None})
         vise = self.reopened()
         self.assertRoughly(vise.Opening.Value, 42)
-        self.assertEqual(list(PathWorkholding.lostParts(self.doc)), ["vise.FCStd"])
+        self.assertEqual(list(PathSource.lostParts(self.doc)), ["vise.FCStd"])

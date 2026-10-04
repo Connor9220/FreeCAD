@@ -30,7 +30,7 @@
 namespace CAMSimulator
 {
 
-// Axis indicators drawn over the simulation, in the colours FreeCAD gives its axes: the
+// Axis indicators drawn over the simulation, in the colors FreeCAD gives its axes: the
 // machine's axes in a corner, the work coordinates at the program's origin, the current
 // operation's work plane, and each rotary axis with an arrow round it the way it turns. All
 // of it is drawn flat on the screen, each stroke over a dark outline so it reads on any stock.
@@ -39,7 +39,7 @@ class AxisOverlay
 public:
     ~AxisOverlay();
 
-    // colours as FreeCAD keeps them, 0xRRGGBBAA
+    // colors as FreeCAD keeps them, 0xRRGGBBAA
     void SetColors(unsigned long x, unsigned long y, unsigned long z, unsigned long origin);
 
     // start a frame of the given size in pixels, scale being pixels per screen point
@@ -56,8 +56,8 @@ public:
     void Origin(const mat4x4 clip, const vec3 origin);
 
     // a rotary axis: its line through pivot along dir, half the given length either way, and
-    // at its positive end an arrow round it the way positive turns go, labelled with name;
-    // colour is that of the linear axis it turns about, 0 to 2
+    // at its positive end an arrow round it the way positive turns go, labeled with name;
+    // color is that of the linear axis it turns about, 0 to 2
     void Rotary(
         const mat4x4 clip,
         const vec3 pivot,
