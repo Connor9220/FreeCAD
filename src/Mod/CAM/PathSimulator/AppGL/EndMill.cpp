@@ -184,13 +184,27 @@ void EndMill::VerticalSweep(float distance, Shape& out) const
         swept.push_back(r);
         swept.push_back(z);
     };
+    // a step in width, at a corner of the outline, gets a point either side of it; along a
+    // slope the two would be a hair apart and make a band of slivers, so it gets one
+    const float step = 0.01f;
     for (auto it = fine.rbegin(); it != fine.rend(); ++it) {
         const float h = *it;
-        if (h < zHi + distance - eps) {
-            add(widest(h + eps), h);
+        const bool top = h >= zHi + distance - eps;
+        const bool bottom = h <= zLo + eps;
+        const float over = top ? 0.f : widest(h + eps);
+        const float under = bottom ? 0.f : widest(h - eps);
+        if (bottom) {
+            // a flat end's rim; a point's tip is the axis point added below
+            if (over >= step) {
+                add(over, h);
+            }
         }
-        if (h > zLo + eps) {
-            add(widest(h - eps), h);
+        else if (top || std::fabs(over - under) < step) {
+            add(top ? under : std::max(over, under), h);
+        }
+        else {
+            add(over, h);
+            add(under, h);
         }
     }
     add(0.f, zLo);
