@@ -1652,13 +1652,16 @@ void MillSimulation::TakeCollisions()
             };
             const bool holder = hit.kind == HolderMeetsStock;
             const bool shank = hit.kind == ShankMeetsStock;
+            const bool retract = hit.kind == RapidIntoStock && RetractsAt(hit.seg);
             Base::Console().warning(
                 "CAM Simulator: {}tool {} {} the stock{}{} at X {} Y {} Z {}{}\n",
                 holder ? "the holder of "
                     : shank ? "the shank, above the cutting edges, of "
                             : "",
                 p->endmill->toolId,
-                holder || shank ? "meets" : "rapids into",
+                holder || shank ? "meets"
+                    : retract       ? "retracts through"
+                                    : "rapids through",
                 op.empty() ? "" : " in ",
                 op,
                 length(hit.pos[0]),
@@ -1668,6 +1671,22 @@ void MillSimulation::TakeCollisions()
             );
         }
     }
+}
+
+bool MillSimulation::RetractsAt(int seg)
+{
+    // whether the segment moves the tool back along its axis, away from its tip, more than any
+    // other way
+    MillPathSegment* p = MillPathSegments[seg];
+    vec3 from, to;
+    mat4x4 rmat;
+    ToolPose(p, 0, from, rmat);
+    ToolPose(p, p->numSimSteps, to, rmat);
+    vec3 move;
+    vec3_sub(move, to, from);
+    const float length = vec3_len(move);
+    const vec3 axis = {rmat[2][0], rmat[2][1], rmat[2][2]};
+    return length > 1e-6f && vec3_mul_inner(move, axis) > 0.7f * length;
 }
 
 float MillSimulation::HitTime(const Collision& hit) const

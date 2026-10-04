@@ -211,6 +211,8 @@ protected:
     bool CollidesAt(int kind) const;
     void ToolPose(MillPathSegment* p, int step, vec3 pos, mat4x4 rmat);
     float HitTime(const Collision& hit) const;
+    // whether the segment moves the tool up its own axis: a rapid there retracts
+    bool RetractsAt(int seg);
     // the runs of collisions, as GetCollisionStages has them, in seconds
     std::vector<std::pair<float, float>> HitRuns() const;
     std::vector<float> MarksAndHits() const;
