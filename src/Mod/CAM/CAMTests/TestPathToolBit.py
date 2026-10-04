@@ -252,3 +252,37 @@ class TestPathToolBitDerivedShapes(PathTestWithAssets):
         cap = math.pi * junction**2 * (9 - junction) / 3
         shaft = math.pi * 4 * (50 - junction)
         self.assertAlmostEqual(solid.Volume, cap + shaft, delta=0.05)
+
+    def testSampleKeyway(self):
+        """The shipped 3/8in keyway loads, builds, and derives its cutting edge height"""
+        toolbit = self.assets.get("toolbit://375_Keyway")
+        self.assertIsInstance(toolbit, ToolBitKeyway)
+        obj = toolbit.attach_to_doc(self.doc)
+        self._recompute(obj)
+        self.assertEqual(obj.Units, "Imperial")
+        self.assertAlmostEqual(obj.CuttingEdgeHeight.getValueAs("in").Value, 0.125, places=6)
+        solid = obj.BitBody.Shape
+        self.assertTrue(solid.isValid())
+        self.assertAlmostEqual(solid.BoundBox.XMax, 0.375 * 25.4 / 2, places=4)
+        self.assertAlmostEqual(solid.BoundBox.ZMax, 2.0 * 25.4, places=4)
+
+    def testSampleLollipop(self):
+        """The shipped 1/4in lollipop loads, builds, and derives its cutting edge height"""
+        toolbit = self.assets.get("toolbit://250_Lollipop")
+        self.assertIsInstance(toolbit, ToolBitLollipop)
+        obj = toolbit.attach_to_doc(self.doc)
+        self._recompute(obj)
+        self.assertEqual(obj.Units, "Imperial")
+        expected = 0.125 + math.sqrt(0.125**2 - 0.0625**2)
+        self.assertAlmostEqual(obj.CuttingEdgeHeight.getValueAs("in").Value, expected, places=6)
+        solid = obj.BitBody.Shape
+        self.assertTrue(solid.isValid())
+        self.assertAlmostEqual(solid.BoundBox.XMax, 0.125 * 25.4, places=4)
+        self.assertAlmostEqual(solid.BoundBox.ZMax, 2.0 * 25.4, places=4)
+
+    def testDefaultLibraryHasTheSamples(self):
+        """The default library lists the keyway and lollipop samples"""
+        library = self.assets.get("toolbitlibrary://Default")
+        labels = [bit.label for bit in library]
+        self.assertIn("3/8in Keyway", labels)
+        self.assertIn("1/4in Lollipop", labels)
