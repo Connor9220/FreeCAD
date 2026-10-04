@@ -1556,10 +1556,12 @@ void MillSimulation::ProbeAlong(MillPathSegment* p, int fromStep, int toStep, in
     }
     const float stepLength = p->Length() / (float)std::max(1, p->numSimSteps);
     const float spacing = std::max(mDexel.Resolution(), holder ? 1.f : std::min(1.f, radius));
-    // the shank a little thinner: running along a wall its own flutes cut, it touches it, and
-    // the rays there end within half their spacing of where the wall is
+    // the shank, and the tool on a rapid, a little thinner: running along a wall its own flutes
+    // cut, or back up the hole it went down, it touches it, and the rays there end within half
+    // their spacing of where the wall is
     const float slack = 0.5f * mDexel.Resolution();
-    const float thinner = shank && radius > slack ? (radius - slack) / radius : 1.f;
+    const float thinner
+        = (shank || kind == RapidIntoStock) && radius > slack ? (radius - slack) / radius : 1.f;
     const int stride = stepLength > 0 ? std::max(1, (int)(spacing / stepLength)) : p->numSimSteps;
     for (int k = fromStep + 1; k <= toStep; k++) {
         if (k % stride != 0 && k != toStep) {
