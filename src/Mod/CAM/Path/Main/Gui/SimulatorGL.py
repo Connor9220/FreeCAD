@@ -67,6 +67,39 @@ def ClipProfile(profile, top):
     return [v for p in clipped for v in p]
 
 
+def ShankProfile(profile, bottom):
+    """A tool's profile, as AddTool takes it from the top down, above height bottom: from the
+    top at its rim down to the axis at bottom, as AddTool takes a holder's. None if none of it is
+    above bottom."""
+    points = list(zip(profile[0::2], profile[1::2]))
+    if not points or points[0][1] <= bottom or IsSame(points[0][1], bottom):
+        return None
+    above = []
+    for (r0, z0), (r1, z1) in zip(points, points[1:]):
+        above.append((r0, z0))
+        if z0 > bottom >= z1:
+            r = r0 + (r1 - r0) * (bottom - z0) / (z1 - z0)
+            above.append((r, bottom))
+            break
+    else:
+        return None
+    if above[-1][0] > 0:
+        above.append((0.0, bottom))
+    return [v for p in above for v in p]
+
+
+def CuttingHeight(tool, top):
+    """How far up from its tip the tool cuts: its CuttingEdgeHeight, if it has one below top, the
+    height of the tool as the simulator draws it; else None, the whole tool cutting."""
+    height = getattr(tool, "CuttingEdgeHeight", None)
+    if height is None:
+        return None
+    height = FreeCAD.Units.Quantity(height).getValueAs("mm").Value
+    if height <= 0 or height >= top or IsSame(height, top):
+        return None
+    return height
+
+
 def IsSame(x, y):
     """Check if two floats are the same within an epsilon"""
     return abs(x - y) < 0.0001
@@ -499,7 +532,18 @@ class CAMSimulation:
                 # what is above the holder's face is in it, cutting nothing: the holder meets
                 # what is there
                 toolProfile = ClipProfile(toolProfile, holder[-1])
-            self.millSim.AddTool(toolProfile, toolNumber, tool.Diameter, 1, holder=holder)
+            # above its cutting edges the tool cuts nothing either: where it meets material it
+            # rubs or crashes
+            shank = None
+            top = toolProfile[1] if len(toolProfile) > 1 else 0
+            cutting = CuttingHeight(tool, top)
+            if cutting is not None:
+                shank = ShankProfile(toolProfile, cutting)
+                if shank:
+                    toolProfile = ClipProfile(toolProfile, cutting)
+            self.millSim.AddTool(
+                toolProfile, toolNumber, tool.Diameter, 1, holder=holder, shank=shank
+            )
             # The simulation runs at the programmed feeds. As the cycle time
             # estimate does, a G0 without F moves at the tool controller's
             # rapid rate (its feed when none is set) and a feed move without

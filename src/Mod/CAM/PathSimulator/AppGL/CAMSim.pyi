@@ -51,10 +51,13 @@ class CAMSim(BaseClass):
         diameter: float,
         resolution: float,
         holder: list = None,
+        shank: list = None,
     ) -> Any:
         """
         Set the shape of the tool to be used for simulation, and the outline of the holder
-        it is set in, if any, drawn with it
+        it is set in, if any, drawn with it. shape is the part of the tool that cuts; shank, the
+        tool above its cutting edges, up to the holder: drawn with it, cutting nothing, a
+        collision where it meets the stock
         """
         ...
 

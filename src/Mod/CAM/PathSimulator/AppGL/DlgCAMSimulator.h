@@ -101,6 +101,7 @@ public:
     float diameter;
     float resolution;
     std::vector<float> holder;  // the outline of the holder it is set in, if any
+    std::vector<float> shank;   // the outline of the tool above its cutting edges, if known
 };
 
 class DlgCAMSimulator: public QOpenGLWidget
@@ -136,7 +137,8 @@ public:
         int toolNumber,
         float diameter,
         float resolution,
-        const std::vector<float>& holderProfilePoints = {}
+        const std::vector<float>& holderProfilePoints = {},
+        const std::vector<float>& shankProfilePoints = {}
     );
 
     void setStockShape(const Part::TopoShape& shape, float resolution);

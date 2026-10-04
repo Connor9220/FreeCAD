@@ -65,7 +65,8 @@ public:
         int toolNumber,
         float diameter,
         float resolution,
-        const std::vector<float>& holderProfilePoints = {}
+        const std::vector<float>& holderProfilePoints = {},
+        const std::vector<float>& shankProfilePoints = {}
     );
     void SetBaseShape(const Part::TopoShape& baseShape, float resolution);
     void AddCommand(Command* cmd);

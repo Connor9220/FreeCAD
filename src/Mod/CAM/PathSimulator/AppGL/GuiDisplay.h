@@ -26,6 +26,7 @@
 
 #include <QWidget>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "MillMotion.h"
@@ -68,8 +69,9 @@ public:
     void setAxesEnabled(bool b);
     // stop on collision as set, shown off and greyed out where collisions are not found
     void setStopOnCollision(bool b, bool available);
-    // where the holder meets the stock, as shares of the program's time
-    void setCollisions(const std::vector<float>& stages);
+    // where the tool, its shank or its holder collides, each run of hits from its first to its
+    // last, as shares of the program's time
+    void setCollisions(const std::vector<std::pair<float, float>>& stages);
     void setFps(float fps);
 
 Q_SIGNALS:

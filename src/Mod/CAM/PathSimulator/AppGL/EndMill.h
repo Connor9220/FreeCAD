@@ -46,6 +46,7 @@ public:
     Shape halfToolShape;
     Shape toolShape;
     Shape holderShape;  // drawn with the tool, never cutting
+    Shape shankShape;   // the tool above its cutting edges, never cutting either
 
 public:
     EndMill(int toolid, float diameter);
@@ -60,12 +61,21 @@ public:
     }
     // the holder's widest radius and the heights it spans, from the tool's tip
     void HolderBounds(float& radius, float& zLo, float& zHi) const;
+    // the tool above its cutting edges, up to the holder: its outline as the holder's. It
+    // cuts nothing; where it meets material, the tool rubs or crashes
+    void SetShank(const std::vector<float>& shankProfile);
+    bool HasShank() const
+    {
+        return shankPoints.size() >= 4;
+    }
+    void ShankBounds(float& radius, float& zLo, float& zHi) const;
     void GenerateDisplayLists(float quality);
     unsigned int GenerateArcSegmentDL(float radius, float angleRad, float zShift, Shape* retShape) const;
 
 protected:
     void MirrorPointBuffer();
     std::vector<float> holderPoints;
+    std::vector<float> shankPoints;
 };
 
 }  // namespace CAMSimulator

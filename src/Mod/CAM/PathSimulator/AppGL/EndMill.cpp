@@ -77,6 +77,7 @@ EndMill::~EndMill()
     toolShape.FreeResources();
     halfToolShape.FreeResources();
     holderShape.FreeResources();
+    shankShape.FreeResources();
     pathShape.FreeResources();
 }
 
@@ -99,6 +100,10 @@ void EndMill::GenerateDisplayLists(float quality)
         const int nHolderPoints = (int)holderPoints.size() / 2;
         holderShape.RotateProfile(holderPoints.data(), nHolderPoints, 0, 0, nslices, false);
     }
+    if (HasShank()) {
+        const int nShankPoints = (int)shankPoints.size() / 2;
+        shankShape.RotateProfile(shankPoints.data(), nShankPoints, 0, 0, nslices, false);
+    }
 
     // half tool
     halfToolShape.RotateProfile(profilePoints.data(), nPoints, 0, 0, nslices / 2, true);
@@ -113,16 +118,32 @@ void EndMill::SetHolder(const std::vector<float>& holderProfile)
     holderPoints.assign(holderProfile.begin(), holderProfile.end() - (holderProfile.size() % 2));
 }
 
-void EndMill::HolderBounds(float& radius, float& zLo, float& zHi) const
+// the widest radius of an outline of radius, height pairs, and the heights it spans
+static void ProfileBounds(const std::vector<float>& points, float& radius, float& zLo, float& zHi)
 {
     radius = 0;
     zLo = 1e30f;
     zHi = -1e30f;
-    for (size_t i = 0; i + 1 < holderPoints.size(); i += 2) {
-        radius = std::max(radius, std::fabs(holderPoints[i]));
-        zLo = std::min(zLo, holderPoints[i + 1]);
-        zHi = std::max(zHi, holderPoints[i + 1]);
+    for (size_t i = 0; i + 1 < points.size(); i += 2) {
+        radius = std::max(radius, std::fabs(points[i]));
+        zLo = std::min(zLo, points[i + 1]);
+        zHi = std::max(zHi, points[i + 1]);
     }
+}
+
+void EndMill::HolderBounds(float& radius, float& zLo, float& zHi) const
+{
+    ProfileBounds(holderPoints, radius, zLo, zHi);
+}
+
+void EndMill::SetShank(const std::vector<float>& shankProfile)
+{
+    shankPoints.assign(shankProfile.begin(), shankProfile.end() - (shankProfile.size() % 2));
+}
+
+void EndMill::ShankBounds(float& radius, float& zLo, float& zHi) const
+{
+    ProfileBounds(shankPoints, radius, zLo, zHi);
 }
 
 unsigned int EndMill::GenerateArcSegmentDL(float radius, float angleRad, float zShift, Shape* retShape) const

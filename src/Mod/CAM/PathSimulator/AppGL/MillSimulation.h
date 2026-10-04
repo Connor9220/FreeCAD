@@ -97,7 +97,8 @@ public:
         const std::vector<float>& toolProfile,
         int toolid,
         float diameter,
-        const std::vector<float>& holderProfile = {}
+        const std::vector<float>& holderProfile = {},
+        const std::vector<float>& shankProfile = {}
     );
     bool ToolExists(int toolid);
     void RenderSimulation();
@@ -127,6 +128,8 @@ public:
     {
         HolderMeetsStock = 0,
         RapidIntoStock = 1,
+        // the tool above its cutting edges: rubbing or crashing into what it meets
+        ShankMeetsStock = 2,
         CollisionKinds
     };
     struct Collision
@@ -141,8 +144,10 @@ public:
     {
         return mCollisions;
     }
-    // when each was found, as a share of the program's time
-    std::vector<float> GetCollisionStages() const;
+    // when each run of collisions was found, from its first to its last, as shares of the
+    // program's time: hits of one kind in a row, the moves between them cutting nothing, one
+    // run; a cut that meets nothing ends it
+    std::vector<std::pair<float, float>> GetCollisionStages() const;
     void EnableStopOnCollision(bool b);
     // whether collisions are found: with the dexel stock, cut on the processor
     bool CanFindCollisions() const;
@@ -206,6 +211,8 @@ protected:
     bool CollidesAt(int kind) const;
     void ToolPose(MillPathSegment* p, int step, vec3 pos, mat4x4 rmat);
     float HitTime(const Collision& hit) const;
+    // the runs of collisions, as GetCollisionStages has them, in seconds
+    std::vector<std::pair<float, float>> HitRuns() const;
     std::vector<float> MarksAndHits() const;
     void RenderDexel();
     void RenderAxes();
@@ -277,6 +284,7 @@ public:
     int mNextProbe = 0;
     std::map<int, Collision> mCollisions;  // by segment and kind
     std::set<int> mCollisionOps;  // operation * CollisionKinds + kind, for those reported
+    std::set<int> mStopOps;       // the same, for those stopped at, from where it was played
     bool mProbeWarned = false;
     float mStopAt = -1;    // a hit found while playing: the time to stop at, next frame
     float mPlayFrom = 0;   // where playback last started or was moved to: hits there do not stop it
@@ -305,6 +313,7 @@ public:
     vec3 cutColor = {0.5f, 0.84f, 0.73f};
     vec3 toolColor = {0.5f, 0.4f, 0.3f};
     vec3 holderColor = {0.62f, 0.64f, 0.68f};
+    vec3 shankColor = {0.72f, 0.73f, 0.75f};  // bright steel, apart from the cutting edges
     vec3 holderHitColor = {0.9f, 0.15f, 0.1f};
     vec3 overcutColor = {0.9f, 0.15f, 0.1f};
     vec3 baseShapeColor = {0.7f, 0.6f, 0.5f};

@@ -97,7 +97,7 @@ public:
         update();
     }
 
-    void setHits(const std::vector<float>& h)
+    void setHits(const std::vector<std::pair<float, float>>& h)
     {
         if (h == hits) {
             return;
@@ -131,11 +131,19 @@ protected:
         sliderSpan(slider, x0, span);
 
         QPainter painter(this);
-        // where the holder meets the stock: red, a notch above and below to stand out
+        // each run of collisions: a red line where it starts, a notch above and below to stand
+        // out, and a faint band on to where it ends
         const QColor red(230, 40, 30);
-        painter.setPen(QPen(red, 2));
-        for (float f : hits) {
-            const int x = x0 + (int)std::lround(f * (float)span);
+        QColor band = red;
+        band.setAlpha(90);
+        for (const auto& [from, to] : hits) {
+            const int x = x0 + (int)std::lround(from * (float)span);
+            const int xEnd = x0 + (int)std::lround(to * (float)span);
+            if (xEnd > x) {
+                const int third = height() / 3;
+                painter.fillRect(x, third, xEnd - x, height() - 2 * third, band);
+            }
+            painter.setPen(QPen(red, 2));
             painter.drawLine(x, 1, x, height() - 2);
             painter.fillRect(x - 3, 0, 7, 3, red);
             painter.fillRect(x - 3, height() - 3, 7, 3, red);
@@ -163,7 +171,7 @@ protected:
 private:
     QSlider* slider;
     std::vector<float> starts;
-    std::vector<float> hits;
+    std::vector<std::pair<float, float>> hits;
     std::vector<SimTimeSpan> spans;
 };
 
@@ -581,7 +589,7 @@ void GuiDisplay::setStopOnCollision(bool b, bool available)
     ui->stopOnCollisionButton->setChecked(b && available);
 }
 
-void GuiDisplay::setCollisions(const std::vector<float>& stages)
+void GuiDisplay::setCollisions(const std::vector<std::pair<float, float>>& stages)
 {
     opMarkers->setHits(stages);
 }
