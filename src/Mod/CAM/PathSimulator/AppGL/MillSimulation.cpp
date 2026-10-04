@@ -1591,6 +1591,11 @@ void MillSimulation::ProbeAlong(MillPathSegment* p, int fromStep, int toStep, in
                                     : tool->toolShape;
         mat4x4 smat;
         mat4x4_dup(smat, tmat);
+        if (thinner < 1.f) {
+            // and as far off what it sits on: the shank on the edges' top, the tool at the bottom
+            // of the hole it is coming back up
+            mat4x4_translate_in_place(smat, 0.f, 0.f, slack);
+        }
         mat4x4_scale_aniso(smat, smat, thinner, thinner, 1.f);
         const int found = mDexel.Probe(lo, hi, id, [&shape, smat, rmat] {
             shape.Render(smat, rmat);
@@ -1627,7 +1632,9 @@ void MillSimulation::TakeCollisions()
         const Collision hit = it->second;
         mProbes.erase(it);
         const int key = hit.seg * CollisionKinds + hit.kind;
-        if (rays <= 0 || mCollisions.count(key) != 0) {
+        // a ray or two is the grid, a sliver it left where a ray runs down a tool's axis, not
+        // stock the tool meets
+        if (rays < 3 || mCollisions.count(key) != 0) {
             continue;
         }
         mCollisions[key] = hit;
