@@ -28,8 +28,8 @@ import pathlib
 import FreeCAD
 from CAMTests.PathTestUtils import PathTestWithAssets
 from Path.Tool.library import Library
-from Path.Tool.shape import ToolBitShapeBullnose, ToolBitShapeDovetail
-from Path.Tool.toolbit import ToolBitEndmill, ToolBitBullnose, ToolBitDovetail
+from Path.Tool.shape import ToolBitShapeBullnose, ToolBitShapeDovetail, ToolBitShapeKeyway
+from Path.Tool.toolbit import ToolBitEndmill, ToolBitBullnose, ToolBitDovetail, ToolBitKeyway
 from Path.Tool.toolbit.migration import ParameterAccessor, migrate_parameters
 
 TOOL_DIR = pathlib.Path(os.path.realpath(__file__)).parent.parent / "Tools"
@@ -160,3 +160,46 @@ class TestPathToolBitMigration(PathTestWithAssets):
         self.doc.recompute()
         obj.Proxy._process_queued_visual_update()
         self.assertAlmostEqual(obj.BitBody.Shape.Volume, volume, places=6)
+
+
+class TestPathToolBitDerivedShapes(PathTestWithAssets):
+    """Shapes whose CuttingEdgeHeight follows from their other parameters."""
+
+    def setUp(self):
+        super().setUp()
+        self.doc = FreeCAD.newDocument("TestToolBitDerived")
+
+    def tearDown(self):
+        FreeCAD.closeDocument(self.doc.Name)
+        super().tearDown()
+
+    def _recompute(self, obj):
+        self.doc.recompute()
+        obj.Proxy._process_queued_visual_update()
+
+    def testKeyway(self):
+        """Keyway: CuttingEdgeHeight = LowerCuttingHeight + NeckCuttingHeight, read-only"""
+        shape = cast(ToolBitShapeKeyway, self.assets.get("toolbitshape://keyway"))
+        obj = ToolBitKeyway(shape, id="keyway").attach_to_doc(self.doc)
+        self._recompute(obj)
+        self.assertIn("CuttingEdgeHeight", obj.PropertiesList)
+        self.assertIn("ReadOnly", obj.getEditorMode("CuttingEdgeHeight"))
+        self.assertAlmostEqual(obj.CuttingEdgeHeight.Value, 3.0)
+
+        solid = obj.BitBody.Shape
+        self.assertTrue(solid.isValid())
+        self.assertAlmostEqual(solid.BoundBox.ZMin, 0.0, places=6)
+        self.assertAlmostEqual(solid.BoundBox.ZMax, 50.0, places=6)
+        self.assertAlmostEqual(solid.BoundBox.XMax, 10.0, places=6)
+        volume = solid.Volume
+
+        obj.NeckCuttingHeight = FreeCAD.Units.Quantity("4 mm")
+        self._recompute(obj)
+        self.assertAlmostEqual(obj.CuttingEdgeHeight.Value, 7.0)
+        # The fluted part of the neck is not drawn: same solid.
+        self.assertAlmostEqual(obj.BitBody.Shape.Volume, volume, places=6)
+
+        obj.LowerCuttingHeight = FreeCAD.Units.Quantity("5 mm")
+        self._recompute(obj)
+        self.assertAlmostEqual(obj.CuttingEdgeHeight.Value, 9.0)
+        self.assertGreater(obj.BitBody.Shape.Volume, volume)

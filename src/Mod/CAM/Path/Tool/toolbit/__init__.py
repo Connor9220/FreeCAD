@@ -11,6 +11,7 @@ from .models.custom import ToolBitCustom
 from .models.dovetail import ToolBitDovetail
 from .models.drill import ToolBitDrill
 from .models.endmill import ToolBitEndmill
+from .models.keyway import ToolBitKeyway
 from .models.radius import ToolBitRadius
 from .models.probe import ToolBitProbe
 from .models.reamer import ToolBitReamer
@@ -30,6 +31,7 @@ __all__ = [
     "ToolBitDovetail",
     "ToolBitDrill",
     "ToolBitEndmill",
+    "ToolBitKeyway",
     "ToolBitRadius",
     "ToolBitProbe",
     "ToolBitReamer",

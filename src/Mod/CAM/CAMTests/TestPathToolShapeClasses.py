@@ -323,6 +323,45 @@ class TestPathToolShapeClasses(PathTestWithAssets):
         # NeckCuttingHeight is an input, not something derived from the drawing.
         self.assertNotIn("NeckCuttingHeight", instance.derived_parameters())
 
+    def test_toolbitshapekeyway_defaults(self):
+        """Test ToolBitShapeKeyway default parameters and labels."""
+        shape = self._test_shape_common("keyway")
+        self.assertEqual(shape["Diameter"].Value, 20.0)
+        self.assertEqual(unit(shape["Diameter"]), "mm")
+        self.assertEqual(shape["LowerCuttingHeight"].Value, 3.0)
+        self.assertEqual(shape["NeckDiameter"].Value, 8.0)
+        self.assertEqual(shape["NeckHeight"].Value, 10.0)
+        self.assertEqual(shape["NeckCuttingHeight"].Value, 0.0)
+        self.assertEqual(shape["ShankDiameter"].Value, 10.0)
+        self.assertEqual(shape["Length"].Value, 50.0)
+        self.assertEqual(shape["CuttingEdgeHeight"].Value, 3.0)
+        uri = ToolBitShape.resolve_name("keyway")
+        instance = self.assets.get(uri)
+        self.assertEqual(instance.get_parameter_label("LowerCuttingHeight"), "Lower cutting height")
+        self.assertEqual(instance.get_parameter_label("NeckCuttingHeight"), "Neck cutting height")
+        self.assertEqual(set(instance.derived_parameters()), {"CuttingEdgeHeight"})
+        for alias in ("keyway", "keyseat", "woodruff"):
+            self.assertIs(ToolBitShape.get_subclass_by_name(alias), type(instance))
+
+    def test_keyway_derived_cutting_edge_height(self):
+        """The keyway cuts with its head and the fluted part of its neck."""
+        shape = self.assets.get(ToolBitShape.resolve_name("keyway"))
+        shape.set_parameters(
+            LowerCuttingHeight=FreeCAD.Units.Quantity("3.175 mm"),
+            NeckCuttingHeight=FreeCAD.Units.Quantity("2 mm"),
+            CuttingEdgeHeight=FreeCAD.Units.Quantity("0 mm"),
+        )
+        self.assertIn("CuttingEdgeHeight", shape.apply_derived_parameters())
+        height = shape.get_parameter("CuttingEdgeHeight")
+        self.assertAlmostEqual(height.Value, 5.175)
+        self.assertEqual(height.Unit, FreeCAD.Units.Unit("mm"))
+        self.assertEqual(shape.apply_derived_parameters(), {})
+
+        # No fluted neck: only the head cuts.
+        shape.set_parameter("NeckCuttingHeight", FreeCAD.Units.Quantity("0 mm"))
+        shape.apply_derived_parameters()
+        self.assertAlmostEqual(shape.get_parameter("CuttingEdgeHeight").Value, 3.175)
+
     def test_toolbitshapeendmill_defaults(self):
         """Test ToolBitShapeEndmill default parameters and labels."""
         # Provide a dummy filepath for instantiation.
