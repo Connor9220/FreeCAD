@@ -104,6 +104,7 @@ def migrate_parameters(accessor: ParameterAccessor) -> bool:
     Currently handles:
     - TorusRadius → CornerRadius
     - FlatRadius/Diameter → CornerRadius
+    - Dovetail without NeckCuttingHeight → NeckCuttingHeight = 0
     - Infers Units from parameter strings if not set
 
     Args:
@@ -182,5 +183,25 @@ def migrate_parameters(accessor: ParameterAccessor) -> bool:
                 migrated = True
             except Exception as e:
                 Path.Log.error(f"Failed to migrate FlatRadius for toolbit {name}: {e}")
+
+    # Dovetails saved before NeckCuttingHeight existed have no fluted neck.
+    if shape_type and str(shape_type).lower() == "dovetail":
+        if not accessor.has("NeckCuttingHeight"):
+            diam_raw = accessor.get("Diameter") if has_diam else None
+            if isinstance(diam_raw, str) and diam_raw.strip().endswith("in"):
+                value = "0.0000 in"
+            else:
+                value = "0.0000 mm"
+
+            accessor.add_property(
+                "App::PropertyLength",
+                "NeckCuttingHeight",
+                "Shape",
+                "Fluted length of the neck above the head",
+            )
+            accessor.set_editor_mode("NeckCuttingHeight", 0)
+            accessor.set("NeckCuttingHeight", value)
+            Path.Log.info(f"Added NeckCuttingHeight={value} for {name}")
+            migrated = True
 
     return migrated

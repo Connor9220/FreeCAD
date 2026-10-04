@@ -312,10 +312,16 @@ class TestPathToolShapeClasses(PathTestWithAssets):
         self.assertEqual(unit(shape["Diameter"]), "mm")
         self.assertEqual(shape["CuttingEdgeAngle"].Value, 60.0)
         self.assertEqual(unit(shape["CuttingEdgeAngle"]), "°")
+        self.assertEqual(shape["CuttingEdgeHeight"].Value, 9.0)
+        self.assertEqual(shape["NeckCuttingHeight"].Value, 0.0)
+        self.assertEqual(unit(shape["NeckCuttingHeight"]), "mm")
         # Need an instance to get parameter labels, get it from the asset manager
         uri = ToolBitShape.resolve_name("dovetail")
         instance = self.assets.get(uri)
         self.assertEqual(instance.get_parameter_label("CuttingEdgeAngle"), "Cutting angle")
+        self.assertEqual(instance.get_parameter_label("NeckCuttingHeight"), "Neck cutting height")
+        # NeckCuttingHeight is an input, not something derived from the drawing.
+        self.assertNotIn("NeckCuttingHeight", instance.derived_parameters())
 
     def test_toolbitshapeendmill_defaults(self):
         """Test ToolBitShapeEndmill default parameters and labels."""
