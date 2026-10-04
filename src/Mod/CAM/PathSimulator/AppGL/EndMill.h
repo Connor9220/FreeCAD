@@ -70,11 +70,16 @@ public:
     }
     void ShankBounds(float& radius, float& zLo, float& zHi) const;
     void GenerateDisplayLists(float quality);
+    // The tool moved straight along its axis by distance, as one solid, its tip where it is
+    // lowest: at each height as wide as the tool is anywhere within distance below, so a head
+    // wider than its neck takes all it passes through, not only where it stops.
+    void VerticalSweep(float distance, Shape& out) const;
     unsigned int GenerateArcSegmentDL(float radius, float angleRad, float zShift, Shape* retShape) const;
 
 protected:
     void MirrorPointBuffer();
     std::vector<float> holderPoints;
+    int slices = 16;  // around the axis, as the display lists have it
     std::vector<float> shankPoints;
 };
 

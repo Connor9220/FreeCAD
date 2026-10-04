@@ -247,18 +247,26 @@ void MillPathSegment::render(int step)
     }
     else {
         if (mMotionType == MTVertical) {
-            if (mStepLength[PZ] > 0) {
-                mat4x4_translate_in_place_v(mat, mStartPos);
+            // the tool swept from the step from to this one, from where it is lowest: drawn
+            // only there, a head wider than its neck would leave what it passed on the way
+            from = std::clamp(from, 0, step);
+            const int lowest = mStepLength[PZ] > 0 ? from : step;
+            const float travel = std::fabs((step - from) * mStepLength[PZ]);
+            mat4x4_translate_in_place(
+                mat,
+                mStartPos[PX],
+                mStartPos[PY],
+                mStartPos[PZ] + lowest * mStepLength[PZ]
+            );
+            if (travel < EPSILON) {
+                endmill->toolShape.Render(mat, rmat);
             }
             else {
-                mat4x4_translate_in_place(
-                    mat,
-                    mStartPos[PX],
-                    mStartPos[PY],
-                    mStartPos[PZ] + mStepNumber * mStepLength[PZ]
-                );
+                Shape sweep;
+                endmill->VerticalSweep(travel, sweep);
+                sweep.Render(mat, rmat);
+                sweep.FreeResources();
             }
-            endmill->toolShape.Render(mat, rmat);
         }
         else {
             float renderDist = step * mStepDistance;
