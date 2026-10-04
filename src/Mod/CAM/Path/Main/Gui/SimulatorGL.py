@@ -88,19 +88,36 @@ def ShankProfile(profile, bottom):
     return [v for p in above for v in p]
 
 
-def CuttingHeight(tool, top):
-    """How far up from its tip the tool cuts: its CuttingEdgeHeight, if it has one below top, the
-    height of the tool as the simulator draws it; else None, the whole tool cutting. A dovetail's
-    CuttingEdgeHeight is its head's; the neck above cuts as far as its NeckCuttingHeight."""
+def PointHeight(profile):
+    """The height of a tool's point, as AddTool takes its profile from the top down: where, going
+    up from the tip, its outline stops widening. None if it has no point, a flat end at the tip."""
+    points = list(zip(profile[0::2], profile[1::2]))[::-1]
+    for (r0, z0), (r1, z1) in zip(points, points[1:]):
+        if r1 <= r0 or IsSame(r1, r0):
+            return None if IsSame(z0, points[0][1]) else z0
+    return None
+
+
+def CuttingHeight(tool, profile):
+    """How far up from its tip the tool cuts, its profile as AddTool takes it from the top down:
+    its CuttingEdgeHeight, if it has one below the top of the profile; else None, the whole tool
+    cutting. A dovetail's CuttingEdgeHeight is its head's; the neck above cuts as far as its
+    NeckCuttingHeight. A CuttingEdgeHeight of 0 cuts with the point only, a drill's cone or a
+    reamer's chamfer: the body above cuts nothing, and moved sideways through stock it crashes."""
     height = getattr(tool, "CuttingEdgeHeight", None)
-    if height is None:
+    if height is None or len(profile) < 2:
         return None
+    top = profile[1]
     height = FreeCAD.Units.Quantity(height).getValueAs("mm").Value
     if str(getattr(tool, "ShapeType", "")).lower() == "dovetail":
         neck = getattr(tool, "NeckCuttingHeight", None)
         if neck is not None:
             height += FreeCAD.Units.Quantity(neck).getValueAs("mm").Value
-    if height <= 0 or height >= top or IsSame(height, top):
+    if height <= 0 or IsSame(height, 0):
+        height = PointHeight(profile)
+        if height is None:
+            return None
+    if height >= top or IsSame(height, top):
         return None
     return height
 
@@ -540,8 +557,7 @@ class CAMSimulation:
             # above its cutting edges the tool cuts nothing either: where it meets material it
             # rubs or crashes
             shank = None
-            top = toolProfile[1] if len(toolProfile) > 1 else 0
-            cutting = CuttingHeight(tool, top)
+            cutting = CuttingHeight(tool, toolProfile)
             if cutting is not None:
                 shank = ShankProfile(toolProfile, cutting)
                 if shank:
