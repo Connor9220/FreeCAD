@@ -92,6 +92,12 @@ public:
 
     // do the cuts gathered so far, when they are cut on the processor
     void Flush();
+    // whether some ray lost detail: the stock busier along it than the most a ray keeps, its
+    // narrowest gaps or stretches gone, and what meets it there not counted as a hit
+    bool LostDetail() const
+    {
+        return mCpu && mCutter.LostDetail();
+    }
     int Pending() const
     {
         return mCpu ? mCutter.Pending() : 0;
@@ -152,11 +158,18 @@ private:
         unsigned int initTex = 0;  // each ray's first stretch as set up, for the stock's colour
         unsigned int pointVbo = 0;
         int nPoints = 0;
-        std::vector<float> initEnds;     // 12 a ray, for Reset
-        std::vector<float> initNormals;  // packed, 12 a ray
+        std::vector<float> initEnds;     // stride a ray, for Reset
+        std::vector<float> initNormals;  // packed, stride a ray
         std::vector<float> ends;         // the rays as cut, read back for the mesh
         std::vector<float> normals;
+        // ends a ray: twelve on the graphics card; on the processor as many as the busiest ray
+        // needs, grown as cuts need more, up to the cutter's most
+        int stride = Ends;
+        std::vector<char> initLossy;  // the rays that lost detail, as set up
+        std::vector<char> lossy;      // and as cut
     };
+    // grid d given twice the ends a ray, its copies with it; false if it has the most it may
+    bool Grow(int d);
 
     bool InitOn(
         const std::vector<Vertex>& verts,
@@ -217,6 +230,8 @@ private:
     {
         std::vector<float> ends[3];
         std::vector<float> normals[3];
+        std::vector<char> lossy[3];
+        int stride[3] = {Ends, Ends, Ends};
     };
     std::vector<CpuSnapshot> mCpuSnapshots;
     void CatchUpMirror();

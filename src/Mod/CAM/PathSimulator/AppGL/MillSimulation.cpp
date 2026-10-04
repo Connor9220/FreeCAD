@@ -1622,6 +1622,14 @@ void MillSimulation::ProbeAlong(MillPathSegment* p, int fromStep, int toStep, in
 
 void MillSimulation::TakeCollisions()
 {
+    // said once: rays the stock's detail no longer fits lost some, and are not checked
+    if (!mLostWarned && (mDexel.LostDetail() || mWorkholding.LostDetail())) {
+        mLostWarned = true;
+        Base::Console().warning(
+            "CAM Simulator: the stock is too busy along some lines for the detail the simulator "
+            "keeps; there it may show material that was cut, and collisions are not checked\n"
+        );
+    }
     std::vector<std::pair<int, int>> hits;
     mDexel.TakeHits(hits);
     for (const auto& [id, rays] : hits) {

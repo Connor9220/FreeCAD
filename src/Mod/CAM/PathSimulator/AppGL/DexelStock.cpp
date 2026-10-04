@@ -41,6 +41,20 @@ namespace CAMSimulator
 // an end that is not there: past every real one, so the ends of a ray stay in order
 constexpr float NoEnd = 1e30f;
 
+// rays of from values each spread to to, the new room filled with fill
+static void restride(std::vector<float>& v, size_t rays, int from, int to, float fill)
+{
+    if (from == to || v.size() < rays * from) {
+        return;
+    }
+    std::vector<float> out(rays * to, fill);
+    const int keep = std::min(from, to);
+    for (size_t r = 0; r < rays; r++) {
+        std::copy_n(v.data() + r * from, (size_t)keep, out.data() + r * to);
+    }
+    v.swap(out);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Shaders, GLSL 1.20
 
@@ -743,16 +757,25 @@ bool DexelStock::InitOn(
             }
         }
 
-        // the stretches between going in and coming out
-        g.initEnds.assign(rays * Ends, NoEnd);
-        g.initNormals.assign(rays * Ends, 0.f);
+        // The stretches between going in and coming out, each ray's gathered first: on the
+        // processor the grid keeps as many ends a ray as its busiest ray needs, up to the
+        // cutter's most; on the card, and past that, a ray loses its narrowest gaps: what is
+        // solid stays so, the ray's far stretches, the tops of a vise's jaws say, not dropped.
+        std::vector<float> allT;
+        std::vector<float> allN;
+        std::vector<size_t> start(rays + 1, 0);
+        size_t busiest = 0;
+        std::vector<float> ts;
+        std::vector<float> ns;
         for (size_t r = 0; r < rays; r++) {
+            start[r] = allT.size();
             std::vector<Hit>& h = hits[r];
             std::sort(h.begin(), h.end(), [](const Hit& x, const Hit& y) { return x.t < y.t; });
             int depth = 0;
-            int nEnds = 0;
             float lastT = -1e30f;
             bool lastEnter = false;
+            ts.clear();
+            ns.clear();
             for (const Hit& hit : h) {
                 // a ray through an edge meets both triangles there: once is enough
                 if (std::fabs(hit.t - lastT) < 1e-4f * mRes && hit.enter == lastEnter) {
@@ -764,22 +787,50 @@ bool DexelStock::InitOn(
                 depth += hit.enter ? 1 : -1;
                 const bool opens = before <= 0 && depth > 0;
                 const bool closes = before > 0 && depth <= 0;
-                if ((opens || closes) && nEnds < Ends) {
-                    g.initEnds[r * Ends + nEnds] = hit.t;
-                    g.initNormals[r * Ends + nEnds] = packNormal(hit.n[0], hit.n[1], hit.n[2]);
-                    nEnds++;
+                if (opens || closes) {
+                    ts.push_back(hit.t);
+                    ns.push_back(packNormal(hit.n[0], hit.n[1], hit.n[2]));
                 }
             }
-            if (nEnds % 2 != 0) {
-                // an open stretch: a leak in the mesh, leave the ray empty
-                for (int e = 0; e < Ends; e++) {
-                    g.initEnds[r * Ends + e] = NoEnd;
+            if (ts.size() % 2 != 0) {
+                continue;  // an open stretch: a leak in the mesh, leave the ray empty
+            }
+            busiest = std::max(busiest, ts.size());
+            allT.insert(allT.end(), ts.begin(), ts.end());
+            allN.insert(allN.end(), ns.begin(), ns.end());
+        }
+        start[rays] = allT.size();
+        g.stride = mCpu ? std::clamp(((int)busiest + 1) / 2 * 2, (int)Ends, DexelCutter::MaxEnds)
+                        : (int)Ends;
+        const size_t stride = (size_t)g.stride;
+        g.initEnds.assign(rays * stride, NoEnd);
+        g.initNormals.assign(rays * stride, 0.f);
+        g.initLossy.assign(mCpu ? rays : 0, 0);
+        for (size_t r = 0; r < rays; r++) {
+            ts.assign(allT.begin() + start[r], allT.begin() + start[r + 1]);
+            ns.assign(allN.begin() + start[r], allN.begin() + start[r + 1]);
+            if (ts.size() > stride && mCpu) {
+                g.initLossy[r] = 1;
+            }
+            while (ts.size() > stride) {
+                size_t narrowest = 1;
+                for (size_t k = 3; k + 1 < ts.size(); k += 2) {
+                    if (ts[k + 1] - ts[k] < ts[narrowest + 1] - ts[narrowest]) {
+                        narrowest = k;
+                    }
                 }
+                ts.erase(ts.begin() + narrowest, ts.begin() + narrowest + 2);
+                ns.erase(ns.begin() + narrowest, ns.begin() + narrowest + 2);
+            }
+            for (size_t k = 0; k < ts.size(); k++) {
+                g.initEnds[r * stride + k] = ts[k];
+                g.initNormals[r * stride + k] = ns[k];
             }
         }
 
         g.ends = g.initEnds;
         g.normals = g.initNormals;
+        g.lossy = g.initLossy;
         if (mCpu) {
             continue;
         }
@@ -925,6 +976,7 @@ void DexelStock::Reset()
         }
         g.ends = g.initEnds;
         g.normals = g.initNormals;
+        g.lossy = g.initLossy;
     }
     mPending = false;
     mMesher.MarkAllDirty();
@@ -975,6 +1027,8 @@ int DexelStock::SaveSnapshot()
         for (int d = 0; d < 3; d++) {
             snap.ends[d] = mGrids[d].ends;
             snap.normals[d] = mGrids[d].normals;
+            snap.lossy[d] = mGrids[d].lossy;
+            snap.stride[d] = mGrids[d].stride;
         }
         mCpuSnapshots.push_back(std::move(snap));
         return (int)mCpuSnapshots.size() - 1;
@@ -1025,8 +1079,16 @@ void DexelStock::RestoreSnapshot(int index)
         if (mValid && index >= 0 && index < (int)mCpuSnapshots.size()) {
             mCutter.Setup(mOrigin, mRes, mDims);
             for (int d = 0; d < 3; d++) {
-                mGrids[d].ends = mCpuSnapshots[index].ends[d];
-                mGrids[d].normals = mCpuSnapshots[index].normals[d];
+                Grid& g = mGrids[d];
+                const CpuSnapshot& snap = mCpuSnapshots[index];
+                g.ends = snap.ends[d];
+                g.normals = snap.normals[d];
+                g.lossy = snap.lossy[d];
+                // taken before the grid grew: its rays spread to the grid's ends a ray
+                if (snap.stride[d] != g.stride) {
+                    restride(g.ends, (size_t)g.w * g.h, snap.stride[d], g.stride, NoEnd);
+                    restride(g.normals, (size_t)g.w * g.h, snap.stride[d], g.stride, 0.f);
+                }
             }
             mMesher.MarkAllDirty();
         }
@@ -1119,17 +1181,54 @@ static void CaptureForCutter(void* context, const Shape& shape, const mat4x4& mo
     static_cast<DexelCutter*>(context)->Draw(shape, model, normal);
 }
 
+bool DexelStock::Grow(int d)
+{
+    // twice the ends a ray, the rays as cut and as set up spread to it; a busy ray along a row of
+    // holes, say, otherwise loses a hole
+    Grid& g = mGrids[d];
+    if (g.stride >= DexelCutter::MaxEnds) {
+        return false;
+    }
+    const int to = std::min(2 * g.stride, (int)DexelCutter::MaxEnds);
+    const size_t rays = (size_t)g.w * g.h;
+    restride(g.ends, rays, g.stride, to, NoEnd);
+    restride(g.normals, rays, g.stride, to, 0.f);
+    restride(g.initEnds, rays, g.stride, to, NoEnd);
+    restride(g.initNormals, rays, g.stride, to, 0.f);
+    g.stride = to;
+    mLookupAll = true;
+    return true;
+}
+
 void DexelStock::Flush()
 {
     if (!mValid || !mCpu) {
         return;
     }
+    auto cutterGrid = [](Grid& g) {
+        DexelCutter::Grid c;
+        c.axis = g.axis;
+        c.a = g.a;
+        c.b = g.b;
+        c.w = g.w;
+        c.h = g.h;
+        c.ends = g.ends.data();
+        c.normals = g.normals.data();
+        c.stride = g.stride;
+        c.lossy = g.lossy.empty() ? nullptr : g.lossy.data();
+        return c;
+    };
     DexelCutter::Grid grids[3];
     for (int d = 0; d < 3; d++) {
-        Grid& g = mGrids[d];
-        grids[d] = {g.axis, g.a, g.b, g.w, g.h, g.ends.data(), g.normals.data()};
+        grids[d] = cutterGrid(mGrids[d]);
     }
-    mCutter.Flush(grids);
+    mCutter.Flush(grids, [this, &cutterGrid](int d, DexelCutter::Grid& g) {
+        if (!Grow(d)) {
+            return false;
+        }
+        g = cutterGrid(mGrids[d]);
+        return true;
+    });
 }
 
 int DexelStock::Probe(const vec3 lo, const vec3 hi, int id, const std::function<void()>& draw)
@@ -1324,8 +1423,18 @@ bool DexelStock::PrepareLookup()
     glActiveTexture(GL_TEXTURE0);
     for (int d = 0; d < 3; d++) {
         Grid& g = mGrids[d];
-        if (g.ends.size() < (size_t)g.w * g.h * Ends) {
+        if (g.ends.size() < (size_t)g.w * g.h * g.stride) {
             return false;
+        }
+        // the shader reads twelve ends a ray: a grid that keeps more gives it its first twelve
+        std::vector<float> packed;
+        const float* src = g.ends.data();
+        if (g.stride != Ends) {
+            packed.resize((size_t)g.w * g.h * Ends);
+            for (size_t r = 0; r < (size_t)g.w * g.h; r++) {
+                std::copy_n(g.ends.data() + r * g.stride, (size_t)Ends, packed.data() + r * Ends);
+            }
+            src = packed.data();
         }
         const bool fresh = mLookupTex[d] == 0;
         if (fresh) {
@@ -1347,7 +1456,7 @@ bool DexelStock::PrepareLookup()
                 0,
                 GL_RGBA,
                 GL_FLOAT,
-                g.ends.data()
+                src
             );
             continue;
         }
@@ -1366,7 +1475,7 @@ bool DexelStock::PrepareLookup()
             rows,
             GL_RGBA,
             GL_FLOAT,
-            g.ends.data() + (size_t)rect[1] * g.w * Ends
+            src + (size_t)rect[1] * g.w * Ends
         );
     }
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -1393,7 +1502,17 @@ bool DexelStock::Sync(double budgetMs)
     DexelMesher::Grid grids[3];
     for (int d = 0; d < 3; d++) {
         const Grid& g = mGrids[d];
-        grids[d] = {g.axis, g.a, g.b, g.w, g.h, g.ends.data(), g.normals.data(), g.initEnds.data()};
+        grids[d] = {
+            g.axis,
+            g.a,
+            g.b,
+            g.w,
+            g.h,
+            g.ends.data(),
+            g.normals.data(),
+            g.initEnds.data(),
+            g.stride,
+        };
     }
     return mMesher.Update(grids, budgetMs);
 }

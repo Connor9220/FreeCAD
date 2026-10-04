@@ -39,7 +39,6 @@ namespace
 {
 
 constexpr float NoEnd = 1e29f;  // ends at or past this are not there
-constexpr int Ends = 12;
 
 // a surface crossing on an edge of the lattice
 struct Hermite
@@ -222,13 +221,13 @@ void DexelMesher::BuildTile(int key, const Grid grids[3], Built& out) const
             if (g0 < 0 || g0 >= gz.w || g1 < 0 || g1 >= gz.h) {
                 continue;
             }
-            const float* e = gz.ends + ((size_t)g1 * gz.w + g0) * Ends;
+            const float* e = gz.ends + ((size_t)g1 * gz.w + g0) * gz.stride;
             if (e[0] >= NoEnd) {
                 continue;
             }
             for (int l2 = 0; l2 < N; l2++) {
                 const float z = nodeAt(2, base[2] + l2);
-                for (int k = 0; k < Ends; k += 2) {
+                for (int k = 0; k < gz.stride; k += 2) {
                     if (e[k] >= NoEnd) {
                         break;
                     }
@@ -282,11 +281,11 @@ void DexelMesher::BuildTile(int key, const Grid grids[3], Built& out) const
                     const int v = gn[g.b];
                     int best = -1;
                     if (u >= 0 && u < g.w && v >= 0 && v < g.h) {
-                        const size_t r = ((size_t)v * g.w + u) * Ends;
+                        const size_t r = ((size_t)v * g.w + u) * g.stride;
                         const float mid = 0.5f * (t0 + t1);
                         float bestDist = 1e30f;
                         const int kind = inside[i0] ? 1 : 0;
-                        for (int k = 0; k < Ends; k++) {
+                        for (int k = 0; k < g.stride; k++) {
                             const float t = g.ends[r + k];
                             if (t >= NoEnd) {
                                 break;
@@ -301,7 +300,7 @@ void DexelMesher::BuildTile(int key, const Grid grids[3], Built& out) const
                             const float t = g.ends[r + best];
                             h.p[d] = t;
                             unpackNormal(g.normals[r + best], h.n);
-                            for (int k = 0; k < Ends; k++) {
+                            for (int k = 0; k < g.stride; k++) {
                                 const float s = g.initEnds[r + k];
                                 if (s >= NoEnd) {
                                     break;

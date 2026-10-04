@@ -288,6 +288,7 @@ public:
     std::set<int> mCollisionOps;  // operation * CollisionKinds + kind, for those reported
     std::set<int> mStopOps;       // the same, for those stopped at, from where it was played
     bool mProbeWarned = false;
+    bool mLostWarned = false;  // that the stock lost detail somewhere, said once
     float mStopAt = -1;    // a hit found while playing: the time to stop at, next frame
     float mPlayFrom = 0;   // where playback last started or was moved to: hits there do not stop it
     float mQuality = 10;

@@ -55,6 +55,7 @@ public:
         const float* ends = nullptr;
         const float* normals = nullptr;
         const float* initEnds = nullptr;
+        int stride = 12;  // ends a ray: twelve, or more where a ray crosses more stretches
     };
 
     ~DexelMesher();

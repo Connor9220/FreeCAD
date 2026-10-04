@@ -63,17 +63,27 @@ float packNormal(float x, float y, float z)
 // One ray's stretches less [t0, t1], the new ends taking the sweep's normals there: as the
 // subtraction shader does, a piece thinner than sliver going, and a seventh stretch closing
 // the narrowest gap or dropping the thinnest stretch.
-void subtractRay(float* e, float* n, float t0, float t1, float nIn, float nOut, float sliver)
+// [t0, t1] taken from the ray's stretches, of cap ends: false, the ray left as it was, if what
+// is left would need more; with lossy, the narrowest gaps or stretches then go instead, lost said
+bool subtractRay(
+    float* e,
+    float* n,
+    int cap,
+    float t0,
+    float t1,
+    float nIn,
+    float nOut,
+    float sliver,
+    bool lossy,
+    bool& lost
+)
 {
-    float o[14];
-    float on[14];
-    for (int i = 0; i < 14; i++) {
-        o[i] = NoEnd;
-        on[i] = 0;
-    }
+    constexpr int room = DexelCutter::MaxEnds + 2;
+    float o[room];
+    float on[room];
     int c = 0;
     bool changed = false;
-    for (int k = 0; k < 6; k++) {
+    for (int k = 0; k < cap / 2; k++) {
         const float s = e[2 * k];
         const float f = e[2 * k + 1];
         if (s >= 1e29f) {
@@ -112,18 +122,22 @@ void subtractRay(float* e, float* n, float t0, float t1, float nIn, float nOut, 
         }
     }
     if (!changed) {
-        return;
+        return true;
     }
-    int drop = 14;
-    if (c > 12) {
+    if (c > cap) {
+        if (!lossy) {
+            return false;
+        }
+        // one stretch more than it keeps, a cut splitting one: the narrowest gap or stretch goes
         float best = 1e30f;
-        for (int k = 0; k < 7; k++) {
+        int drop = 0;
+        for (int k = 0; 2 * k + 1 < c; k++) {
             const float len = o[2 * k + 1] - o[2 * k];
             if (len < best) {
                 best = len;
                 drop = 2 * k;
             }
-            if (k < 6) {
+            if (2 * k + 2 < c) {
                 const float gap = o[2 * k + 2] - o[2 * k + 1];
                 if (gap < best) {
                     best = gap;
@@ -131,11 +145,18 @@ void subtractRay(float* e, float* n, float t0, float t1, float nIn, float nOut, 
                 }
             }
         }
+        for (int i = drop; i + 2 < c; i++) {
+            o[i] = o[i + 2];
+            on[i] = on[i + 2];
+        }
+        c -= 2;
+        lost = true;
     }
-    for (int i = 0; i < 12; i++) {
-        e[i] = i < drop ? o[i] : o[i + 2];
-        n[i] = i < drop ? on[i] : on[i + 2];
+    for (int i = 0; i < cap; i++) {
+        e[i] = i < c ? o[i] : NoEnd;
+        n[i] = i < c ? on[i] : 0.f;
     }
+    return true;
 }
 
 // Threads kept for the cutter's batches: starting them anew for each batch cost more than a
@@ -462,8 +483,15 @@ void DexelCutter::CaptureCut(
     }
 }
 
-void DexelCutter::ApplyRows(const Grid& g, int gridIndex, int row0, int row1, std::atomic<int>* met)
-    const
+void DexelCutter::ApplyRows(
+    const Grid& g,
+    int gridIndex,
+    int row0,
+    int row1,
+    std::atomic<int>* met,
+    bool lossy,
+    std::atomic<bool>& overflow
+) const
 {
     // the gathered cuts, in order, on these rows of the grid
     const float sliver = 0.05f * mRes;
@@ -486,10 +514,15 @@ void DexelCutter::ApplyRows(const Grid& g, int gridIndex, int row0, int row1, st
                 if (!(t0 < t1)) {
                     continue;  // the sweep misses this ray, or only grazes it
                 }
-                const size_t ray = ((size_t)v * g.w + u) * Ends;
+                const size_t index = (size_t)v * g.w + u;
+                const size_t ray = index * g.stride;
                 if (mCuts[c].probe >= 0) {
+                    // a ray that lost detail may hold material that was cut: not a hit
+                    if (g.lossy && g.lossy[index]) {
+                        continue;
+                    }
                     const float* e = g.ends + ray;
-                    for (int k = 0; k < Ends; k += 2) {
+                    for (int k = 0; k < g.stride; k += 2) {
                         if (e[k] < 1e29f && std::min(e[k + 1], t1) - std::max(e[k], t0) > reach) {
                             met[c].fetch_add(1, std::memory_order_relaxed);
                             break;
@@ -497,13 +530,33 @@ void DexelCutter::ApplyRows(const Grid& g, int gridIndex, int row0, int row1, st
                     }
                     continue;
                 }
-                subtractRay(g.ends + ray, g.normals + ray, t0, t1, cap.nIn[r], cap.nOut[r], sliver);
+                bool lost = false;
+                if (!subtractRay(
+                        g.ends + ray,
+                        g.normals + ray,
+                        g.stride,
+                        t0,
+                        t1,
+                        cap.nIn[r],
+                        cap.nOut[r],
+                        sliver,
+                        lossy,
+                        lost
+                    )) {
+                    overflow.store(true, std::memory_order_relaxed);
+                }
+                else if (lost) {
+                    if (g.lossy) {
+                        g.lossy[index] = 1;
+                    }
+                    mLost.store(true, std::memory_order_relaxed);
+                }
             }
         }
     }
 }
 
-void DexelCutter::Flush(const Grid grids[3])
+void DexelCutter::Flush(Grid grids[3], const Grow& grow)
 {
     if (mCuts.empty()) {
         return;
@@ -520,20 +573,43 @@ void DexelCutter::Flush(const Grid grids[3])
         }
     });
     // Then taken from the rays in order, a band of rows of a grid at a time, to whichever thread
-    // is free: the cuts gather where the tool is, so narrow bands keep the threads busy.
+    // is free: the cuts gather where the tool is, so narrow bands keep the threads busy. A ray
+    // left in more stretches than its grid keeps is left as it was and its grid grown, and the
+    // cuts done again: taking away what is already gone changes nothing, and the probes are
+    // counted afresh.
     const int bands = 8 * std::max(1, (int)std::thread::hardware_concurrency());
     std::unique_ptr<std::atomic<int>[]> met(new std::atomic<int>[mCuts.size()]);
-    for (size_t c = 0; c < mCuts.size(); c++) {
-        met[c].store(0);
+    bool atMost[3] = {false, false, false};
+    for (;;) {
+        for (size_t c = 0; c < mCuts.size(); c++) {
+            met[c].store(0);
+        }
+        std::atomic<bool> overflow[3];
+        for (auto& o : overflow) {
+            o.store(false);
+        }
+        pool.Run(3 * bands, [&](int i) {
+            const int gi = i / bands;
+            const int band = i % bands;
+            const Grid& g = grids[gi];
+            const int row0 = (int)((long long)g.h * band / bands);
+            const int row1 = (int)((long long)g.h * (band + 1) / bands);
+            ApplyRows(g, gi, row0, row1, met.get(), atMost[gi], overflow[gi]);
+        });
+        bool again = false;
+        for (int d = 0; d < 3; d++) {
+            if (!overflow[d].load()) {
+                continue;
+            }
+            again = true;
+            if (!grow || !grow(d, grids[d])) {
+                atMost[d] = true;
+            }
+        }
+        if (!again) {
+            break;
+        }
     }
-    pool.Run(3 * bands, [&](int i) {
-        const int gi = i / bands;
-        const int band = i % bands;
-        const Grid& g = grids[gi];
-        const int row0 = (int)((long long)g.h * band / bands);
-        const int row1 = (int)((long long)g.h * (band + 1) / bands);
-        ApplyRows(g, gi, row0, row1, met.get());
-    });
     for (size_t c = 0; c < mCuts.size(); c++) {
         if (mCuts[c].probe >= 0) {
             mHits.emplace_back(mCuts[c].probe, met[c].load());

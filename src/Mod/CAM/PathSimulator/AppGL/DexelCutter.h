@@ -26,6 +26,7 @@
 #include "SimShapes.h"
 #include "linmath.h"
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -42,9 +43,11 @@ class DexelCutter
 {
 public:
     static constexpr int Ends = 12;
+    // the most ends a ray keeps: past this a ray loses its narrowest gaps, and is marked
+    static constexpr int MaxEnds = 64;
 
-    // a grid of rays as the cutter changes them: ray (u, v) at u + v * w, twelve ends a ray and
-    // their packed normals
+    // a grid of rays as the cutter changes them: ray (u, v) at u + v * w, stride ends a ray and
+    // their packed normals; lossy, where given, marks the rays that lost detail
     struct Grid
     {
         int axis = 0;
@@ -54,7 +57,12 @@ public:
         int h = 0;
         float* ends = nullptr;
         float* normals = nullptr;
+        int stride = Ends;
+        char* lossy = nullptr;
     };
+    // Grow(d, g): the stock's grid d given more ends a ray, g brought up to it; false if it has
+    // the most it may
+    using Grow = std::function<bool(int, Grid&)>;
 
     void Setup(const vec3 origin, float res, const int dims[3]);
 
@@ -71,8 +79,15 @@ public:
         return (int)mCuts.size();
     }
 
-    // do the cuts gathered, on the grids given
-    void Flush(const Grid grids[3]);
+    // do the cuts gathered, on the grids given: a ray they leave in more stretches than its grid
+    // keeps grows the grid through grow, and the cuts are done again, taking material away twice
+    // changing nothing; at the most a grid may keep, the ray loses its narrowest gaps
+    void Flush(Grid grids[3], const Grow& grow);
+    // whether any ray has lost detail so, since set up
+    bool LostDetail() const
+    {
+        return mLost.load();
+    }
 
     // the probes done since last asked: each one's id and the rays on which it met material
     void TakeHits(std::vector<std::pair<int, int>>& hits);
@@ -108,7 +123,15 @@ private:
     // those missing every grid left out
     void CutTriangles(const Cut& cut, std::vector<float>& tris) const;
     void CaptureCut(const Grid& g, const Cut& cut, const std::vector<float>& tris, Capture& cap) const;
-    void ApplyRows(const Grid& g, int gridIndex, int row0, int row1, std::atomic<int>* met) const;
+    void ApplyRows(
+        const Grid& g,
+        int gridIndex,
+        int row0,
+        int row1,
+        std::atomic<int>* met,
+        bool lossy,
+        std::atomic<bool>& overflow
+    ) const;
 
     vec3 mOrigin = {0, 0, 0};
     float mRes = 1;
@@ -117,6 +140,7 @@ private:
     std::vector<DrawCall> mDraws;
     std::vector<Capture> mCaptures;  // a cut's for each grid, three a cut
     std::vector<std::pair<int, int>> mHits;
+    mutable std::atomic<bool> mLost {false};
 };
 
 }  // namespace CAMSimulator
