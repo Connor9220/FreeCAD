@@ -90,11 +90,16 @@ def ShankProfile(profile, bottom):
 
 def CuttingHeight(tool, top):
     """How far up from its tip the tool cuts: its CuttingEdgeHeight, if it has one below top, the
-    height of the tool as the simulator draws it; else None, the whole tool cutting."""
+    height of the tool as the simulator draws it; else None, the whole tool cutting. A dovetail's
+    CuttingEdgeHeight is its head's; the neck above cuts as far as its NeckCuttingHeight."""
     height = getattr(tool, "CuttingEdgeHeight", None)
     if height is None:
         return None
     height = FreeCAD.Units.Quantity(height).getValueAs("mm").Value
+    if str(getattr(tool, "ShapeType", "")).lower() == "dovetail":
+        neck = getattr(tool, "NeckCuttingHeight", None)
+        if neck is not None:
+            height += FreeCAD.Units.Quantity(neck).getValueAs("mm").Value
     if height <= 0 or height >= top or IsSame(height, top):
         return None
     return height
