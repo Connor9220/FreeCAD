@@ -103,7 +103,8 @@ def CuttingHeight(tool, profile):
     its CuttingEdgeHeight, if it has one below the top of the profile; else None, the whole tool
     cutting. A dovetail's CuttingEdgeHeight is its head's; the neck above cuts as far as its
     NeckCuttingHeight. A CuttingEdgeHeight of 0 cuts with the point only, a drill's cone or a
-    reamer's chamfer: the body above cuts nothing, and moved sideways through stock it crashes."""
+    reamer's chamfer, or with the end face of a tool with none: the body above cuts nothing, and
+    moved sideways through stock it crashes."""
     height = getattr(tool, "CuttingEdgeHeight", None)
     if height is None or len(profile) < 2:
         return None
@@ -114,9 +115,9 @@ def CuttingHeight(tool, profile):
         if neck is not None:
             height += FreeCAD.Units.Quantity(neck).getValueAs("mm").Value
     if height <= 0 or IsSame(height, 0):
-        height = PointHeight(profile)
-        if height is None:
-            return None
+        # the point, or a flat end's face: a slice of it, thinner than anything the simulator
+        # shows, so a plunge still cuts the hole whole
+        height = PointHeight(profile) or 0.1
     if height >= top or IsSame(height, top):
         return None
     return height
