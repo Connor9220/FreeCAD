@@ -119,7 +119,7 @@ def _pieceDrawing(piece, palette, width=330, height=130):
 
     # from the front: the stock behind, taller; the piece on the table before it
     x0 = margin
-    text(x0 + cellW / 2, textH, translate("CAM_Vise", "From the front"), faint)
+    text(x0 + cellW / 2, textH, translate("CAM_Workholding", "From the front"), faint)
     stockTall = v("Drop") if edge else tall * 1.5
     sx, sy = fit(cellW - labelW - 16, wide[1], cellH - under - 4, max(stockTall, tall))
     w, h, st = wide[1] * sx, tall * sy, stockTall * sy
@@ -141,7 +141,7 @@ def _pieceDrawing(piece, palette, width=330, height=130):
 
     # from above: the stock's edge beyond, the piece against it, front to back down
     x0 = 2 * margin + cellW
-    text(x0 + cellW / 2, textH, translate("CAM_Vise", "From above"), faint)
+    text(x0 + cellW / 2, textH, translate("CAM_Workholding", "From above"), faint)
     lipW = (metrics.horizontalAdvance("Reach") + 10) if edge else 0
     sx, sy = fit(cellW - labelW - lipW - 8, wide[1], cellH - band - under - 4, deep[1] + reach)
     if kind == "ObjectDog":
@@ -198,9 +198,9 @@ class _StopsClamps:
                     self.files.append((self._clampName(which, clamp[0]), which, clamp[1]))
         sections = []
         for title, icon in (
-            (translate("CAM_Vise", "Stops"), Widgets.themedIcon(":/icons/xy-in-stock.svg")),
-            (translate("CAM_Vise", "Clamps"), QtGui.QIcon(":/icons/CAM_Job.svg")),
-            (translate("CAM_Vise", "Placed"), QtGui.QIcon(":/icons/Std_Placement.svg")),
+            (translate("CAM_Workholding", "Stops"), Widgets.themedIcon(":/icons/xy-in-stock.svg")),
+            (translate("CAM_Workholding", "Clamps"), QtGui.QIcon(":/icons/CAM_Job.svg")),
+            (translate("CAM_Workholding", "Placed"), QtGui.QIcon(":/icons/Std_Placement.svg")),
         ):
             section = QtWidgets.QWidget()
             section.setWindowTitle(title)
@@ -213,18 +213,22 @@ class _StopsClamps:
         # second side next to the first, a corner
         layout = self.layouts[0]
         self.stopRows = []
-        for label in (translate("CAM_Vise", "First stop"), translate("CAM_Vise", "Second stop")):
+        for label in (
+            translate("CAM_Workholding", "First stop"),
+            translate("CAM_Workholding", "Second stop"),
+        ):
             side = Widgets.combo()
-            side.setToolTip(translate("CAM_Vise", "The side of the part against the stops"))
+            side.setToolTip(translate("CAM_Workholding", "The side of the part against the stops"))
             kind = Widgets.combo(wide=True)
             kind.setToolTip(
                 translate(
-                    "CAM_Vise", "A dog in the table, a fence along the side, or another Job's stop"
+                    "CAM_Workholding",
+                    "A dog in the table, a fence along the side, or another Job's stop",
                 )
             )
             count = QtWidgets.QSpinBox()
             count.setRange(1, 6)
-            count.setToolTip(translate("CAM_Vise", "How many along the side"))
+            count.setToolTip(translate("CAM_Workholding", "How many along the side"))
             row = QtWidgets.QHBoxLayout()
             row.addWidget(side, 2)
             row.addWidget(kind, 3)
@@ -245,15 +249,15 @@ class _StopsClamps:
             kind = Widgets.combo(wide=True)
             kind.setToolTip(
                 translate(
-                    "CAM_Vise",
+                    "CAM_Workholding",
                     "A side clamp pushing the part onto the stops, or a hold-down over its top edge",
                 )
             )
             count = QtWidgets.QSpinBox()
             count.setRange(1, 12)
-            count.setToolTip(translate("CAM_Vise", "How many along the side"))
+            count.setToolTip(translate("CAM_Workholding", "How many along the side"))
             browse = Widgets.browseButton(
-                translate("CAM_Vise", "Choose a clamp on this computer or from a library")
+                translate("CAM_Workholding", "Choose a clamp on this computer or from a library")
             )
             row = QtWidgets.QHBoxLayout()
             row.addWidget(kind, 1)
@@ -271,34 +275,36 @@ class _StopsClamps:
         # there, taken away
         layout = self.layouts[2]
         self.list = QtWidgets.QListWidget()
-        self.list.setToolTip(translate("CAM_Vise", "The Job's stops, clamps and table"))
+        self.list.setToolTip(translate("CAM_Workholding", "The Job's stops, clamps and table"))
         self.list.setFixedHeight(5 * self.list.fontMetrics().height() + 12)
         layout.addRow(self.list)
         self.offset = Widgets.mmBox(
             self.ui,
             translate(
-                "CAM_Vise",
+                "CAM_Workholding",
                 "Where the one picked is along its side, from the Job's origin: its X on the front "
                 "or back, its Y on the left or right",
             ),
             minimum=-10000.0,
         )
-        self.remove = QtWidgets.QPushButton(translate("CAM_Vise", "Remove"))
-        self.remove.setToolTip(translate("CAM_Vise", "Take the one picked away"))
+        self.remove = QtWidgets.QPushButton(translate("CAM_Workholding", "Remove"))
+        self.remove.setToolTip(translate("CAM_Workholding", "Take the one picked away"))
         row = QtWidgets.QHBoxLayout()
         row.addWidget(self.offset, 1)
         row.addWidget(self.remove)
-        layout.addRow(translate("CAM_Vise", "Position"), row)
+        layout.addRow(translate("CAM_Workholding", "Position"), row)
         # the one picked's size, the others of its kind on its side with it; a picture of it,
         # its drawing or a clamp's own thumbnail
         self.sizes = QtWidgets.QWidget()
         self.sizeGrid = QtWidgets.QGridLayout(self.sizes)
         self.sizeGrid.setContentsMargins(0, 0, 0, 0)
         self.sizeBoxes = {}
-        layout.addRow(translate("CAM_Vise", "Size"), self.sizes)
-        self.sameSide = QtWidgets.QCheckBox(translate("CAM_Vise", "The others on its side too"))
+        layout.addRow(translate("CAM_Workholding", "Size"), self.sizes)
+        self.sameSide = QtWidgets.QCheckBox(
+            translate("CAM_Workholding", "The others on its side too")
+        )
         self.sameSide.setToolTip(
-            translate("CAM_Vise", "Its size given to the others of its kind on its side")
+            translate("CAM_Workholding", "Its size given to the others of its kind on its side")
         )
         self.sameSide.setChecked(True)
         layout.addRow("", self.sameSide)
@@ -386,7 +392,7 @@ class _StopsClamps:
         keep = combo.currentData()
         combo.blockSignals(True)
         combo.clear()
-        combo.addItem(translate("CAM_Vise", "None"), None)
+        combo.addItem(translate("CAM_Workholding", "None"), None)
         for side in Items.sides(self.job) if first else []:
             if Items.adjacent(first, side):
                 combo.addItem(self.names.get(side, side), side)
@@ -409,9 +415,9 @@ class _StopsClamps:
         ):
             QtWidgets.QMessageBox.warning(
                 FreeCADGui.getMainWindow(),
-                translate("CAM_Vise", "Clamps"),
+                translate("CAM_Workholding", "Clamps"),
                 translate(
-                    "CAM_Vise",
+                    "CAM_Workholding",
                     "Save the document first: the clamp's parts are linked from its own file.",
                 ),
             )
@@ -437,9 +443,9 @@ class _StopsClamps:
         keep = combo.currentData()
         combo.blockSignals(True)
         combo.clear()
-        combo.addItem(translate("CAM_Vise", "None"), None)
-        combo.addItem(translate("CAM_Vise", "Side clamp"), "SideClamp")
-        combo.addItem(translate("CAM_Vise", "Edge clamp"), "EdgeClamp")
+        combo.addItem(translate("CAM_Workholding", "None"), None)
+        combo.addItem(translate("CAM_Workholding", "Side clamp"), "SideClamp")
+        combo.addItem(translate("CAM_Workholding", "Edge clamp"), "EdgeClamp")
         for name, path, _ in self.files:
             combo.addItem(name, path)
         combo.setCurrentIndex(max(0, combo.findData(keep)) if keep is not None else 0)
@@ -452,9 +458,9 @@ class _StopsClamps:
         if not self.job.Document.FileName:
             QtWidgets.QMessageBox.warning(
                 FreeCADGui.getMainWindow(),
-                translate("CAM_Vise", "Clamps"),
+                translate("CAM_Workholding", "Clamps"),
                 translate(
-                    "CAM_Vise",
+                    "CAM_Workholding",
                     "Save the document first: the clamp's parts are linked from its own file.",
                 ),
             )
@@ -476,8 +482,8 @@ class _StopsClamps:
         if clamp is None:
             QtWidgets.QMessageBox.warning(
                 FreeCADGui.getMainWindow(),
-                translate("CAM_Vise", "Clamps"),
-                translate("CAM_Vise", "%s holds no clamp.") % os.path.basename(path),
+                translate("CAM_Workholding", "Clamps"),
+                translate("CAM_Workholding", "%s holds no clamp.") % os.path.basename(path),
             )
             return None
         self.files.append((self._clampName(path, clamp[0]), path, clamp[1]))
@@ -520,7 +526,9 @@ class _StopsClamps:
             which = combo.currentData()
             row["count"].setEnabled(which is not None)
         self.clampNote.setText(
-            translate("CAM_Vise", "No side clamp on the %s: it would push the part off the stops")
+            translate(
+                "CAM_Workholding", "No side clamp on the %s: it would push the part off the stops"
+            )
             % ", ".join(taken)
             if taken
             else ""
@@ -545,7 +553,7 @@ class _StopsClamps:
         stops = Items.stopsOf(self.job)
         first = self.stopRows[0]["side"]
         first.clear()
-        first.addItem(translate("CAM_Vise", "None"), None)
+        first.addItem(translate("CAM_Workholding", "None"), None)
         for side in standing:
             first.addItem(self.names.get(side, side), side)
         first.setCurrentIndex(max(0, first.findData(stops[0]["side"] if stops else None)))
@@ -559,15 +567,15 @@ class _StopsClamps:
             spec = stops[i] if i < len(stops) else {}
             kind = row["kind"]
             kind.clear()
-            kind.addItem(translate("CAM_Vise", "Dog"), "Dog")
-            kind.addItem(translate("CAM_Vise", "Fence"), "Fence")
+            kind.addItem(translate("CAM_Workholding", "Dog"), "Dog")
+            kind.addItem(translate("CAM_Workholding", "Fence"), "Fence")
             # another Job's stop, shared: this one's own on its other face
             owners = Items.shareableStops(self.job)
             if spec.get("share") is not None and spec["share"] not in owners:
                 owners.insert(0, spec["share"])
             for owner in owners:
                 kind.addItem(
-                    translate("CAM_Vise", "%s, in %s")
+                    translate("CAM_Workholding", "%s, in %s")
                     % (owner.Label, PathWorkholding.memberOf(owner)[0].Label),
                     ("share", owner.Name),
                 )
@@ -580,7 +588,9 @@ class _StopsClamps:
             row["count"].setValue(spec.get("count", 2 if i == 0 else 1))
             for job in spec.get("sharedWith", []):
                 notes.append(
-                    translate("CAM_Vise", "Shared with %s: its stops stay, the part moves to them")
+                    translate(
+                        "CAM_Workholding", "Shared with %s: its stops stay, the part moves to them"
+                    )
                     % job.Label
                 )
         self.shared.setText("\n".join(notes))
@@ -626,7 +636,7 @@ class _StopsClamps:
             if side:
                 text = "%s: %s" % (self.names.get(side, side), piece.Label)
             if PathWorkholding.isShared(piece):
-                text += " " + translate("CAM_Vise", "(shared)")
+                text += " " + translate("CAM_Workholding", "(shared)")
             item = QtWidgets.QListWidgetItem(text)
             item.setData(QtCore.Qt.UserRole, piece.Name)
             self.list.addItem(item)

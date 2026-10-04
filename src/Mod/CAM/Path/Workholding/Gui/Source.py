@@ -112,16 +112,16 @@ def _askLibrary(doc, file, item):
     """Whether to download the library's file for one not found."""
     answer = QtWidgets.QMessageBox.question(
         FreeCADGui.getMainWindow(),
-        translate("CAM_Vise", "Workholding not found"),
+        translate("CAM_Workholding", "Workholding not found"),
         translate(
-            "CAM_Vise",
+            "CAM_Workholding",
             "%s uses %s, which was not found. The library has it: %s.\n\nDownload it?",
         )
         % (doc.Label, os.path.basename(file), item.get("label", item["id"]))
         + (
             "\n\n"
             + translate(
-                "CAM_Vise",
+                "CAM_Workholding",
                 "The library's has changed since it was added: the Job's toolpaths were made "
                 "with it as it was.",
             )
@@ -141,15 +141,15 @@ def _usedBy(rows):
     said = []
     if vises:
         said.append(
-            translate("CAM_Vise", "1 vise")
+            translate("CAM_Workholding", "1 vise")
             if vises == 1
-            else translate("CAM_Vise", "%d vises") % vises
+            else translate("CAM_Workholding", "%d vises") % vises
         )
     if clamps:
         said.append(
-            translate("CAM_Vise", "1 clamp")
+            translate("CAM_Workholding", "1 clamp")
             if clamps == 1
-            else translate("CAM_Vise", "%d clamps") % clamps
+            else translate("CAM_Workholding", "%d clamps") % clamps
         )
     return ", ".join(said)
 
@@ -163,9 +163,9 @@ def _askChanged(doc, changed):
     lines = []
     for entry in files:
         why = (
-            translate("CAM_Vise", "updated from %s") % entry["library"]
+            translate("CAM_Workholding", "updated from %s") % entry["library"]
             if entry["library"]
-            else translate("CAM_Vise", "changed on this computer")
+            else translate("CAM_Workholding", "changed on this computer")
         )
         lines.append(
             "<p style='margin: 0 0 6px 0'><b>%s</b> — %s<br>&nbsp;&nbsp;&nbsp;&nbsp;%s</p>"
@@ -173,23 +173,23 @@ def _askChanged(doc, changed):
         )
     box = QtWidgets.QMessageBox(FreeCADGui.getMainWindow())
     box.setIcon(QtWidgets.QMessageBox.Information)
-    box.setWindowTitle(translate("CAM_Vise", "Workholding Files Changed"))
+    box.setWindowTitle(translate("CAM_Workholding", "Workholding Files Changed"))
     box.setTextFormat(QtCore.Qt.RichText)
     box.setText(
         "<p>%s</p>%s<p>%s</p>"
         % (
-            translate("CAM_Vise", "These files have changed since they were added to %s:")
+            translate("CAM_Workholding", "These files have changed since they were added to %s:")
             % doc.Label,
             "".join(lines),
             translate(
-                "CAM_Vise",
+                "CAM_Workholding",
                 "The Job uses them as they are now. Check the toolpaths near them before cutting.",
             ),
         )
     )
     box.setDetailedText("\n".join(entry["path"] for entry in files))
     later = box.addButton(
-        translate("CAM_Vise", "Remind Me Next Time"), QtWidgets.QMessageBox.RejectRole
+        translate("CAM_Workholding", "Remind Me Next Time"), QtWidgets.QMessageBox.RejectRole
     )
     ok = box.addButton(QtWidgets.QMessageBox.Ok)
     box.setDefaultButton(ok)
@@ -197,7 +197,7 @@ def _askChanged(doc, changed):
     if box.clickedButton() == later:
         for entry in files:
             Path.Log.warning(
-                translate("CAM_Vise", "%s: %s has changed since it was added")
+                translate("CAM_Workholding", "%s: %s has changed since it was added")
                 % (doc.Label, entry["path"])
             )
         return
@@ -211,9 +211,9 @@ def _askFile(doc, file):
     name = os.path.basename(file.replace("\\", "/"))
     answer = QtWidgets.QMessageBox.question(
         FreeCADGui.getMainWindow(),
-        translate("CAM_Vise", "Workholding not found"),
+        translate("CAM_Workholding", "Workholding not found"),
         translate(
-            "CAM_Vise",
+            "CAM_Workholding",
             "%s uses %s, which is not in the workholding folders.\n\nFind the file?",
         )
         % (doc.Label, name),
@@ -222,7 +222,7 @@ def _askFile(doc, file):
         return None
     path, _ = QtWidgets.QFileDialog.getOpenFileName(
         FreeCADGui.getMainWindow(),
-        translate("CAM_Vise", "Find %s") % name,
+        translate("CAM_Workholding", "Find %s") % name,
         PathLibrary.folder(),
         translate("CAM_AddVise", "FreeCAD document (*.FCStd)"),
     )

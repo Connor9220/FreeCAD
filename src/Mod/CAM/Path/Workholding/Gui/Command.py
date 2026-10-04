@@ -65,7 +65,7 @@ def _jobOfSelection():
         return None
     label, ok = QtWidgets.QInputDialog.getItem(
         FreeCADGui.getMainWindow(),
-        translate("CAM_Vise", "Vise"),
+        translate("CAM_Workholding", "Vise"),
         translate("CAM_AddVise", "Job"),
         [j.Label for j in jobs],
         0,
@@ -74,15 +74,15 @@ def _jobOfSelection():
     return jobs[[j.Label for j in jobs].index(label)] if ok else None
 
 
-class CommandVise:
+class CommandWorkholding:
     """A vise of a Job: the stock seated in one it has, or one added from the library."""
 
     def GetResources(self):
         return {
             "Pixmap": "CAM_Vise",
-            "MenuText": QT_TRANSLATE_NOOP("CAM_Vise", "Workholding…"),
+            "MenuText": QT_TRANSLATE_NOOP("CAM_Workholding", "Workholding…"),
             "ToolTip": QT_TRANSLATE_NOOP(
-                "CAM_Vise",
+                "CAM_Workholding",
                 "Seat the Job's stock in one of its vises, or add one from the library: against "
                 "the fixed jaw, held as deep as asked, the moving jaw closed on it.",
             ),
@@ -170,7 +170,7 @@ class CommandLibrary:
 
 
 if FreeCAD.GuiUp:
-    FreeCADGui.addCommand("CAM_Vise", CommandVise())
+    FreeCADGui.addCommand("CAM_Workholding", CommandWorkholding())
     FreeCADGui.addCommand("CAM_WorkholdingLibrary", CommandLibrary())
     FreeCADGui.addCommand("CAM_AddAnother", CommandAddAnother())
 

@@ -51,7 +51,7 @@ def mmBox(ui, tip=None, value=None, step=None, minimum=None):
 
 def browseButton(tip):
     """browseButton(tip) ... a button opening the workholding browser, to choose another."""
-    button = QtWidgets.QPushButton(translate("CAM_Vise", "Browse…"))
+    button = QtWidgets.QPushButton(translate("CAM_Workholding", "Browse…"))
     button.setIcon(QtGui.QIcon.fromTheme("edit-find", QtGui.QIcon(":/icons/zoom-in.svg")))
     button.setToolTip(tip)
     return button
@@ -84,12 +84,12 @@ def themedIcon(resource, size=32):
 def sides():
     """sides() ... the sides of a part, as the view cube names them, and the Job's axis each faces out."""
     return [
-        (translate("CAM_Vise", "Bottom"), "-Z"),
-        (translate("CAM_Vise", "Top"), "+Z"),
-        (translate("CAM_Vise", "Front"), "-Y"),
-        (translate("CAM_Vise", "Back"), "+Y"),
-        (translate("CAM_Vise", "Left"), "-X"),
-        (translate("CAM_Vise", "Right"), "+X"),
+        (translate("CAM_Workholding", "Bottom"), "-Z"),
+        (translate("CAM_Workholding", "Top"), "+Z"),
+        (translate("CAM_Workholding", "Front"), "-Y"),
+        (translate("CAM_Workholding", "Back"), "+Y"),
+        (translate("CAM_Workholding", "Left"), "-X"),
+        (translate("CAM_Workholding", "Right"), "+X"),
     ]
 
 

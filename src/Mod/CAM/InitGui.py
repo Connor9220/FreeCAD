@@ -129,7 +129,7 @@ class CAMWorkbench(Workbench):
         projcmdlist = [
             "CAM_Job",
             "CAM_Workplane",
-            "CAM_Vise",
+            "CAM_Workholding",
             "CAM_Sanity",
         ]
         postcmdlist = ["CAM_Post", "CAM_PostSelected"]
@@ -416,7 +416,7 @@ class CAMWorkbench(Workbench):
             )
         if onlyJob:
             self.appendContextMenu(
-                "", ["CAM_OpActiveToggle", "CAM_ExportTemplate", "CAM_Sanity", "CAM_Vise"]
+                "", ["CAM_OpActiveToggle", "CAM_ExportTemplate", "CAM_Sanity", "CAM_Workholding"]
             )
         if startPoint:
             self.appendContextMenu("", ["CAM_SetStartPoint"])
@@ -426,7 +426,7 @@ class CAMWorkbench(Workbench):
         import Path.Workholding.Vise as PathWorkholding
 
         if not onlyOps and all(PathWorkholding.isMember(sel) for sel in selection):
-            self.appendContextMenu("", ["CAM_OpActiveToggle", "CAM_Vise", "CAM_AddAnother"])
+            self.appendContextMenu("", ["CAM_OpActiveToggle", "CAM_Workholding", "CAM_AddAnother"])
         if onlyOps and len(selection) == 1:
             self.appendContextMenu("", ["CAM_Inspect"])
         if onlyJob or onlyOps:

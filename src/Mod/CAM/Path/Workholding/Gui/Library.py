@@ -545,7 +545,7 @@ class LibraryDialog(QtWidgets.QDialog):
         library = item.get("library", "") or (listed["index"] if listed else "")
         if library:
             return (0, PathLibrary.libraryName(library).lower()), PathLibrary.libraryName(library)
-        return (1, ""), translate("CAM_Vise", "Your own files")
+        return (1, ""), translate("CAM_Workholding", "Your own files")
 
     def refilter(self):
         """Those found listed by name, under the library each came from on this computer; the

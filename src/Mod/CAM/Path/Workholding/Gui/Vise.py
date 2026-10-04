@@ -333,13 +333,13 @@ class _StepRows(QtWidgets.QWidget if FreeCAD.GuiUp else object):
         layout.setContentsMargins(0, 0, 0, 0)
         self.table = QtWidgets.QTableWidget(0, 2)
         self.table.setHorizontalHeaderLabels(
-            [translate("CAM_Vise", "Down"), translate("CAM_Vise", "In")]
+            [translate("CAM_Workholding", "Down"), translate("CAM_Workholding", "In")]
         )
         self.table.horizontalHeaderItem(0).setToolTip(
-            translate("CAM_Vise", "From the soft jaws' top down to the step's floor")
+            translate("CAM_Workholding", "From the soft jaws' top down to the step's floor")
         )
         self.table.horizontalHeaderItem(1).setToolTip(
-            translate("CAM_Vise", "From the soft jaws' face in to the step's wall")
+            translate("CAM_Workholding", "From the soft jaws' face in to the step's wall")
         )
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
@@ -349,11 +349,11 @@ class _StepRows(QtWidgets.QWidget if FreeCAD.GuiUp else object):
         buttons.addStretch()
         add = QtWidgets.QToolButton()
         add.setText("+")
-        add.setToolTip(translate("CAM_Vise", "Another step cut in the soft jaws"))
+        add.setToolTip(translate("CAM_Workholding", "Another step cut in the soft jaws"))
         add.clicked.connect(self.addStep)
         remove = QtWidgets.QToolButton()
         remove.setText("\u2212")
-        remove.setToolTip(translate("CAM_Vise", "Take the chosen step away, else the last"))
+        remove.setToolTip(translate("CAM_Workholding", "Take the chosen step away, else the last"))
         remove.clicked.connect(self.removeStep)
         buttons.addWidget(add)
         buttons.addWidget(remove)
@@ -383,7 +383,10 @@ class _StepRows(QtWidgets.QWidget if FreeCAD.GuiUp else object):
 
     def renumber(self):
         self.table.setVerticalHeaderLabels(
-            [translate("CAM_Vise", "Step %d") % (i + 1) for i in range(self.table.rowCount())]
+            [
+                translate("CAM_Workholding", "Step %d") % (i + 1)
+                for i in range(self.table.rowCount())
+            ]
         )
 
     def addStep(self):
@@ -499,7 +502,7 @@ class _ParallelPicker(QtCore.QObject if FreeCAD.GuiUp else object):
         # one picked, part of the list above
         self.set = Widgets.combo()
         self.set.setToolTip(
-            translate("CAM_Vise", "The set of parallels: its type, thickness and length")
+            translate("CAM_Workholding", "The set of parallels: its type, thickness and length")
         )
         unit = None
         for i, entry in enumerate(self.sets):
@@ -516,9 +519,9 @@ class _ParallelPicker(QtCore.QObject if FreeCAD.GuiUp else object):
                     ),
                     (i, t),
                 )
-        self.set.addItem(translate("CAM_Vise", "Custom\u2026"), "custom")
+        self.set.addItem(translate("CAM_Workholding", "Custom\u2026"), "custom")
         self.heights = Widgets.combo()
-        self.heights.setToolTip(translate("CAM_Vise", "How tall the pair is"))
+        self.heights.setToolTip(translate("CAM_Workholding", "How tall the pair is"))
         self.pair = QtWidgets.QWidget()
         row = QtWidgets.QHBoxLayout(self.pair)
         row.setContentsMargins(0, 0, 0, 0)
@@ -531,21 +534,22 @@ class _ParallelPicker(QtCore.QObject if FreeCAD.GuiUp else object):
             return b
 
         self.height = box(
-            translate("CAM_Vise", "How tall the parallels are"), FreeCAD.Units.Inch.Value
+            translate("CAM_Workholding", "How tall the parallels are"), FreeCAD.Units.Inch.Value
         )
         self.thickness = box(
-            translate("CAM_Vise", "How thick each parallel is"), PathParallels.DefaultThickness
+            translate("CAM_Workholding", "How thick each parallel is"),
+            PathParallels.DefaultThickness,
         )
         self.length = box(
-            translate("CAM_Vise", "How long the parallels are, across the jaws"),
+            translate("CAM_Workholding", "How long the parallels are, across the jaws"),
             PathParallels.DefaultLength,
         )
         self.soft = QtWidgets.QComboBox()
-        self.soft.addItem(translate("CAM_Vise", "Hard, steel"), False)
-        self.soft.addItem(translate("CAM_Vise", "Soft, aluminum or plastic"), True)
+        self.soft.addItem(translate("CAM_Workholding", "Hard, steel"), False)
+        self.soft.addItem(translate("CAM_Workholding", "Soft, aluminum or plastic"), True)
         self.soft.setToolTip(
             translate(
-                "CAM_Vise",
+                "CAM_Workholding",
                 "A tool cutting soft parallels is warned of; hard, steel ones are a crash",
             )
         )
@@ -553,10 +557,10 @@ class _ParallelPicker(QtCore.QObject if FreeCAD.GuiUp else object):
         # the rows they take in the panel, those of custom ones only for them
         self.rows = [
             (QtWidgets.QLabel(translate("CAM_SeatInVise", "Parallels")), self.pair, False),
-            (QtWidgets.QLabel(translate("CAM_Vise", "Height")), self.height, True),
-            (QtWidgets.QLabel(translate("CAM_Vise", "Thickness")), self.thickness, True),
-            (QtWidgets.QLabel(translate("CAM_Vise", "Length")), self.length, False),
-            (QtWidgets.QLabel(translate("CAM_Vise", "Material")), self.soft, False),
+            (QtWidgets.QLabel(translate("CAM_Workholding", "Height")), self.height, True),
+            (QtWidgets.QLabel(translate("CAM_Workholding", "Thickness")), self.thickness, True),
+            (QtWidgets.QLabel(translate("CAM_Workholding", "Length")), self.length, False),
+            (QtWidgets.QLabel(translate("CAM_Workholding", "Material")), self.soft, False),
         ]
         self.set.currentIndexChanged.connect(self.setChanged)
         self.heights.currentIndexChanged.connect(lambda *args: self.changed.emit())
@@ -634,7 +638,7 @@ class _ParallelPicker(QtCore.QObject if FreeCAD.GuiUp else object):
             if height <= 0 or thickness <= 0 or length <= 0:
                 return None
             return PathParallels.Parallel(
-                height, thickness, length, soft, translate("CAM_Vise", "Custom")
+                height, thickness, length, soft, translate("CAM_Workholding", "Custom")
             )
         height = self.heights.currentData()
         if not isinstance(data, tuple) or height is None:
@@ -763,9 +767,9 @@ class TaskPanelVise:
         # part sits in it; what the stock stands on; where along the jaws and what moves
         sections = []
         for title, icon in (
-            (translate("CAM_Vise", "Vise"), QtGui.QIcon(":/icons/CAM_Vise.svg")),
-            (translate("CAM_Vise", "Stock"), Widgets.themedIcon(":/icons/stock.svg")),
-            (translate("CAM_Vise", "Position"), QtGui.QIcon(":/icons/Std_Placement.svg")),
+            (translate("CAM_Workholding", "Vise"), QtGui.QIcon(":/icons/CAM_Vise.svg")),
+            (translate("CAM_Workholding", "Stock"), Widgets.themedIcon(":/icons/stock.svg")),
+            (translate("CAM_Workholding", "Position"), QtGui.QIcon(":/icons/Std_Placement.svg")),
         ):
             section = QtWidgets.QWidget()
             section.setWindowTitle(title)
@@ -790,7 +794,7 @@ class TaskPanelVise:
         for owner in _shareable(job):
             free = PathWorkholding.freeStations(owner)
             self.addEntry(
-                translate("CAM_Vise", "%s, in %s (station %s free)")
+                translate("CAM_Workholding", "%s, in %s (station %s free)")
                 % (
                     owner.Label,
                     PathWorkholding.memberOf(owner)[0].Label,
@@ -806,7 +810,7 @@ class TaskPanelVise:
             PathWorkholding.refreshSettings(self.existing)
         self.vise.setCurrentIndex(self.lastVise)
         self.browse = Widgets.browseButton(
-            translate("CAM_Vise", "Choose a vise on this computer or from a library")
+            translate("CAM_Workholding", "Choose a vise on this computer or from a library")
         )
         row = QtWidgets.QHBoxLayout()
         row.addWidget(self.vise, 1)
@@ -815,21 +819,25 @@ class TaskPanelVise:
         # the station of a vise of several the stock goes in: its own, or one free
         self.station = QtWidgets.QComboBox()
         self.station.setToolTip(
-            translate("CAM_Vise", "The station of the vise the stock goes in, one no other Job has")
+            translate(
+                "CAM_Workholding", "The station of the vise the stock goes in, one no other Job has"
+            )
         )
         self.station.setStyleSheet("QComboBox { combobox-popup: 0; }")
-        self.stationLabel = QtWidgets.QLabel(translate("CAM_Vise", "Station"))
+        self.stationLabel = QtWidgets.QLabel(translate("CAM_Workholding", "Station"))
         layout.addRow(self.stationLabel, self.station)
         # how the part sits in it: the side of the part on the vise's bottom, the floor or the
         # parallels, and the side against its fixed jaw, one of the four left
         self.seat = QtWidgets.QComboBox()
         self.seat.setToolTip(
-            translate("CAM_Vise", "The side of the part on the floor or the parallels")
+            translate("CAM_Workholding", "The side of the part on the floor or the parallels")
         )
         self.jaw = QtWidgets.QComboBox()
-        self.jaw.setToolTip(translate("CAM_Vise", "The side of the part against the fixed jaw"))
-        layout.addRow(translate("CAM_Vise", "Bottom side"), self.seat)
-        layout.addRow(translate("CAM_Vise", "Fixed jaw side"), self.jaw)
+        self.jaw.setToolTip(
+            translate("CAM_Workholding", "The side of the part against the fixed jaw")
+        )
+        layout.addRow(translate("CAM_Workholding", "Bottom side"), self.seat)
+        layout.addRow(translate("CAM_Workholding", "Fixed jaw side"), self.jaw)
         self.seat.currentIndexChanged.connect(self.seatChanged)
         self.jaw.currentIndexChanged.connect(self.showSeat)
         # what the sides lit on the part are
@@ -838,9 +846,9 @@ class TaskPanelVise:
             '<span style="color:%s">\u25a0</span> %s'
             % (
                 _hex(SEAT_COLOR),
-                translate("CAM_Vise", "Bottom"),
+                translate("CAM_Workholding", "Bottom"),
                 _hex(JAW_FACE_COLOR),
-                translate("CAM_Vise", "Fixed jaw"),
+                translate("CAM_Workholding", "Fixed jaw"),
             )
         )
         layout.addRow("", legend)
@@ -848,18 +856,22 @@ class TaskPanelVise:
         # them to seat the stock on; a vise whose file does not name its plates keeps its own,
         # the choice not shown
         self.jaws = QtWidgets.QComboBox()
-        self.jaws.addItem(translate("CAM_Vise", "Hard"), "Hard")
-        self.jaws.addItem(translate("CAM_Vise", "Soft"), "Soft")
-        self.jaws.addItem(translate("CAM_Vise", "Grip"), "Grip")
+        self.jaws.addItem(translate("CAM_Workholding", "Hard"), "Hard")
+        self.jaws.addItem(translate("CAM_Workholding", "Soft"), "Soft")
+        self.jaws.addItem(translate("CAM_Workholding", "Grip"), "Grip")
         self.jaws.setToolTip(
-            translate("CAM_Vise", "The vise's own hard jaws, or soft jaws to cut to the part")
+            translate(
+                "CAM_Workholding", "The vise's own hard jaws, or soft jaws to cut to the part"
+            )
         )
-        self.jawsLabel = QtWidgets.QLabel(translate("CAM_Vise", "Jaws"))
+        self.jawsLabel = QtWidgets.QLabel(translate("CAM_Workholding", "Jaws"))
         layout.addRow(self.jawsLabel, self.jaws)
         self.softThickness = Widgets.mmBox(
-            ui, translate("CAM_Vise", "How thick the soft jaws are, from the vise's jaw out")
+            ui, translate("CAM_Workholding", "How thick the soft jaws are, from the vise's jaw out")
         )
-        self.softHeight = Widgets.mmBox(ui, translate("CAM_Vise", "How tall the soft jaws are"))
+        self.softHeight = Widgets.mmBox(
+            ui, translate("CAM_Workholding", "How tall the soft jaws are")
+        )
         self.steps = _StepRows(
             ui,
             lambda: (
@@ -869,9 +881,9 @@ class TaskPanelVise:
         )
         self.softRows = []
         for label, field in (
-            (translate("CAM_Vise", "Thickness"), self.softThickness),
-            (translate("CAM_Vise", "Height"), self.softHeight),
-            (translate("CAM_Vise", "Steps"), self.steps),
+            (translate("CAM_Workholding", "Thickness"), self.softThickness),
+            (translate("CAM_Workholding", "Height"), self.softHeight),
+            (translate("CAM_Workholding", "Steps"), self.steps),
         ):
             label = QtWidgets.QLabel(label)
             layout.addRow(label, field)
@@ -884,25 +896,27 @@ class TaskPanelVise:
             return Widgets.mmBox(ui, tip, value, step=0.01)
 
         self.gripHeight = length(
-            translate("CAM_Vise", "How far the grips stand above the jaws' tops: the grip"),
+            translate("CAM_Workholding", "How far the grips stand above the jaws' tops: the grip"),
             defaults["grip"],
         )
         self.gripSetback = length(
-            translate("CAM_Vise", "The grips' teeth behind the jaws' face"), defaults["setback"]
+            translate("CAM_Workholding", "The grips' teeth behind the jaws' face"),
+            defaults["setback"],
         )
         self.gripBite = length(
-            translate("CAM_Vise", "How far the grips' teeth bite into the stock"), defaults["bite"]
+            translate("CAM_Workholding", "How far the grips' teeth bite into the stock"),
+            defaults["bite"],
         )
         self.gripCount = QtWidgets.QSpinBox()
         self.gripCount.setRange(1, 6)
         self.gripCount.setValue(defaults["grips"])
-        self.gripCount.setToolTip(translate("CAM_Vise", "How many grips on each jaw"))
+        self.gripCount.setToolTip(translate("CAM_Workholding", "How many grips on each jaw"))
         self.gripRows = []
         for label, field in (
-            (translate("CAM_Vise", "Grip height"), self.gripHeight),
-            (translate("CAM_Vise", "Tooth setback"), self.gripSetback),
-            (translate("CAM_Vise", "Bite"), self.gripBite),
-            (translate("CAM_Vise", "Grips"), self.gripCount),
+            (translate("CAM_Workholding", "Grip height"), self.gripHeight),
+            (translate("CAM_Workholding", "Tooth setback"), self.gripSetback),
+            (translate("CAM_Workholding", "Bite"), self.gripBite),
+            (translate("CAM_Workholding", "Grips"), self.gripCount),
         ):
             label = QtWidgets.QLabel(label)
             layout.addRow(label, field)
@@ -988,23 +1002,23 @@ class TaskPanelVise:
 
         # what holds the stock, a section of its own above the rest: a vise, or stops and clamps
         holds = QtWidgets.QWidget()
-        holds.setWindowTitle(translate("CAM_Vise", "Workholding"))
+        holds.setWindowTitle(translate("CAM_Workholding", "Workholding"))
         holds.setWindowIcon(QtGui.QIcon(":/icons/CAM_Job.svg"))
         holdsLayout = QtWidgets.QFormLayout(holds)
         self.holds = Widgets.combo()
         self.byVise = _ComboChoice(
             self.holds,
-            translate("CAM_Vise", "Vise"),
+            translate("CAM_Workholding", "Vise"),
             "vise",
-            translate("CAM_Vise", "The stock seated in a vise"),
+            translate("CAM_Workholding", "The stock seated in a vise"),
         )
         self.byStops = _ComboChoice(
             self.holds,
-            translate("CAM_Vise", "Stops and clamps"),
+            translate("CAM_Workholding", "Stops and clamps"),
             "stops",
-            translate("CAM_Vise", "The stock on the table, pushed onto stops and clamped"),
+            translate("CAM_Workholding", "The stock on the table, pushed onto stops and clamped"),
         )
-        holdsLayout.addRow(translate("CAM_Vise", "Holds it"), self.holds)
+        holdsLayout.addRow(translate("CAM_Workholding", "Holds it"), self.holds)
         self.stops = _StopsClamps(self, ui)
         # the table it stands on, with the stops and clamps
         sections[1][1].addRow(self.stops.table)
@@ -1085,7 +1099,7 @@ class TaskPanelVise:
         """The step the stops' and clamps' changes go into, opened if it is not: pending until
         OK or Apply keep it, Cancel undoes it."""
         if not self.adding and not self.pending:
-            self.job.Document.openTransaction(translate("CAM_Vise", "Stops and clamps"))
+            self.job.Document.openTransaction(translate("CAM_Workholding", "Stops and clamps"))
             self.pending = True
 
     def applyStops(self):
@@ -1483,9 +1497,9 @@ class TaskPanelVise:
         self.seat.blockSignals(True)
         self.seat.clear()
         if choose:
-            self.seat.addItem(translate("CAM_Vise", "Choose a side…"), None)
+            self.seat.addItem(translate("CAM_Workholding", "Choose a side…"), None)
         elif turn is None:
-            self.seat.addItem(translate("CAM_Vise", "As it is"), None)
+            self.seat.addItem(translate("CAM_Workholding", "As it is"), None)
         for label, direction in Widgets.sides():
             self.seat.addItem(label, direction)
         chosen = self.seat.findData(_opposite(turn[0])) if turn and not choose else 0
@@ -1504,7 +1518,7 @@ class TaskPanelVise:
         # which side is against the fixed jaw waits on which is on the bottom
         self.jaw.setEnabled(seat is not None)
         if seat is None:
-            self.jaw.addItem(translate("CAM_Vise", "As it is"), None)
+            self.jaw.addItem(translate("CAM_Workholding", "As it is"), None)
             return
         for label, direction in Widgets.sides():
             if (
@@ -1702,7 +1716,7 @@ class TaskPanelVise:
         if count > 1:
             now = PathWorkholding.station(vise)
             for number in sorted({now} | set(PathWorkholding.freeStations(vise))):
-                self.station.addItem(translate("CAM_Vise", "Station %d") % number, number)
+                self.station.addItem(translate("CAM_Workholding", "Station %d") % number, number)
             self.station.setCurrentIndex(self.station.findData(now))
         self.station.blockSignals(False)
         self.station.setVisible(count > 1)
