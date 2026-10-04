@@ -100,9 +100,16 @@ void Shape::RotateProfile(
         vstart = i * 2 * (nSlices + 1);
 
         for (int j = 0; j <= nSlices; j++) {
-            // generate vertices
+            // generate vertices: a whole turn half a slice round, so no corner sits square across
+            // from the axis, where a ray of the dexel stock running through the axis would meet
+            // the mesh on its edges and lose count of in and out
             float sx = sinTable[j];
             float sy = cosTable[j];
+            if (!isHalfTurn) {
+                const float a = 2 * pi * ((float)j + 0.5f) / (float)nSlices;
+                sx = sinf(a);
+                sy = cosf(a);
+            }
             float x1 = prevrad * sx + distance;
             float y1 = prevrad * sy;
             float x2 = rad * sx + distance;
