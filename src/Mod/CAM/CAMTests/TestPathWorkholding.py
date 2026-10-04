@@ -1095,3 +1095,217 @@ class TestPathWorkholdingStations(PathTestUtils.PathTestBase):
         self.assertEqual(len(PathWorkholdingCheck.checkZip(path)), 1)
         with self.assertRaises(ValueError):
             PathWorkholding.addVise(self.job, self.part)
+
+
+class TestPathWorkholdingRecover(PathTestUtils.PathTestBase):
+    """A Job whose vise's file is not where it was: found again by its name in the folders vises
+    are kept in, got from a library, picked, or said to be lost, its settings kept."""
+
+    # the vise's own file and the Job as TestPathWorkholdingAdd makes them
+    jaw = TestPathWorkholdingAdd.jaw
+
+    def setUp(self):
+        TestPathWorkholdingAdd.setUp(self)
+        self.vise = PathWorkholding.addVise(self.job, self.part)
+        self.vise.Opening = 42
+        self.doc.recompute()
+        self.doc.save()
+        self.jobPath = self.doc.FileName
+        self.visePath = self.source.FileName
+        FreeCAD.closeDocument(self.doc.Name)
+        FreeCAD.closeDocument(self.source.Name)
+        # the vise's file moved away
+        self.moved = os.path.join(self.dir, "elsewhere")
+        os.makedirs(self.moved)
+        shutil.move(self.visePath, os.path.join(self.moved, "vise.FCStd"))
+        self.doc = FreeCAD.openDocument(self.jobPath)
+        self.source = None
+
+    def tearDown(self):
+        for name in list(FreeCAD.listDocuments()):
+            FreeCAD.closeDocument(name)
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def reopened(self):
+        return [o for o in self.doc.Objects if PathWorkholding.viseSetup(o) is not None][0]
+
+    def assertLinked(self, vise):
+        parts = [o for o in vise.Group if o.isDerivedFrom("App::Link")]
+        self.assertTrue(parts and all(o.LinkedObject is not None for o in parts))
+        # the moving jaw where its opening says
+        self.assertRoughly(self.jaw(vise).Placement.Base.y, -42)
+
+    def test00_lost(self):
+        """Its parts unlinked, by the file and the object each was linked to."""
+        lost = PathWorkholding.lostParts(self.doc)
+        self.assertEqual(list(lost), ["vise.FCStd"])
+        self.assertEqual(
+            sorted(n for _, n in lost["vise.FCStd"]),
+            ["Body", "FixedPlate", "MovingJaw", "MovingPlate"],
+        )
+
+    def test01_found_in_a_folder(self):
+        """Found by its name in a folder vises are kept in: linked again, nothing asked."""
+        asked = []
+        found = PathWorkholding.recoverParts(
+            self.doc, folders=[self.moved], library=[], askFile=lambda f: asked.append(f)
+        )
+        self.assertEqual(found, {"vise.FCStd": os.path.join(self.moved, "vise.FCStd")})
+        self.assertEqual(asked, [])
+        self.assertLinked(self.reopened())
+        self.assertEqual(PathWorkholding.lostParts(self.doc), {})
+
+    def test02_got_from_a_library(self):
+        """Not in the folders and not found by the user, but a library has it: downloaded into the
+        first, once asked."""
+        import hashlib, json
+
+        library = os.path.join(self.dir, "library")
+        os.makedirs(os.path.join(library, "vises"))
+        shutil.copy(os.path.join(self.moved, "vise.FCStd"), os.path.join(library, "vises"))
+        data = open(os.path.join(library, "vises", "vise.FCStd"), "rb").read()
+        index = os.path.join(library, "index.json")
+        item = {
+            "id": "vise",
+            "kind": "vise",
+            "file": "vises/vise.FCStd",
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "label": "Test vise",
+        }
+        with open(index, "w") as f:
+            json.dump({"format": 1, "items": [item]}, f)
+        here = os.path.join(self.dir, "here")
+        asked = []
+        found = PathWorkholding.recoverParts(
+            self.doc,
+            folders=[here],
+            library=[index],
+            askLibrary=lambda f, i: asked.append(i["id"]) or True,
+            askFile=lambda f: asked.append("file") or None,
+        )
+        self.assertEqual(asked, ["file", "vise"])
+        self.assertEqual(found["vise.FCStd"], os.path.join(here, "vise.FCStd"))
+        self.assertLinked(self.reopened())
+
+    def test03_picked(self):
+        """Not found anywhere: the file picked."""
+        found = PathWorkholding.recoverParts(
+            self.doc,
+            folders=[os.path.join(self.dir, "nowhere")],
+            library=[],
+            askLibrary=lambda f, i: True,
+            askFile=lambda f: os.path.join(self.moved, "vise.FCStd"),
+        )
+        self.assertEqual(found["vise.FCStd"], os.path.join(self.moved, "vise.FCStd"))
+        self.assertLinked(self.reopened())
+
+    def test05_found_in_its_own_library(self):
+        """Its file came from a library not among the user's, kept under another name there:
+        found in it by its id."""
+        import hashlib, json
+
+        library = os.path.join(self.dir, "private")
+        os.makedirs(os.path.join(library, "vises"))
+        shutil.copy(
+            os.path.join(self.moved, "vise.FCStd"), os.path.join(library, "vises", "renamed.FCStd")
+        )
+        data = open(os.path.join(library, "vises", "renamed.FCStd"), "rb").read()
+        index = os.path.join(library, "index.json")
+        with open(index, "w") as f:
+            json.dump(
+                {
+                    "format": 1,
+                    "items": [
+                        {
+                            "id": "the-vise",
+                            "kind": "vise",
+                            "file": "vises/renamed.FCStd",
+                            "size": len(data),
+                            "sha256": hashlib.sha256(data).hexdigest(),
+                        }
+                    ],
+                },
+                f,
+            )
+        vise = self.reopened()
+        self.assertTrue(vise.SourceFile.endswith("vise.FCStd"))
+        vise.SourceLibrary = index
+        vise.SourceItem = "the-vise"
+        here = os.path.join(self.dir, "here")
+        found = PathWorkholding.recoverParts(
+            self.doc, folders=[here], library=[], askLibrary=lambda f, i: True
+        )
+        self.assertEqual(found["vise.FCStd"], os.path.join(here, "renamed.FCStd"))
+        self.assertLinked(vise)
+        self.assertEqual(vise.SourceItem, "the-vise")
+
+    def test06_changed_file_told(self):
+        """Found again, but its file is not the one it was added with: linked, and told of, the
+        sha256 it was added with kept until the change is taken; its stamp's library and id
+        kept on it."""
+        vise = self.reopened()
+        added = vise.SourceSha256
+        self.assertTrue(added)
+        path = os.path.join(self.moved, "vise.FCStd")
+        source = FreeCAD.openDocument(path)
+        settings = [o for o in source.Objects if o.TypeId == "App::VarSet"][0]
+        for name, value in (("Library", "https://example.com/lib"), ("LibraryItem", "the-vise")):
+            settings.addProperty("App::PropertyString", name, "About", "")
+            setattr(settings, name, value)
+        source.save()
+        FreeCAD.closeDocument(source.Name)
+        found = PathWorkholding.recoverParts(self.doc, folders=[self.moved], library=[])
+        self.assertEqual(found["vise.FCStd"], path)
+        self.assertLinked(vise)
+        self.assertEqual(vise.SourceSha256, added)
+        self.assertEqual(
+            (vise.SourceLibrary, vise.SourceItem), ("https://example.com/lib", "the-vise")
+        )
+        changed = PathWorkholding.changedSources(self.doc)
+        self.assertEqual(changed, [(vise, path)])
+        PathWorkholding.acceptChanged(changed)
+        self.assertNotEqual(vise.SourceSha256, added)
+        self.assertEqual(PathWorkholding.changedSources(self.doc), [])
+
+    def test07_library_copy_changed(self):
+        """The library's copy is not the one it was added with: said so when it is offered."""
+        import hashlib, json
+
+        library = os.path.join(self.dir, "library")
+        os.makedirs(os.path.join(library, "vises"))
+        shutil.copy(os.path.join(self.moved, "vise.FCStd"), os.path.join(library, "vises"))
+        index = os.path.join(library, "index.json")
+        with open(index, "w") as f:
+            json.dump(
+                {
+                    "format": 1,
+                    "items": [
+                        {
+                            "id": "vise",
+                            "kind": "vise",
+                            "file": "vises/vise.FCStd",
+                            "sha256": hashlib.sha256(b"another").hexdigest(),
+                        }
+                    ],
+                },
+                f,
+            )
+        offered = []
+        PathWorkholding.recoverParts(
+            self.doc,
+            folders=[os.path.join(self.dir, "here")],
+            library=[index],
+            askLibrary=lambda f, i: offered.append(i["changed"]) or False,
+        )
+        self.assertEqual(offered, [True])
+
+    def test04_left_lost(self):
+        """Nothing found or picked: left as it is, its settings kept."""
+        found = PathWorkholding.recoverParts(
+            self.doc, folders=[], library=[], askLibrary=lambda f, i: False, askFile=lambda f: None
+        )
+        self.assertEqual(found, {"vise.FCStd": None})
+        vise = self.reopened()
+        self.assertRoughly(vise.Opening.Value, 42)
+        self.assertEqual(list(PathWorkholding.lostParts(self.doc)), ["vise.FCStd"])

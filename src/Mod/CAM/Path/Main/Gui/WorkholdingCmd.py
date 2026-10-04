@@ -19,17 +19,16 @@
 
 """Seat a Job's stock in a vise of its Workholding: against the fixed jaw, held as deep as asked,
 across the jaws as asked, the moving jaw closed on it. Add a vise from its own file, and another
-of a piece of workholding beside it."""
+of a piece of workholding beside it. Or hold it on the table: stops on one side or a corner, the
+stock against them, clamps round it, a table under it."""
 
 import os
-import re
-import zipfile
 
-from xml.etree import ElementTree
 
 import FreeCAD
 import Path
 import Path.Main.Workholding as PathWorkholding
+import Path.Main.WorkholdingItems as Items
 import Path.Main.WorkholdingJaws as PathJaws
 import Path.Main.WorkholdingParallels as PathParallels
 import Path.Preferences
@@ -64,50 +63,142 @@ def _prefs():
     return FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Mod/CAM")
 
 
-def _viseLabel(path):
-    """The label of the vise a vise's file holds, read from the file without opening it as a
-    document; None if it holds no vise: no part, or no VarSet with an Opening."""
-    try:
-        with zipfile.ZipFile(path) as archive:
-            root = ElementTree.fromstring(archive.read("Document.xml"))
-    except (OSError, KeyError, zipfile.BadZipFile, ElementTree.ParseError):
-        return None
-    types = {o.get("name"): o.get("type") for o in root.iter("Object") if o.get("type")}
-    labels = {}
-    opening = False
-    data = root.find("ObjectData")
-    for obj in data.findall("Object") if data is not None else []:
-        name = obj.get("name")
-        for prop in obj.iter("Property"):
-            if prop.get("name") == "Label" and prop.find("String") is not None:
-                labels[name] = prop.find("String").get("value")
-            elif prop.get("name") == "Opening" and types.get(name) == "App::VarSet":
-                opening = True
-    parts = [name for name, kind in types.items() if kind == "App::Part"]
-    if not opening or not parts:
-        return None
-    return labels.get(parts[0], parts[0])
+def _bound(obj, name):
+    """Whether an expression sets obj's property name."""
+    return any(path == name for path, _ in getattr(obj, "ExpressionEngine", []))
 
 
-def _library():
-    """The vises to choose from, as (label, path), by label: the vise files in the CAM assets'
-    Workholding folder and in the folder the last was added from."""
-    folders = [str(Path.Preferences.getAssetPath() / "Workholding")]
-    folders.append(_prefs().GetString("WorkholdingDir", ""))
-    seen = set()
-    vises = []
-    for folder in folders:
-        if not folder or not os.path.isdir(folder):
-            continue
-        for name in os.listdir(folder):
-            path = os.path.join(folder, name)
-            if not name.lower().endswith(".fcstd") or os.path.realpath(path) in seen:
-                continue
-            seen.add(os.path.realpath(path))
-            label = _viseLabel(path)
-            if label is not None:
-                vises.append((label, path))
-    return sorted(vises, key=lambda v: v[0].lower())
+def _pieceDrawing(piece, palette, width=330, height=130):
+    """A drawing of a stop or clamp made here, its sizes named on it as the panel names them:
+    from the front, facing the stock's side, its height, the stock behind it standing taller;
+    and from above, along the stock across and front to back down, the stock's edge beyond it.
+    Each view fills its half. None for any other."""
+    kind = type(getattr(piece, "Proxy", None)).__name__
+    if kind not in ("ObjectDog", "ObjectFence", "ObjectSideClamp", "ObjectEdgeClamp"):
+        return None
+
+    def v(name):
+        return float(getattr(piece, name).Value)
+
+    edge = kind == "ObjectEdgeClamp"
+    if kind == "ObjectDog":
+        wide, deep = ("Diameter", v("Diameter")), ("Diameter", v("Diameter"))
+    elif kind == "ObjectFence":
+        wide, deep = ("Length", v("Length")), ("Width", v("Width"))
+    else:
+        wide, deep = ("Width", v("Width")), ("Length", v("Length"))
+    tall = v("Drop") + v("Rise") if edge else v("Height")
+    reach = v("Reach") if edge else 0.0
+
+    pixmap = QtGui.QPixmap(width, height)
+    pixmap.fill(QtCore.Qt.transparent)
+    p = QtGui.QPainter(pixmap)
+    p.setRenderHint(QtGui.QPainter.Antialiasing)
+    ink = palette.color(QtGui.QPalette.Text)
+    faint = palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.Text)
+    dim = palette.color(QtGui.QPalette.Highlight).lighter(150)
+    stockColour = QtGui.QColor(138, 109, 59)
+    body = palette.color(QtGui.QPalette.Mid)
+    font = p.font()
+    font.setPointSizeF(max(7.0, font.pointSizeF() - 1))
+    p.setFont(font)
+    metrics = QtGui.QFontMetrics(font)
+    textH = metrics.height()
+
+    def text(x, y, words, colour, centre=True):
+        w = metrics.horizontalAdvance(words)
+        p.setPen(colour)
+        p.drawText(QtCore.QPointF(x - w / 2 if centre else x, y), words)
+
+    def across(x1, x2, y, words):
+        # its name under the line
+        p.setPen(QtGui.QPen(dim, 1))
+        p.drawLine(QtCore.QPointF(x1, y), QtCore.QPointF(x2, y))
+        for x in (x1, x2):
+            p.drawLine(QtCore.QPointF(x, y - 3), QtCore.QPointF(x, y + 3))
+        text((x1 + x2) / 2, y + metrics.ascent() + 2, words, dim)
+
+    def up(x, y1, y2, words, right=False):
+        p.setPen(QtGui.QPen(dim, 1))
+        p.drawLine(QtCore.QPointF(x, y1), QtCore.QPointF(x, y2))
+        for y in (y1, y2):
+            p.drawLine(QtCore.QPointF(x - 3, y), QtCore.QPointF(x + 3, y))
+        w = metrics.horizontalAdvance(words)
+        tx = x + 5 if right else x - 5 - w
+        text(tx, (y1 + y2) / 2 + metrics.ascent() / 2 - 1, words, dim, False)
+
+    def fit(availW, wide, availH, tall):
+        """The scales across and up a view fills its room by, the one no more than 2.5 times
+        the other: a thin piece drawn thick enough to see."""
+        sx, sy = availW / max(wide, 1e-6), availH / max(tall, 1e-6)
+        return min(sx, sy * 2.5), min(sy, sx * 2.5)
+
+    margin, band = 8, 10
+    cellW = (width - 3 * margin) / 2
+    cellTop = textH + 6
+    cellH = height - cellTop - margin
+    labelW = max(metrics.horizontalAdvance(n) for n in ("Height", "Drop", "Rise", deep[0])) + 10
+    under = textH + 6
+
+    # from the front: the stock behind, taller; the piece on the table before it
+    x0 = margin
+    text(x0 + cellW / 2, textH, translate("CAM_Vise", "From the front"), faint)
+    stockTall = v("Drop") if edge else tall * 1.5
+    sx, sy = fit(cellW - labelW - 16, wide[1], cellH - under - 4, max(stockTall, tall))
+    w, h, st = wide[1] * sx, tall * sy, stockTall * sy
+    left = x0 + labelW + (cellW - labelW - w) / 2
+    base = cellTop + (cellH - under + max(st, h)) / 2
+    p.setPen(QtGui.QPen(faint, 1))
+    p.setBrush(stockColour)
+    p.drawRect(QtCore.QRectF(left - 8, base - st, w + 16, st))
+    p.drawLine(QtCore.QPointF(left - 12, base), QtCore.QPointF(left + w + 12, base))
+    p.setPen(QtGui.QPen(ink, 1))
+    p.setBrush(body)
+    if edge:
+        p.drawRect(QtCore.QRectF(left, base - h, w, h))
+        up(left - 14, base - st, base, "Drop")
+        up(left + w + 14, base - h, base - st, "Rise", right=True)
+    else:
+        p.drawRect(QtCore.QRectF(left, base - h, w, h))
+        up(left - 14, base - h, base, "Height")
+
+    # from above: the stock's edge beyond, the piece against it, front to back down
+    x0 = 2 * margin + cellW
+    text(x0 + cellW / 2, textH, translate("CAM_Vise", "From above"), faint)
+    lipW = (metrics.horizontalAdvance("Reach") + 10) if edge else 0
+    sx, sy = fit(cellW - labelW - lipW - 8, wide[1], cellH - band - under - 4, deep[1] + reach)
+    if kind == "ObjectDog":
+        # round, as it is
+        sx = sy = min(sx, sy)
+    w, d, r = wide[1] * sx, deep[1] * sy, reach * sy
+    left = x0 + labelW + (cellW - labelW - lipW - w) / 2
+    top = cellTop + (cellH - under - band - d) / 2
+    edgeY = top + band
+    p.setPen(QtGui.QPen(faint, 1))
+    p.setBrush(stockColour)
+    p.drawRect(QtCore.QRectF(left - 8, top, w + 16, band))
+    p.setPen(QtGui.QPen(ink, 1))
+    p.setBrush(body)
+    if kind == "ObjectDog":
+        p.drawEllipse(QtCore.QRectF(left, edgeY, w, d))
+    else:
+        p.drawRect(QtCore.QRectF(left, edgeY, w, d))
+        if edge:
+            p.drawRect(QtCore.QRectF(left, edgeY - r, w, r))
+            up(left + w + 6, edgeY - r, edgeY, "Reach", right=True)
+    if kind != "ObjectDog":
+        up(left - 6, edgeY, edgeY + d, deep[0])
+    across(left, left + w, edgeY + d + 4, wide[0])
+    p.end()
+    return pixmap
+
+
+def _browseButton(tip):
+    """A button opening the workholding browser, to choose another."""
+    button = QtWidgets.QPushButton(translate("CAM_Vise", "Browse…"))
+    button.setIcon(QtGui.QIcon.fromTheme("edit-find", QtGui.QIcon(":/icons/zoom-in.svg")))
+    button.setToolTip(tip)
+    return button
 
 
 def _closeIfUnused(doc):
@@ -125,6 +216,148 @@ def _closeIfUnused(doc):
     if gui is not None and gui.mdiViewsOfType("Gui::View3DInventor"):
         return
     FreeCAD.closeDocument(doc.Name)
+
+
+def _linkedFiles(group):
+    """The documents of the files the parts of a vise or clamp group are linked from."""
+    found = []
+    for obj in getattr(group, "Group", []) or []:
+        linked = getattr(obj, "LinkedObject", None) if obj.isDerivedFrom("App::Link") else None
+        if (
+            linked is not None
+            and linked.Document != group.Document
+            and linked.Document not in found
+        ):
+            found.append(linked.Document)
+    return found
+
+
+def closeFilesAfter(group):
+    """closeFilesAfter(group) ... the files a vise or clamp group links its parts from closed, once
+    it is deleted, those nothing links to then and open in no window."""
+    names = [d.Name for d in _linkedFiles(group)]
+
+    def close():
+        for name in names:
+            doc = FreeCAD.listDocuments().get(name)
+            if doc is not None:
+                _closeIfUnused(doc)
+
+    if names:
+        QtCore.QTimer.singleShot(0, close)
+
+
+# documents whose vises' or clamps' files are being looked for
+_recovering = set()
+
+
+def recoverWhenIdle(doc):
+    """recoverWhenIdle(doc) ... the document's vises and clamps whose files are not found
+    recovered once it is loaded and no other dialog is up, asking one thing at a time."""
+    if doc.Name in _recovering:
+        return
+    _recovering.add(doc.Name)
+    QtCore.QTimer.singleShot(500, lambda: _recoverIdle(doc.Name))
+
+
+def _recoverIdle(name):
+    doc = FreeCAD.listDocuments().get(name)
+    if doc is None:
+        _recovering.discard(name)
+        return
+    # waits its turn: the document loaded, no other dialog up
+    if doc.Restoring or QtWidgets.QApplication.activeModalWidget() is not None:
+        QtCore.QTimer.singleShot(300, lambda: _recoverIdle(name))
+        return
+    try:
+        PathWorkholding.recoverParts(
+            doc,
+            askLibrary=lambda file, item: _askLibrary(doc, file, item),
+            askFile=lambda file: _askFile(doc, file),
+        )
+        _askChanged(doc, PathWorkholding.changedSources(doc))
+    except Exception as e:
+        Path.Log.error("%s: %s" % (doc.Label, e))
+    finally:
+        _recovering.discard(name)
+        # back to the document recovered: the files opened to link to are not shown
+        if name in FreeCAD.listDocuments():
+            FreeCAD.setActiveDocument(name)
+            FreeCADGui.setActiveDocument(name)
+
+
+def _askLibrary(doc, file, item):
+    """Whether to download the library's file for one not found."""
+    answer = QtWidgets.QMessageBox.question(
+        FreeCADGui.getMainWindow(),
+        translate("CAM_Vise", "Workholding not found"),
+        translate(
+            "CAM_Vise",
+            "%s uses %s, which was not found. The library has it: %s.\n\nDownload it?",
+        )
+        % (doc.Label, os.path.basename(file), item.get("label", item["id"]))
+        + (
+            "\n\n"
+            + translate(
+                "CAM_Vise",
+                "The library's has changed since it was added: the Job's toolpaths were made "
+                "with it as it was.",
+            )
+            if item.get("changed")
+            else ""
+        ),
+    )
+    return answer == QtWidgets.QMessageBox.Yes
+
+
+def _askChanged(doc, changed):
+    """Whether the vises' and clamps' files changed since the Job was made are used as they are
+    now; if not, asked again the next time it is opened."""
+    if not changed:
+        return
+    answer = QtWidgets.QMessageBox.question(
+        FreeCADGui.getMainWindow(),
+        translate("CAM_Vise", "Workholding changed"),
+        translate(
+            "CAM_Vise",
+            "These files of %s's workholding have changed since they were added: its toolpaths "
+            "were made with them as they were.\n\n%s\n\nUse them as they are now? No asks again "
+            "the next time it is opened.",
+        )
+        % (doc.Label, "\n".join("%s: %s" % (row.Label, path) for row, path in changed)),
+    )
+    if answer == QtWidgets.QMessageBox.Yes:
+        PathWorkholding.acceptChanged(changed)
+    else:
+        for row, path in changed:
+            Path.Log.warning(
+                translate("CAM_Vise", "%s: %s has changed since it was added") % (row.Label, path)
+            )
+
+
+def _askFile(doc, file):
+    """The file the user finds for one not in the folders, None if none."""
+    import Path.Main.WorkholdingLibrary as PathLibrary
+
+    name = os.path.basename(file.replace("\\", "/"))
+    answer = QtWidgets.QMessageBox.question(
+        FreeCADGui.getMainWindow(),
+        translate("CAM_Vise", "Workholding not found"),
+        translate(
+            "CAM_Vise",
+            "%s uses %s, which is not in the workholding folders.\n\nFind the file?",
+        )
+        % (doc.Label, name),
+    )
+    if answer != QtWidgets.QMessageBox.Yes:
+        return None
+    path, _ = QtWidgets.QFileDialog.getOpenFileName(
+        FreeCADGui.getMainWindow(),
+        translate("CAM_Vise", "Find %s") % name,
+        PathLibrary.folder(),
+        translate("CAM_AddVise", "FreeCAD document (*.FCStd)"),
+    )
+    return path or None
 
 
 class _Adding:
@@ -168,7 +401,6 @@ class _Adding:
         if previous is not None and previous != source:
             _closeIfUnused(previous)
             FreeCADGui.setActiveDocument(self.doc.Name)
-        _prefs().SetString("WorkholdingDir", os.path.dirname(path))
         return self.vise
 
     def drop(self):
@@ -871,15 +1103,682 @@ def _jobsOf(doc):
     ]
 
 
+def _showSection(form, visible):
+    """A section of the panel shown or hidden whole, its header with it."""
+    box = form.parentWidget()
+    while box is not None and "TaskBox" not in box.metaObject().className():
+        box = box.parentWidget()
+    if visible:
+        form.setVisible(True)
+    (box or form).setVisible(visible)
+
+
+def _combo(wide=False):
+    """A drop-down that drops down below itself as a list; a wide one no wider than its shortest
+    choices in the panel, its list as wide as its longest."""
+    combo = QtWidgets.QComboBox()
+    combo.setStyleSheet("QComboBox { combobox-popup: 0; }")
+    combo.setMaxVisibleItems(16)
+    if wide:
+        combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(6)
+    return combo
+
+
+def _fitList(combo):
+    """The drop-down's list as wide as its longest choice."""
+    view = combo.view()
+    view.setMinimumWidth(view.sizeHintForColumn(0) + 2 * view.frameWidth() + 24)
+
+
+class _StopsClamps:
+    """The stops and clamps holding a Job's stock on the table, three sections of the panel: the
+    stops, on one side of the stock or on two next to each other, a corner; the clamps, a kind
+    and how many on each side; and those placed, each picked out, nudged along its side or taken
+    away. Each change put in the document a moment after it, into the panel's pending step."""
+
+    def __init__(self, panel, ui):
+        self.panel = panel
+        self.job = panel.job
+        self.ui = ui
+        self.loading = False
+        self.names = {direction: label for label, direction in _sides()}
+        # the documents open before: a clamp's file opened here is closed again if unused
+        self.open = set(FreeCAD.listDocuments())
+        self.timer = QtCore.QTimer()
+        self.timer.setSingleShot(True)
+        self.timer.setInterval(150)
+        self.timer.timeout.connect(self.preview)
+        # the clamps' files the Job uses, and those chosen since: (name, path, kind)
+        self.files = []
+        for spec in Items.clampsOf(self.job):
+            which = spec.get("which")
+            if which and which not in ("SideClamp", "EdgeClamp"):
+                clamp = Items.clampFile(which)
+                if clamp is not None and all(p != which for _, p, _ in self.files):
+                    self.files.append((self._clampName(which, clamp[0]), which, clamp[1]))
+        sections = []
+        for title, icon in (
+            (translate("CAM_Vise", "Stops"), _themedIcon(":/icons/xy-in-stock.svg")),
+            (translate("CAM_Vise", "Clamps"), QtGui.QIcon(":/icons/CAM_Job.svg")),
+            (translate("CAM_Vise", "Placed"), QtGui.QIcon(":/icons/Std_Placement.svg")),
+        ):
+            section = QtWidgets.QWidget()
+            section.setWindowTitle(title)
+            section.setWindowIcon(icon)
+            sections.append((section, QtWidgets.QFormLayout(section)))
+        self.forms = [section for section, _ in sections]
+        self.layouts = [layout for _, layout in sections]
+
+        # the stops: a side of the part, what stands against it and how many, spread along it; a
+        # second side next to the first, a corner
+        layout = self.layouts[0]
+        self.stopRows = []
+        for label in (translate("CAM_Vise", "First stop"), translate("CAM_Vise", "Second stop")):
+            side = _combo()
+            side.setToolTip(translate("CAM_Vise", "The side of the part against the stops"))
+            kind = _combo(wide=True)
+            kind.setToolTip(
+                translate(
+                    "CAM_Vise", "A dog in the table, a fence along the side, or another Job's stop"
+                )
+            )
+            count = QtWidgets.QSpinBox()
+            count.setRange(1, 6)
+            count.setToolTip(translate("CAM_Vise", "How many along the side"))
+            row = QtWidgets.QHBoxLayout()
+            row.addWidget(side, 2)
+            row.addWidget(kind, 3)
+            row.addWidget(count)
+            layout.addRow(label, row)
+            self.stopRows.append({"side": side, "kind": kind, "count": count})
+        self.shared = _Note()
+        layout.addRow("", self.shared)
+        self.error = _Note()
+        self.error.setStyleSheet("color: #d04040")
+        layout.addRow("", self.error)
+
+        # the clamps: a kind on each side, how many, spread along it
+        layout = self.layouts[1]
+        self.clampRows = []
+        for i in range(4):
+            label = QtWidgets.QLabel()
+            kind = _combo(wide=True)
+            kind.setToolTip(
+                translate(
+                    "CAM_Vise",
+                    "A side clamp pushing the part onto the stops, or a hold-down over its top edge",
+                )
+            )
+            count = QtWidgets.QSpinBox()
+            count.setRange(1, 12)
+            count.setToolTip(translate("CAM_Vise", "How many along the side"))
+            browse = _browseButton(
+                translate("CAM_Vise", "Choose a clamp on this computer or from a library")
+            )
+            row = QtWidgets.QHBoxLayout()
+            row.addWidget(kind, 1)
+            row.addWidget(browse)
+            row.addWidget(count)
+            layout.addRow(label, row)
+            entry = {"label": label, "kind": kind, "count": count, "side": None, "browse": browse}
+            self.clampRows.append(entry)
+            browse.clicked.connect(lambda checked=False, entry=entry: self.browseClamp(entry))
+            self.fillClampKinds(kind)
+        self.clampNote = _Note()
+        layout.addRow("", self.clampNote)
+
+        # those placed: picked out in the 3D view too, put where it goes along its side and kept
+        # there, taken away
+        layout = self.layouts[2]
+        self.list = QtWidgets.QListWidget()
+        self.list.setToolTip(translate("CAM_Vise", "The Job's stops, clamps and table"))
+        self.list.setFixedHeight(5 * self.list.fontMetrics().height() + 12)
+        layout.addRow(self.list)
+        self.offset = self.lengthBox(
+            translate(
+                "CAM_Vise",
+                "Where the one picked is along its side, from the Job's origin: its X on the front "
+                "or back, its Y on the left or right",
+            )
+        )
+        self.offset.setProperty("minimum", -10000.0)
+        self.remove = QtWidgets.QPushButton(translate("CAM_Vise", "Remove"))
+        self.remove.setToolTip(translate("CAM_Vise", "Take the one picked away"))
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(self.offset, 1)
+        row.addWidget(self.remove)
+        layout.addRow(translate("CAM_Vise", "Position"), row)
+        # the one picked's size, the others of its kind on its side with it; a picture of it,
+        # its drawing or a clamp's own thumbnail
+        self.sizes = QtWidgets.QWidget()
+        self.sizeGrid = QtWidgets.QGridLayout(self.sizes)
+        self.sizeGrid.setContentsMargins(0, 0, 0, 0)
+        self.sizeBoxes = {}
+        layout.addRow(translate("CAM_Vise", "Size"), self.sizes)
+        self.sameSide = QtWidgets.QCheckBox(translate("CAM_Vise", "The others on its side too"))
+        self.sameSide.setToolTip(
+            translate("CAM_Vise", "Its size given to the others of its kind on its side")
+        )
+        self.sameSide.setChecked(True)
+        layout.addRow("", self.sameSide)
+        self.picture = QtWidgets.QLabel()
+        self.picture.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addRow(self.picture)
+
+        # under it all, the table: in the Stock section
+        self.table = QtWidgets.QPushButton(translate("CAM_Workholding", "Put a table under it"))
+        self.table.setToolTip(
+            translate(
+                "CAM_Workholding",
+                "A spoilboard with T-track rails and dog holes, and the waste board the stock "
+                "lies on, shown but never hit",
+            )
+        )
+
+        for i, row in enumerate(self.stopRows):
+            row["side"].currentIndexChanged.connect(self.stopSideChanged)
+            row["kind"].currentIndexChanged.connect(self.stopKindChanged)
+            row["count"].valueChanged.connect(self.changed)
+        for row in self.clampRows:
+            row["kind"].currentIndexChanged.connect(
+                lambda index, row=row: self.clampKindChanged(row, index)
+            )
+            row["count"].valueChanged.connect(self.changed)
+        self.list.currentRowChanged.connect(self.picked)
+        self.offset.valueChanged.connect(self.nudged)
+        self.remove.clicked.connect(self.removeChosen)
+        self.table.clicked.connect(self.addTable)
+
+    def lengthBox(self, tip):
+        box = self.ui.createWidget("Gui::QuantitySpinBox")
+        box.setProperty("unit", "mm")
+        box.setToolTip(tip)
+        return box
+
+    def changed(self, *args):
+        """Something the panel says changed: put in a moment after, not as it is read in."""
+        if not self.loading:
+            self.timer.start()
+
+    # what the panel says
+
+    def chosenStops(self):
+        """The stops the panel says, as setStops takes them."""
+        stops = []
+        for row in self.stopRows:
+            side = row["side"].currentData()
+            kind = row["kind"].currentData()
+            if side is None or kind is None:
+                continue
+            if isinstance(kind, (tuple, list)):
+                owner = self.job.Document.getObject(kind[1])
+                if owner is not None:
+                    stops.append({"side": side, "share": owner})
+                continue
+            stops.append({"side": side, "which": kind, "count": row["count"].value()})
+        return stops
+
+    def chosenClamps(self):
+        """The clamps the panel says, as setClamps takes them."""
+        return [
+            {
+                "side": row["side"],
+                "which": row["kind"].currentData(),
+                "count": row["count"].value(),
+            }
+            for row in self.clampRows
+            if row["side"] is not None and row["kind"].currentData() is not None
+        ]
+
+    def stopSides(self):
+        return [r["side"].currentData() for r in self.stopRows if r["side"].currentData()]
+
+    # rows following one another
+
+    def stopSideChanged(self, *args):
+        """A side chosen for the stops: the second only next to the first; the clamps' kinds as
+        the stops' sides allow."""
+        if not self.loading:
+            self.fillSecondSide()
+            self.updateRows()
+        self.changed()
+
+    def fillSecondSide(self):
+        """The sides the second stops can go on, next to the first's, the one chosen kept if it
+        still can."""
+        first = self.stopRows[0]["side"].currentData()
+        combo = self.stopRows[1]["side"]
+        keep = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(translate("CAM_Vise", "None"), None)
+        for side in Items.sides(self.job) if first else []:
+            if Items.adjacent(first, side):
+                combo.addItem(self.names.get(side, side), side)
+        combo.setCurrentIndex(max(0, combo.findData(keep)))
+        combo.blockSignals(False)
+
+    def stopKindChanged(self, *args):
+        if not self.loading:
+            self.updateRows()
+        self.changed()
+
+    def clampKindChanged(self, row, index):
+        """A clamp's file chosen in a document not saved: refused, its parts are linked. One got
+        from a library or found elsewhere: added to the rows' lists and chosen."""
+        path = row["kind"].currentData()
+        if (
+            not self.loading
+            and path not in (None, "SideClamp", "EdgeClamp")
+            and not self.job.Document.FileName
+        ):
+            QtWidgets.QMessageBox.warning(
+                FreeCADGui.getMainWindow(),
+                translate("CAM_Vise", "Clamps"),
+                translate(
+                    "CAM_Vise",
+                    "Save the document first: the clamp's parts are linked from its own file.",
+                ),
+            )
+            row["kind"].blockSignals(True)
+            row["kind"].setCurrentIndex(row.get("last", 0))
+            row["kind"].blockSignals(False)
+            return
+        row["last"] = row["kind"].currentIndex()
+        if not self.loading:
+            self.updateRows()
+        self.changed()
+
+    @staticmethod
+    def _clampName(path, name):
+        """A clamp's file's name to show: its label, as it says, else its file's name."""
+        import Path.Main.WorkholdingLibrary as PathLibrary
+
+        return PathLibrary.about(path).get("label") or name
+
+    def fillClampKinds(self, combo):
+        """A clamp row's list: none, the clamps made here, the clamps' files the Job uses and
+        those chosen since; what was chosen kept."""
+        keep = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(translate("CAM_Vise", "None"), None)
+        combo.addItem(translate("CAM_Vise", "Side clamp"), "SideClamp")
+        combo.addItem(translate("CAM_Vise", "Edge clamp"), "EdgeClamp")
+        for name, path, _ in self.files:
+            combo.addItem(name, path)
+        combo.setCurrentIndex(max(0, combo.findData(keep)) if keep is not None else 0)
+        combo.blockSignals(False)
+        _fitList(combo)
+
+    def browseClamp(self, row):
+        """A clamp chosen in the browser, on this computer or from a library, put on the row's
+        side; in a document not saved, refused first: its parts are linked."""
+        if not self.job.Document.FileName:
+            QtWidgets.QMessageBox.warning(
+                FreeCADGui.getMainWindow(),
+                translate("CAM_Vise", "Clamps"),
+                translate(
+                    "CAM_Vise",
+                    "Save the document first: the clamp's parts are linked from its own file.",
+                ),
+            )
+            return
+        import Path.Main.Gui.WorkholdingLibraryGui as LibraryGui
+
+        path = LibraryGui.getClamp()
+        index = self.addClampFile(path) if path else None
+        if index is not None and index >= 0:
+            row["kind"].setCurrentIndex(index)
+
+    def addClampFile(self, path):
+        """A clamp's file put in every row's list if it is not there: its place in the lists,
+        None if it holds no clamp."""
+        for _, known, _ in self.files:
+            if os.path.exists(known) and os.path.samefile(known, path):
+                return self.clampRows[0]["kind"].findData(known)
+        clamp = Items.clampFile(path)
+        if clamp is None:
+            QtWidgets.QMessageBox.warning(
+                FreeCADGui.getMainWindow(),
+                translate("CAM_Vise", "Clamps"),
+                translate("CAM_Vise", "%s holds no clamp.") % os.path.basename(path),
+            )
+            return None
+        self.files.append((self._clampName(path, clamp[0]), path, clamp[1]))
+        for row in self.clampRows:
+            self.fillClampKinds(row["kind"])
+            row["last"] = row["kind"].currentIndex()
+        return self.clampRows[0]["kind"].findData(path)
+
+    def updateRows(self):
+        """Each row's fields open as its choices say: a side with no stops, or none, nothing more
+        to say; a shared stop one, its spread its Job's; no side clamp where the stops are."""
+        for i, row in enumerate(self.stopRows):
+            side = row["side"].currentData()
+            kind = row["kind"].currentData()
+            share = isinstance(kind, (tuple, list))
+            row["side"].setEnabled(i == 0 or self.stopRows[0]["side"].currentData() is not None)
+            row["kind"].setEnabled(side is not None)
+            row["count"].setEnabled(side is not None and not share)
+            if share:
+                row["count"].blockSignals(True)
+                row["count"].setValue(1)
+                row["count"].blockSignals(False)
+        stopSides = self.stopSides()
+        taken = []
+        for row in self.clampRows:
+            combo = row["kind"]
+            for index in range(combo.count()):
+                which = combo.itemData(index)
+                if which is None:
+                    continue
+                pushes = which == "SideClamp" or any(
+                    p == which and k == Items.Kind.Push for _, p, k in self.files
+                )
+                combo.model().item(index).setEnabled(not (pushes and row["side"] in stopSides))
+            if not combo.model().item(combo.currentIndex()).isEnabled():
+                combo.blockSignals(True)
+                combo.setCurrentIndex(0)
+                combo.blockSignals(False)
+                taken.append(self.names.get(row["side"], row["side"]))
+            which = combo.currentData()
+            row["count"].setEnabled(which is not None)
+        self.clampNote.setText(
+            translate("CAM_Vise", "No side clamp on the %s: it would push the part off the stops")
+            % ", ".join(taken)
+            if taken
+            else ""
+        )
+
+    # read in from the Job
+
+    def readIn(self):
+        """The rows as the Job's stops and clamps are, read from them: the panel shows what the
+        document has."""
+        self.loading = True
+        try:
+            self.readStops()
+            self.readClamps()
+            self.updateRows()
+        finally:
+            self.loading = False
+        self.fillList()
+
+    def readStops(self):
+        standing = Items.sides(self.job)
+        stops = Items.stopsOf(self.job)
+        first = self.stopRows[0]["side"]
+        first.clear()
+        first.addItem(translate("CAM_Vise", "None"), None)
+        for side in standing:
+            first.addItem(self.names.get(side, side), side)
+        first.setCurrentIndex(max(0, first.findData(stops[0]["side"] if stops else None)))
+        self.fillSecondSide()
+        second = self.stopRows[1]["side"]
+        second.setCurrentIndex(
+            max(0, second.findData(stops[1]["side"] if len(stops) > 1 else None))
+        )
+        notes = []
+        for i, row in enumerate(self.stopRows):
+            spec = stops[i] if i < len(stops) else {}
+            kind = row["kind"]
+            kind.clear()
+            kind.addItem(translate("CAM_Vise", "Dog"), "Dog")
+            kind.addItem(translate("CAM_Vise", "Fence"), "Fence")
+            # another Job's stop, shared: this one's own on its other face
+            owners = Items.shareableStops(self.job)
+            if spec.get("share") is not None and spec["share"] not in owners:
+                owners.insert(0, spec["share"])
+            for owner in owners:
+                kind.addItem(
+                    translate("CAM_Vise", "%s, in %s")
+                    % (owner.Label, PathWorkholding.memberOf(owner)[0].Label),
+                    ("share", owner.Name),
+                )
+            _fitList(kind)
+            if spec.get("share") is not None:
+                kind.setCurrentIndex(max(0, kind.findData(("share", spec["share"].Name))))
+            else:
+                kind.setCurrentIndex(max(0, kind.findData(spec.get("which", "Dog"))))
+            # three two one: two on the first side, one on the second
+            row["count"].setValue(spec.get("count", 2 if i == 0 else 1))
+            for job in spec.get("sharedWith", []):
+                notes.append(
+                    translate("CAM_Vise", "Shared with %s: its stops stay, the part moves to them")
+                    % job.Label
+                )
+        self.shared.setText("\n".join(notes))
+
+    def readClamps(self):
+        standing = Items.sides(self.job)
+        clamps = {spec["side"]: spec for spec in Items.clampsOf(self.job)}
+        for i, row in enumerate(self.clampRows):
+            side = standing[i] if i < len(standing) else None
+            row["side"] = side
+            row["label"].setText(self.names.get(side, side) if side else "")
+            for widget in (row["label"], row["kind"], row["count"]):
+                widget.setVisible(side is not None)
+            spec = clamps.get(side, {})
+            kind = row["kind"]
+            which = spec.get("which")
+            index = kind.findData(which) if which else 0
+            if index < 0:
+                # a clamp's file found elsewhere than the folder now
+                self.files.append(
+                    (os.path.splitext(os.path.basename(which))[0].replace("_", " "), which, None)
+                )
+                for each in self.clampRows:
+                    self.fillClampKinds(each["kind"])
+                index = kind.findData(which)
+            kind.setCurrentIndex(index)
+            row["last"] = index
+            row["count"].setValue(spec.get("count", 2))
+
+    # those placed
+
+    def fillList(self, pick=None):
+        """The Job's stops, clamps and table listed, the one picked kept."""
+        keep = pick or self.chosen()
+        keep = keep.Name if keep is not None else None
+        pieces = Items.stopsOn(self.job) + Items.clampsOn(self.job)
+        pieces += [o for o in Items.itemsOf(self.job) if o not in pieces]
+        self.list.blockSignals(True)
+        self.list.clear()
+        for piece in pieces:
+            side = getattr(piece, "StockSide", "")
+            text = piece.Label
+            if side:
+                text = "%s: %s" % (self.names.get(side, side), piece.Label)
+            if PathWorkholding.isShared(piece):
+                text += " " + translate("CAM_Vise", "(shared)")
+            item = QtWidgets.QListWidgetItem(text)
+            item.setData(QtCore.Qt.UserRole, piece.Name)
+            self.list.addItem(item)
+            if piece.Name == keep:
+                self.list.setCurrentItem(item)
+        self.list.blockSignals(False)
+        self.showChosen()
+
+    def chosen(self):
+        """The piece picked in the list, None if none."""
+        item = self.list.currentItem()
+        if item is None:
+            return None
+        return self.job.Document.getObject(item.data(QtCore.Qt.UserRole))
+
+    def picked(self, *args):
+        """A piece picked: picked in the 3D view too."""
+        piece = self.chosen()
+        FreeCADGui.Selection.clearSelection()
+        if piece is not None:
+            FreeCADGui.Selection.addSelection(piece)
+        self.showChosen()
+
+    def showChosen(self):
+        """Where the piece picked is along its side, as the Job's X or Y; one shared stays where
+        it is, and only one placed by side has a place to show."""
+        piece = self.chosen()
+        placed = piece is not None and Items.isPlaced(piece)
+        self.offset.blockSignals(True)
+        self.offset.setProperty("rawValue", Items.positionOf(piece) if placed else 0.0)
+        self.offset.blockSignals(False)
+        self.offset.setEnabled(placed and not PathWorkholding.isShared(piece))
+        self.remove.setEnabled(piece is not None)
+        self.showSize(piece)
+
+    def sizeNames(self, piece):
+        """The sizes of a piece made here, as it has them; none of a clamp from its own file."""
+        if piece is None or isinstance(getattr(piece, "Proxy", None), Items.ObjectClamp):
+            return []
+        names = [
+            name
+            for name in piece.PropertiesList
+            if piece.getGroupOfProperty(name) == "Workholding"
+            and piece.getTypeIdOfProperty(name) == "App::PropertyLength"
+            and "Hidden" not in piece.getEditorMode(name)
+        ]
+        # side to side along the stock, front to back, then up
+        order = {"ObjectFence": ["Length", "Width"]}.get(
+            type(piece.Proxy).__name__, ["Diameter", "Width", "Length"]
+        )
+        order += ["Reach", "Rise", "Drop", "Height"]
+        return sorted(names, key=lambda n: order.index(n) if n in order else len(order))
+
+    def others(self, piece):
+        """The others of its kind on the piece's side."""
+        side = getattr(piece, "StockSide", "")
+        if not side:
+            return []
+        same = Items.stopsOn(self.job, side) + Items.clampsOn(self.job, side)
+        return [o for o in same if o != piece and getattr(o, "Source", None) == piece.Source]
+
+    def showSize(self, piece):
+        """The piece's sizes to change, unless it follows another Job's; its picture."""
+        while self.sizeGrid.count():
+            widget = self.sizeGrid.takeAt(0).widget()
+            if widget is not None:
+                # gone at once, not once the event loop comes round
+                widget.setParent(None)
+                widget.deleteLater()
+        self.sizeBoxes = {}
+        names = self.sizeNames(piece)
+        fixed = piece is not None and PathWorkholding.isShared(piece)
+        for i, name in enumerate(names):
+            box = self.lengthBox(piece.getDocumentationOfProperty(name))
+            box.setProperty("rawValue", getattr(piece, name).Value)
+            box.setEnabled(not fixed and not _bound(piece, name))
+            box.valueChanged.connect(lambda *args, name=name: self.resized(name))
+            self.sizeGrid.addWidget(
+                QtWidgets.QLabel(translate("App::Property", name)), i // 2, (i % 2) * 2
+            )
+            self.sizeGrid.addWidget(box, i // 2, (i % 2) * 2 + 1)
+            self.sizeBoxes[name] = box
+        form = self.layouts[2]
+        for widget in (self.sizes, form.labelForField(self.sizes)):
+            widget.setVisible(bool(names))
+        self.sameSide.setVisible(bool(names) and not fixed and bool(self.others(piece)))
+        self.showPicture(piece)
+
+    def showPicture(self, piece):
+        """The picked one's picture: its drawing as it is now, or a clamp's own thumbnail."""
+        pixmap = None
+        if piece is not None:
+            pixmap = _pieceDrawing(piece, self.picture.palette())
+            source = getattr(piece, "Source", "")
+            if pixmap is None and source and os.path.isfile(source):
+                import Path.Main.WorkholdingLibrary as PathLibrary
+
+                data = PathLibrary.thumbnail(source)
+                if data:
+                    pixmap = QtGui.QPixmap()
+                    pixmap.loadFromData(data)
+                    pixmap = pixmap.scaled(
+                        160, 160, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
+                    )
+        self.picture.setPixmap(pixmap if pixmap is not None else QtGui.QPixmap())
+        self.picture.setVisible(pixmap is not None)
+
+    def resized(self, name):
+        """A size of the piece picked changed, and the others' of its kind on its side with it."""
+        piece = self.chosen()
+        box = self.sizeBoxes.get(name)
+        if piece is None or box is None or PathWorkholding.isShared(piece):
+            return
+        value = box.property("rawValue")
+        if value <= 0:
+            return
+        self.panel.begin()
+        pieces = [piece] + (self.others(piece) if self.sameSide.isChecked() else [])
+        for each in pieces:
+            if not _bound(each, name):
+                setattr(each, name, value)
+        self.showPicture(piece)
+        self.timer.start()
+
+    def nudged(self, *args):
+        """The piece picked put where its X or Y says, and kept there."""
+        piece = self.chosen()
+        if piece is None or not Items.isPlaced(piece) or PathWorkholding.isShared(piece):
+            return
+        self.panel.begin()
+        Items.setPosition(piece, self.offset.property("rawValue"))
+        self.timer.start()
+
+    def removeChosen(self):
+        """The piece picked taken away, the rows as the Job now has them."""
+        piece = self.chosen()
+        if piece is None:
+            return
+        self.timer.stop()
+        self.panel.begin()
+        FreeCADGui.Selection.clearSelection()
+        Items.removePiece(piece)
+        self.readIn()
+
+    def addTable(self):
+        """The table under the stock: put in, or placed under it again."""
+        self.panel.begin()
+        table = Items.addTable(self.job)
+        self.fillList(table)
+
+    def preview(self):
+        """The stops and clamps put in as the panel says, pending: True if they could be."""
+        self.timer.stop()
+        self.panel.begin()
+        try:
+            Items.setStops(self.job, self.chosenStops())
+            Items.setClamps(self.job, self.chosenClamps())
+        except ValueError as e:
+            self.error.setText(str(e))
+            self.fillList()
+            return False
+        self.error.setText("")
+        self.fillList()
+        return True
+
+    def finish(self):
+        """A clamp's file opened for the panel closed again if nothing links to it now."""
+        self.timer.stop()
+        for name, doc in list(FreeCAD.listDocuments().items()):
+            if name not in self.open and Items.clampIn(doc) is not None:
+                _closeIfUnused(doc)
+        if self.job.Document.Name in FreeCAD.listDocuments():
+            FreeCADGui.setActiveDocument(self.job.Document.Name)
+
+
 class TaskPanelVise:
     """A vise of a Job: one it has, its stock seated in it again, or one added from the library.
 
     The vise, its jaws, the grip, where across the jaws, whether to close the jaw, what moves.
     Seating a vise it has, each Apply is an undoable step of its own. Adding one, the add's
     transaction stays open: seating goes into it, OK keeps the vise, Cancel takes it out again,
-    and another chosen takes its place."""
+    and another chosen takes its place.
 
-    def __init__(self, job, vise=None):
+    Or the stops and clamps holding the stock on the table, piece among them picked out."""
+
+    def __init__(self, job, vise=None, piece=None):
         self.job = job
         # the vise the Job has, chosen; or an _Adding, a vise being added
         self.existing = None
@@ -937,12 +1836,6 @@ class TaskPanelVise:
                 ),
                 ("share", owner),
             )
-        self.addEntry(translate("CAM_Vise", "Add from the library:"), ("none", None))
-        self.vise.model().item(self.vise.count() - 1).setEnabled(False)
-        for label, path in _library():
-            self.addEntry("    " + label, ("file", path))
-        self.addEntry(translate("CAM_AddVise", "Get from library…"), ("library", None))
-        self.addEntry(translate("CAM_AddVise", "Other file…"), ("other", None))
         self.lastVise = 0
         if vise in vises or (vise is None and vises):
             self.existing = vise or vises[0]
@@ -950,7 +1843,13 @@ class TaskPanelVise:
             # as its file now has it, the file open with the Job
             PathWorkholding.refreshSettings(self.existing)
         self.vise.setCurrentIndex(self.lastVise)
-        layout.addRow(translate("CAM_SeatInVise", "Vise"), self.vise)
+        self.browse = _browseButton(
+            translate("CAM_Vise", "Choose a vise on this computer or from a library")
+        )
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(self.vise, 1)
+        row.addWidget(self.browse)
+        layout.addRow(translate("CAM_SeatInVise", "Vise"), row)
         # the station of a vise of several the stock goes in: its own, or one free
         self.station = QtWidgets.QComboBox()
         self.station.setToolTip(
@@ -1081,6 +1980,7 @@ class TaskPanelVise:
         standsOn.addWidget(self.standsOn, 3)
         standsOn.addWidget(self.step, 1)
         layout.addRow(translate("CAM_SeatInVise", "Stands on"), standsOn)
+        self.standsOnLabel = layout.labelForField(standsOn)
         self.parallels = _ParallelPicker(ui)
         self.parallels.addTo(layout)
         # what it comes to, at the end of the seat: why it cannot be seated, a vise too small
@@ -1131,9 +2031,34 @@ class TaskPanelVise:
             self.moves, translate("CAM_SeatInVise", "The part, the vise stays"), "part"
         )
         layout.addRow(translate("CAM_SeatInVise", "What moves"), self.moves)
-        _alignLabels([layout for _, layout in sections])
+
+        # what holds the stock, a section of its own above the rest: a vise, or stops and clamps
+        holds = QtWidgets.QWidget()
+        holds.setWindowTitle(translate("CAM_Vise", "Workholding"))
+        holds.setWindowIcon(QtGui.QIcon(":/icons/CAM_Job.svg"))
+        holdsLayout = QtWidgets.QFormLayout(holds)
+        self.holds = _combo()
+        self.byVise = _ComboChoice(
+            self.holds,
+            translate("CAM_Vise", "Vise"),
+            "vise",
+            translate("CAM_Vise", "The stock seated in a vise"),
+        )
+        self.byStops = _ComboChoice(
+            self.holds,
+            translate("CAM_Vise", "Stops and clamps"),
+            "stops",
+            translate("CAM_Vise", "The stock on the table, pushed onto stops and clamped"),
+        )
+        holdsLayout.addRow(translate("CAM_Vise", "Holds it"), self.holds)
+        self.stops = _StopsClamps(self, ui)
+        # the table it stands on, with the stops and clamps
+        sections[1][1].addRow(self.stops.table)
+        self.form = [holds] + self.form + self.stops.forms
+        _alignLabels([layout for _, layout in sections] + [holdsLayout] + self.stops.layouts)
 
         self.vise.currentIndexChanged.connect(self.viseChanged)
+        self.browse.clicked.connect(self.browseVise)
         self.standsOn.currentIndexChanged.connect(self.heightByChanged)
         self.parallels.changed.connect(self.updateOther)
         self.step.currentIndexChanged.connect(self.updateOther)
@@ -1163,6 +2088,69 @@ class TaskPanelVise:
         ):
             signal.connect(self.changed)
         self.updateGrip()
+        # what the Job's Workholding holds: a vise, else stops and clamps, else a vise to add
+        stopsFirst = piece is not None or (vise is None and not vises and Items.itemsOf(job))
+        (self.byStops if stopsFirst else self.byVise).setChecked(True)
+        self.stops.readIn()
+        if piece is not None:
+            self.stops.fillList(PathWorkholding.memberOf(piece)[1])
+        self.holds.currentIndexChanged.connect(self.holdsChanged)
+        self.holdsChanged()
+        # the sections in their task boxes by then, hidden whole
+        QtCore.QTimer.singleShot(0, self.holdsChanged)
+
+    def open(self):
+        self.holdsChanged()
+
+    def holdsChanged(self, *args):
+        """The sections of what holds the stock shown: the vise's, or the stops' and clamps'; the
+        stock's for both, what it stands on as they have it, the vise's floor, its parallels or a
+        step, or the table."""
+        stops = self.byStops.isChecked()
+        for form in (self.viseForm, self.positionForm):
+            _showSection(form, not stops)
+        for form in self.stops.forms:
+            _showSection(form, stops)
+        self.stops.table.setVisible(stops)
+        for widget in (self.standsOnLabel, self.standsOn):
+            widget.setVisible(not stops)
+        for note in (self.fit, self.other, self.clearance):
+            note.setVisible(not stops and bool(note.text()))
+        if stops:
+            self.parallels.setShown(False)
+            self.step.setVisible(False)
+            self.seatFaces.hide()
+            return
+        self.heightByChanged()
+        job, vise = self.current()
+        if vise is not None:
+            self.updateFit()
+            self.showSeat()
+
+    def begin(self):
+        """The step the stops' and clamps' changes go into, opened if it is not: pending until
+        OK or Apply keep it, Cancel undoes it."""
+        if not self.adding and not self.pending:
+            self.job.Document.openTransaction(translate("CAM_Vise", "Stops and clamps"))
+            self.pending = True
+
+    def applyStops(self):
+        """The stops and clamps as the panel says, kept: an undoable step of its own, or part of
+        a vise's add."""
+        if not self.stops.preview():
+            Path.Log.error(self.stops.error.text())
+            return False
+        if self.pending:
+            self.job.Document.commitTransaction()
+            self.pending = False
+        return True
+
+    def fileEntry(self, path):
+        """Where the vise's file at path is in the list, None if it is not."""
+        for i, (kind, value) in enumerate(self.entries):
+            if kind == "file" and os.path.realpath(value) == os.path.realpath(path):
+                return i
+        return None
 
     def addEntry(self, label, entry, index=None):
         if index is None:
@@ -1177,8 +2165,8 @@ class TaskPanelVise:
         return self.job, self.existing
 
     def viseChanged(self, index):
-        """A vise the Job has, the one being added dropped; or one from a file, added in the
-        place of the one being added."""
+        """A vise the Job has, the one being added dropped; another Job's shared; or the one
+        being added again."""
         kind, value = self.entries[index]
         if kind == "vise":
             if self.adding:
@@ -1192,22 +2180,27 @@ class TaskPanelVise:
         if kind == "share":
             self.shareChanged(index, value)
             return
-        path = value
-        if kind == "library":
-            import Path.Main.Gui.WorkholdingLibraryGui as LibraryGui
+        if kind == "file":
+            self.addFile(value)
+            return
+        self.vise.blockSignals(True)
+        self.vise.setCurrentIndex(self.lastVise)
+        self.vise.blockSignals(False)
 
-            # downloaded into the Workholding folder, then added as one of its files is
-            path = LibraryGui.getVise()
-        if kind == "other":
-            path, _ = QtWidgets.QFileDialog.getOpenFileName(
-                FreeCADGui.getMainWindow(),
-                translate("CAM_AddVise", "Add Vise"),
-                _prefs().GetString(
-                    "WorkholdingDir", str(Path.Preferences.getAssetPath() / "Workholding")
-                ),
-                translate("CAM_AddVise", "FreeCAD document (*.FCStd)"),
-            )
-        if path and not self.job.Document.FileName:
+    def browseVise(self):
+        """A vise chosen in the browser, on this computer or from a library, added in the place
+        of the one being added."""
+        import Path.Main.Gui.WorkholdingLibraryGui as LibraryGui
+
+        path = LibraryGui.getVise()
+        if path:
+            self.addFile(path)
+
+    def addFile(self, path):
+        """The vise in the file at path added, in the place of the one being added: listed and
+        chosen, seated on the stock as it comes in. In a document not saved, refused: its parts
+        are linked."""
+        if not self.job.Document.FileName:
             QtWidgets.QMessageBox.warning(
                 FreeCADGui.getMainWindow(),
                 translate("CAM_AddVise", "Add Vise"),
@@ -1237,12 +2230,15 @@ class TaskPanelVise:
                 path = None
         self.vise.blockSignals(True)
         if path:
-            found = [i for i, e in enumerate(self.entries) if e == ("file", path)]
-            if found:
-                found = found[0]
-            else:
+            found = self.fileEntry(path)
+            if found is None:
+                # the one being added in place of another being added
+                for i in reversed(range(len(self.entries))):
+                    if self.entries[i][0] == "file":
+                        self.vise.removeItem(i)
+                        self.entries.pop(i)
+                self.addEntry(self.adding.vise.Label, ("file", path))
                 found = self.vise.count() - 1
-                self.addEntry("    " + self.adding.vise.Label, ("file", path), found)
             self.vise.setCurrentIndex(found)
             self.lastVise = found
         else:
@@ -1768,16 +2764,20 @@ class TaskPanelVise:
 
     def clicked(self, button):
         if button == QtWidgets.QDialogButtonBox.Apply:
-            if self.apply():
+            if self.byStops.isChecked():
+                if self.applyStops():
+                    self.stops.readIn()
+            elif self.apply():
                 # on from where it now is
                 self.updateGrip()
 
     def accept(self):
-        if self.apply():
+        if self.applyStops() if self.byStops.isChecked() else self.apply():
             self.seatFaces.hide()
             FreeCADGui.Control.closeDialog()
             if self.adding:
                 self.adding.finish(keep=True)
+            self.stops.finish()
             return True
         return False
 
@@ -1807,6 +2807,7 @@ class TaskPanelVise:
 
     def reject(self):
         self.previewTimer.stop()
+        self.stops.timer.stop()
         self.seatFaces.hide()
         if self.pending:
             # what the preview seated, undone
@@ -1817,6 +2818,7 @@ class TaskPanelVise:
         if self.adding:
             # the vise, and any seating of it, undone with no trace in the undo list
             self.adding.finish(keep=False)
+        self.stops.finish()
         return True
 
 
@@ -1863,6 +2865,7 @@ class ViewProviderViseMember:
         # the rest of the vise, all in Delete's own undoable step; what is selected too is left
         # to Delete, which still has it to remove; no longer shared with other Jobs
         PathWorkholding.release(vise)
+        closeFilesAfter(vise)
         doc = obj.Document
         for other in list(vise.Group) + [vise]:
             if (
@@ -1878,13 +2881,15 @@ class ViewProviderViseMember:
 
 
 def _showVise(obj):
-    """The vise panel on the vise obj is, or is part of: True if it is shown."""
-    job, vise = PathWorkholding.memberOf(obj)
-    if vise is None or PathWorkholding.viseSetup(vise) is None:
+    """The vise panel on the vise obj is, or is part of; on the stops and clamps, the stop or
+    clamp obj is picked out: True if it is shown."""
+    job, member = PathWorkholding.memberOf(obj)
+    if member is None or FreeCADGui.Control.activeDialog():
         return False
-    if FreeCADGui.Control.activeDialog():
-        return False
-    FreeCADGui.Control.showDialog(TaskPanelVise(job, vise))
+    if PathWorkholding.viseSetup(member) is not None:
+        FreeCADGui.Control.showDialog(TaskPanelVise(job, member))
+    else:
+        FreeCADGui.Control.showDialog(TaskPanelVise(job, piece=member))
     return True
 
 
@@ -1947,6 +2952,7 @@ class ViewProviderVise:
         # its parts with it, all in Delete's own undoable step; what is selected too is left
         # to Delete, which still has it to remove; no longer shared with other Jobs
         PathWorkholding.release(vobj.Object)
+        closeFilesAfter(vobj.Object)
         doc = vobj.Object.Document
         for obj in list(vobj.Object.Group):
             if obj.isAttachedToDocument() and not FreeCADGui.Selection.isSelected(obj):
@@ -2002,7 +3008,7 @@ class CommandVise:
     def GetResources(self):
         return {
             "Pixmap": "CAM_Vise",
-            "MenuText": QT_TRANSLATE_NOOP("CAM_Vise", "Vise…"),
+            "MenuText": QT_TRANSLATE_NOOP("CAM_Vise", "Workholding…"),
             "ToolTip": QT_TRANSLATE_NOOP(
                 "CAM_Vise",
                 "Seat the Job's stock in one of its vises, or add one from the library: against "
@@ -2019,14 +3025,17 @@ class CommandVise:
         job = _jobOfSelection()
         if job is None:
             return
-        # the vise selected, or a part of it
+        # the vise selected, or a part of it; else a stop or clamp selected
         vise = None
+        piece = None
         for sel in FreeCADGui.Selection.getSelection():
             member = PathWorkholding.memberOf(sel)[1]
             if member is not None and PathWorkholding.viseSetup(member) is not None:
                 vise = member
                 break
-        FreeCADGui.Control.showDialog(TaskPanelVise(job, vise))
+            if member is not None and piece is None:
+                piece = member
+        FreeCADGui.Control.showDialog(TaskPanelVise(job, vise, None if vise else piece))
 
 
 class CommandAddAnother:

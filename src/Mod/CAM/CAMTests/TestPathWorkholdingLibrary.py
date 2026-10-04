@@ -96,10 +96,56 @@ class TestPathWorkholdingLibrary(PathTestUtils.PathTestBase):
         self.assertEqual(PathLibrary.status(item, self.here), "missing")
         path = PathLibrary.download(item, self.here)
         self.assertEqual(path, os.path.join(self.here, "Test_Vise.FCStd"))
-        self.assertEqual(PathLibrary.status(item, self.here), "installed")
+        self.assertEqual(PathLibrary.status(item, self.here), "current")
         with open(path, "ab") as f:
             f.write(b"changed")
-        self.assertEqual(PathLibrary.status(item, self.here), "changed")
+        self.assertEqual(PathLibrary.status(item, self.here), "modified")
+
+    def test06_stamp_read(self):
+        """What a file says of itself, stamped in its settings' About group, read without
+        opening it; a file not stamped says only its label."""
+        doc = FreeCAD.openDocument(self.vise)
+        settings = doc.getObject("Settings")
+        for name, value in (
+            ("Library", "https://github.com/Owner/Lib"),
+            ("LibraryItem", "Test_Vise"),
+            ("Type", "CNC"),
+            ("Maker", "Someone"),
+        ):
+            settings.addProperty("App::PropertyString", name, "About", "")
+            setattr(settings, name, value)
+        doc.getObject("Vise").Label = "A test vise"
+        doc.saveAs(os.path.join(self.dir, "stamped.FCStd"))
+        FreeCAD.closeDocument(doc.Name)
+        found = PathLibrary.about(os.path.join(self.dir, "stamped.FCStd"))
+        self.assertEqual(
+            found,
+            {
+                "library": "https://github.com/Owner/Lib",
+                "id": "Test_Vise",
+                "type": "CNC",
+                "maker": "Someone",
+                "label": "A test vise",
+                "kind": "vise",
+                "settings": {"maxOpening": 100.0},
+            },
+        )
+        self.assertEqual(
+            PathLibrary.about(self.vise),
+            {"label": "Vise", "kind": "vise", "settings": {"maxOpening": 100.0}},
+        )
+        self.assertEqual(PathLibrary.about(os.path.join(self.dir, "none.FCStd")), {})
+        # those on this computer: the stamped one by its library, the other its own
+        local = PathLibrary.localItems("vise", [self.dir, os.path.dirname(self.vise)])
+        self.assertEqual(
+            [(i["id"], i["label"], i.get("library", "")) for i in local],
+            [
+                ("stamped", "A test vise", "https://github.com/Owner/Lib"),
+                ("Test_Vise", "Vise", ""),
+            ],
+        )
+        self.assertEqual(local[0]["libraryItem"], "Test_Vise")
+        self.assertEqual(PathLibrary.localItems("clamp", [self.dir]), [])
 
     def test02_wrong_file_refused(self):
         """A file not the one the index lists, by its sha256, is refused and not saved."""
@@ -125,6 +171,140 @@ class TestPathWorkholdingLibrary(PathTestUtils.PathTestBase):
         self.writeIndex([self.entry("Test_Vise")], format=PathLibrary.IndexFormat + 1)
         with self.assertRaises(ValueError):
             PathLibrary.loadIndex(self.index)
+
+    def test09_branches(self):
+        """A library kept with its branch, a GitHub repository's looked in on it; one kept before
+        branches, an address a line, read as on its default branch."""
+        before = PathLibrary.libraries()
+        repo = "https://github.com/Owner/Lib"
+        try:
+            PathLibrary.setLibraries([(repo, "dev"), ("/a folder/with spaces", ""), (" ", "x")])
+            self.assertEqual(
+                PathLibrary.libraries(), [(repo, "dev"), ("/a folder/with spaces", "")]
+            )
+            self.assertEqual(PathLibrary.sources(), [repo + "/tree/dev", "/a folder/with spaces"])
+            self.assertEqual(
+                PathLibrary.indexAddress(PathLibrary.sources()[0]),
+                "https://raw.githubusercontent.com/Owner/Lib/dev/index.json",
+            )
+            PathLibrary.setSources([repo])
+            self.assertEqual(PathLibrary.libraries(), [(repo, "")])
+            self.assertEqual(PathLibrary.withBranch(repo + "/tree/old", "new"), repo + "/tree/new")
+            self.assertEqual(PathLibrary.withBranch("/x/index.json", "dev"), "/x/index.json")
+        finally:
+            PathLibrary.setLibraries(before)
+
+    def test10_library_names(self):
+        """A library's name to show: a repository's, with its branch; a folder's."""
+        for address, name in (
+            ("https://github.com/Owner/Lib", "Lib"),
+            ("https://github.com/Owner/Lib.git", "Lib"),
+            ("https://github.com/Owner/Lib/tree/dev", "Lib (dev)"),
+            ("https://raw.githubusercontent.com/Owner/Lib/main/index.json", "Lib"),
+            ("https://example.com/shop/index.json", "shop"),
+            ("/home/me/Shop library", "Shop library"),
+            ("/home/me/Shop library/index.json", "Shop library"),
+        ):
+            self.assertEqual(PathLibrary.libraryName(address), name)
+
+    def test11_updates_told(self):
+        """A file here against its library's item: the one it has now, one it published before,
+        an update, or one it never did, modified here; told of those on this computer, from the
+        index kept, by the library they are stamped with on any of its branches."""
+        item = {"sha256": "new", "history": ["old", "older"]}
+        self.assertEqual(PathLibrary.state("new", item), "current")
+        self.assertEqual(PathLibrary.state("older", item), "update")
+        self.assertEqual(PathLibrary.state("mine", item), "modified")
+        self.assertEqual(
+            PathLibrary.libraryKey("https://github.com/Owner/Lib/tree/dev"),
+            PathLibrary.libraryKey("https://github.com/owner/lib"),
+        )
+        # a stamped vise here, its library's index listing a newer one, this one before it
+        doc = FreeCAD.openDocument(self.vise)
+        settings = doc.getObject("Settings")
+        for name, value in (("Library", "https://github.com/Owner/Lib"), ("LibraryItem", "V")):
+            settings.addProperty("App::PropertyString", name, "About", "")
+            setattr(settings, name, value)
+        here = os.path.join(self.dir, "mine")
+        os.makedirs(here)
+        doc.saveAs(os.path.join(here, "V.FCStd"))
+        FreeCAD.closeDocument(doc.Name)
+        sha = PathLibrary.fileSha256(os.path.join(here, "V.FCStd"))
+        entry = dict(self.entry("Test_Vise"), id="V", history=[sha])
+        self.writeIndex([entry])
+        local = PathLibrary.localItems("vise", [here])
+        library = "https://github.com/Owner/Lib/tree/main"
+        cached = PathLibrary._cached(library)
+        os.makedirs(os.path.dirname(cached), exist_ok=True)
+        shutil.copy(self.index, cached)
+        try:
+            found = PathLibrary.localStates(local, [library])
+            self.assertEqual(found[0][0], "update")
+            self.assertEqual(found[0][1]["id"], "V")
+            # not among the user's libraries: not told
+            self.assertEqual(PathLibrary.localStates(local, []), [(None, None)])
+            # kept, read without fetching; not fetched and not kept, said so
+            self.assertEqual(len(PathLibrary.loadIndex(library, online=False)), 1)
+            with self.assertRaises(ValueError):
+                PathLibrary.loadIndex(os.path.join(self.dir, "nowhere.json"), online=False)
+        finally:
+            os.remove(cached)
+
+    def test07_github_repository(self):
+        """A GitHub repository's address stands for the index.json at its top, as served raw; a
+        folder's for the one in it."""
+        raw = "https://raw.githubusercontent.com/Owner/Lib/"
+        for address, index in (
+            ("https://github.com/Owner/Lib", raw + "HEAD/index.json"),
+            ("https://github.com/Owner/Lib.git/", raw + "HEAD/index.json"),
+            ("https://github.com/Owner/Lib/tree/dev", raw + "dev/index.json"),
+            ("https://github.com/Owner/Lib/tree/dev/shop", raw + "dev/shop/index.json"),
+            ("https://github.com/Owner/Lib/blob/main/index.json", raw + "main/index.json"),
+            (raw + "main/index.json", raw + "main/index.json"),
+        ):
+            self.assertEqual(PathLibrary.indexAddress(address), index)
+        self.writeIndex([self.entry("Test_Vise")])
+        self.assertEqual(PathLibrary.indexAddress(self.library), self.index)
+        self.assertEqual(PathLibrary.indexAddress(self.index), self.index)
+        self.assertEqual(len(PathLibrary.loadIndex(self.library)), 1)
+
+    def test08_clamps(self):
+        """A library's clamps listed apart from its vises, downloaded where clamps are kept,
+        checked as a clamp's file: one that is not a clamp refused."""
+        os.makedirs(os.path.join(self.library, "clamps"))
+        doc = FreeCAD.newDocument("TestLibraryClamp")
+        part = doc.addObject("App::Part", "Clamp")
+        body = doc.addObject("Part::Feature", "Body")
+        body.Shape = Part.makeBox(10, 10, 10)
+        settings = doc.addObject("App::VarSet", "Settings")
+        settings.addProperty("App::PropertyString", "Kind", "Clamp", "")
+        settings.Kind = "HoldDown"
+        part.addObjects([body, settings])
+        doc.saveAs(os.path.join(self.library, "clamps", "Test_Clamp.FCStd"))
+        FreeCAD.closeDocument(doc.Name)
+        data = open(os.path.join(self.library, "clamps", "Test_Clamp.FCStd"), "rb").read()
+        clamp = dict(
+            self.entry("Test_Vise"),
+            id="Test_Clamp",
+            kind="clamp",
+            file="clamps/Test_Clamp.FCStd",
+            size=len(data),
+            sha256=hashlib.sha256(data).hexdigest(),
+        )
+        # a vise's file listed as a clamp
+        fake = self.entry("Test_Vise", id="Fake", kind="clamp")
+        self.writeIndex([self.entry("Test_Vise"), clamp, fake])
+        self.assertEqual([i["id"] for i in PathLibrary.loadIndex(self.index)], ["Test_Vise"])
+        clamps = PathLibrary.loadIndex(self.index, "clamp")
+        self.assertEqual([i["id"] for i in clamps], ["Test_Clamp", "Fake"])
+        self.assertEqual(len(PathLibrary.loadIndex(self.index, None)), 3)
+        self.assertTrue(
+            PathLibrary.localPath(clamps[0]).endswith(os.path.join("Clamps", "Test_Clamp.FCStd"))
+        )
+        path = PathLibrary.download(clamps[0], self.here)
+        self.assertEqual(path, os.path.join(self.here, "Test_Clamp.FCStd"))
+        with self.assertRaises(ValueError):
+            PathLibrary.download(clamps[1], os.path.join(self.dir, "elsewhere"))
 
     def test05_sources_kept(self):
         """The libraries looked in, a preference; none, the default."""

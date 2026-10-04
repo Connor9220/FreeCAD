@@ -17,10 +17,13 @@
 #                                                                              #
 ################################################################################
 
-"""Libraries of workholding to download vises from: each an index.json, at a web address or in a
-folder, listing its vises, their files, settings, licences and the sha256 each is checked
-against. The libraries looked in are a preference, one address a line; a vise downloaded is
-saved in the user's Workholding folder, where the Vise panel finds it.
+"""Libraries of workholding to download vises and clamps from: each an index.json, at a web
+address or in a folder, listing its vises and clamps, their files, settings, licences and the
+sha256 each is checked
+against; a GitHub repository's address stands for the index.json at its top. The libraries looked
+in are a preference, one address a line; a vise downloaded is
+saved in the Vises folder of the user's Workholding folder, a clamp in its Clamps folder, where
+the Vise panel finds them.
 
 Nothing downloaded is opened as a document to be checked: what it holds is read from it as the
 zip it is, and one holding Python, which would run when it is opened, is refused."""
@@ -38,12 +41,12 @@ import Path.Main.WorkholdingCheck as PathCheck
 
 translate = FreeCAD.Qt.translate
 
-# the library FreeCAD looks in unless told otherwise
-DefaultSources = [
-    "https://raw.githubusercontent.com/Connor9220/FreeCAD-Workholding/main/index.json"
-]
+# the libraries FreeCAD looks in unless told otherwise: none, the user adds those they use
+DefaultSources = []
 # the index's layout this FreeCAD reads
 IndexFormat = 1
+# what a library lists
+Kinds = ("vise", "clamp")
 TIMEOUT = 20
 
 
@@ -51,24 +54,83 @@ def _prefs():
     return FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Mod/CAM")
 
 
+def libraries():
+    """libraries() ... the libraries to look in as the user gave them, (address, branch) pairs,
+    the branch a GitHub repository's, empty for its default: the preference, one a line, the
+    branch after a tab; else the default."""
+    found = []
+    for line in _prefs().GetString("WorkholdingSources", "").splitlines():
+        address, _, branch = line.partition("\t")
+        if address.strip():
+            found.append((address.strip(), branch.strip()))
+    return found or [(a, "") for a in DefaultSources]
+
+
+def setLibraries(pairs):
+    """setLibraries(pairs) ... the libraries to look in, (address, branch) pairs, kept; none, the
+    default again."""
+    lines = []
+    for address, branch in pairs:
+        if address.strip():
+            lines.append(address.strip() + ("\t" + branch.strip() if branch.strip() else ""))
+    _prefs().SetString("WorkholdingSources", "\n".join(lines))
+
+
+def withBranch(address, branch):
+    """withBranch(address, branch) ... a library's address on a branch: a GitHub repository's
+    https://github.com/owner/repo/tree/branch; any other, or no branch, as it is."""
+    parsed = urllib.parse.urlparse(address)
+    parts = [p for p in parsed.path.split("/") if p]
+    if (
+        not branch
+        or parsed.netloc.lower() not in ("github.com", "www.github.com")
+        or len(parts) < 2
+    ):
+        return address
+    return "https://github.com/%s/%s/tree/%s" % (parts[0], parts[1], branch)
+
+
+def libraryName(address):
+    """libraryName(address) ... a library's name to show: a GitHub repository's name, with its
+    branch if one is given; a folder's or an index's folder's name."""
+    parsed = urllib.parse.urlparse(address)
+    host = parsed.netloc.lower()
+    parts = [p for p in parsed.path.split("/") if p]
+    if host in ("github.com", "www.github.com") and len(parts) >= 2:
+        name = parts[1][: -len(".git")] if parts[1].endswith(".git") else parts[1]
+        if len(parts) >= 4 and parts[2] == "tree":
+            return "%s (%s)" % (name, parts[3])
+        return name
+    if host == "raw.githubusercontent.com" and len(parts) >= 3:
+        return parts[1] if parts[2] in ("HEAD", "main", "master") else "%s (%s)" % tuple(parts[1:3])
+    path = urllib.request.url2pathname(parsed.path) if parsed.scheme == "file" else address
+    if parsed.scheme in ("http", "https"):
+        path = parsed.path
+    path = path.rstrip("/\\")
+    if path.lower().endswith(".json"):
+        path = os.path.dirname(path)
+    return os.path.basename(path) or address
+
+
 def sources():
-    """sources() ... the libraries to look in, their index's addresses: the preference, one a
-    line, else the default."""
-    text = _prefs().GetString("WorkholdingSources", "")
-    found = [line.strip() for line in text.splitlines() if line.strip()]
-    return found or list(DefaultSources)
+    """sources() ... the libraries to look in, their addresses with their branches."""
+    return [withBranch(address, branch) for address, branch in libraries()]
 
 
 def setSources(addresses):
-    """setSources(addresses) ... the libraries to look in, kept; none, the default again."""
-    _prefs().SetString("WorkholdingSources", "\n".join(a.strip() for a in addresses if a.strip()))
+    """setSources(addresses) ... the libraries to look in, kept, on their default branches; none,
+    the default again."""
+    setLibraries([(a, "") for a in addresses])
 
 
-def folder():
-    """folder() ... where vises downloaded are saved: the CAM assets' Workholding folder."""
+def folder(kind="vise"):
+    """folder(kind="vise") ... where vises are kept, and those downloaded saved: the Vises folder
+    of the CAM assets' Workholding folder; clamps, its Clamps folder."""
     import Path.Preferences
 
-    return str(Path.Preferences.getAssetPath() / "Workholding")
+    if kind == "clamp":
+        return str(Path.Preferences.getAssetPath() / "Workholding" / "Clamps")
+    return str(Path.Preferences.getAssetPath() / "Workholding" / "Vises")
 
 
 def fetch(address):
@@ -91,13 +153,95 @@ def _address(index, relative):
     return os.path.join(os.path.dirname(os.path.expanduser(index)), relative)
 
 
-def loadIndex(address):
-    """loadIndex(address) ... the vises a library's index lists, each a dict as the index has it,
-    with url, its file's address, and thumbnailUrl. Raises ValueError for an index this FreeCAD
-    cannot read."""
+def indexAddress(address):
+    """indexAddress(address) ... the address of a library's index.json: a GitHub repository's,
+    https://github.com/owner/repo, of its default branch, or with /tree/branch[/folder] of that
+    branch and folder, and /blob/... its file, as GitHub serves it raw; a folder's, the index.json
+    in it; any other as it is."""
+    parsed = urllib.parse.urlparse(address)
+    if parsed.scheme in ("http", "https") and parsed.netloc.lower() in (
+        "github.com",
+        "www.github.com",
+    ):
+        parts = [p for p in parsed.path.split("/") if p]
+        if len(parts) >= 2:
+            owner, repo = parts[0], parts[1]
+            if repo.endswith(".git"):
+                repo = repo[: -len(".git")]
+            rest = parts[2:]
+            if rest[:1] in (["tree"], ["blob"]) and len(rest) >= 2:
+                ref, path = rest[1], rest[2:]
+            else:
+                ref, path = "HEAD", []
+            if not path or not path[-1].endswith(".json"):
+                path = path + ["index.json"]
+            return "https://raw.githubusercontent.com/%s/%s/%s/%s" % (
+                owner,
+                repo,
+                ref,
+                "/".join(path),
+            )
+        return address
+    if not parsed.scheme and os.path.isdir(os.path.expanduser(address)):
+        return os.path.join(os.path.expanduser(address), "index.json")
+    return address
+
+
+def _cached(address):
+    """Where a library's index is kept between fetches."""
+    name = hashlib.sha1(indexAddress(address).encode("utf-8")).hexdigest() + ".json"
+    return os.path.join(FreeCAD.getUserCachePath(), "CAM", "WorkholdingIndexes", name)
+
+
+def _fetchIndex(address):
+    """A library's index fetched, and kept: its bytes. Raises OSError or ValueError."""
+    data = fetch(indexAddress(address))
+    json.loads(data.decode("utf-8"))
+    path = _cached(address)
     try:
-        index = json.loads(fetch(address).decode("utf-8"))
-    except (OSError, ValueError) as e:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+    except OSError:
+        pass
+    return data
+
+
+def refreshIndex(address):
+    """refreshIndex(address) ... a library's index fetched and kept, for when it cannot be: its
+    bytes, None when it could not be fetched, nothing said."""
+    try:
+        return _fetchIndex(address)
+    except (OSError, ValueError):
+        return None
+
+
+def loadIndex(address, kind="vise", online=True):
+    """loadIndex(address, kind="vise", online=True) ... the vises a library's index lists, or the
+    clamps, or with kind None both, each a dict as the index has it, with url, its file's
+    address, and thumbnailUrl: fetched, and kept; the one kept when it cannot be, or online is
+    False. Raises ValueError for an index neither fetched nor kept, or one this FreeCAD cannot
+    read."""
+    where = indexAddress(address)
+    data = None
+    failed = None
+    if online:
+        try:
+            data = _fetchIndex(address)
+        except (OSError, ValueError) as e:
+            failed = e
+    if data is None:
+        try:
+            with open(_cached(address), "rb") as f:
+                data = f.read()
+        except OSError:
+            raise ValueError(
+                translate("CAM", "No library at %s: %s")
+                % (address, failed or translate("CAM", "not fetched yet"))
+            )
+    try:
+        index = json.loads(data.decode("utf-8"))
+    except ValueError as e:
         raise ValueError(translate("CAM", "No library at %s: %s") % (address, e))
     if index.get("format", 0) > IndexFormat:
         raise ValueError(
@@ -106,19 +250,22 @@ def loadIndex(address):
         )
     items = []
     for item in index.get("items", []):
-        if item.get("kind", "vise") != "vise" or not item.get("file") or not item.get("sha256"):
+        if item.get("kind", "vise") not in Kinds or not item.get("file") or not item.get("sha256"):
+            continue
+        if kind is not None and item.get("kind", "vise") != kind:
             continue
         item = dict(item)
-        item["url"] = _address(address, item["file"])
+        item["url"] = _address(where, item["file"])
+        item["index"] = address
         if item.get("thumbnail"):
-            item["thumbnailUrl"] = _address(address, item["thumbnail"])
+            item["thumbnailUrl"] = _address(where, item["thumbnail"])
         items.append(item)
     return items
 
 
 def localPath(item, where=None):
-    """localPath(item, where=None) ... where an index's vise is, or would be, saved."""
-    return os.path.join(where or folder(), os.path.basename(item["file"]))
+    """localPath(item, where=None) ... where an index's vise or clamp is, or would be, saved."""
+    return os.path.join(where or folder(item.get("kind", "vise")), os.path.basename(item["file"]))
 
 
 def _sha256(path):
@@ -129,20 +276,87 @@ def _sha256(path):
     return h.hexdigest()
 
 
+def state(sha, item):
+    """state(sha, item) ... a file of sha256 sha against an index's item: "current", the file
+    the library has now; "update", one it published before; "modified", one it never did."""
+    if sha == item["sha256"]:
+        return "current"
+    return "update" if sha in item.get("history", []) else "modified"
+
+
 def status(item, where=None):
-    """status(item, where=None) ... whether an index's vise is here: "installed", the same file;
-    "changed", a file of its name that differs, the library's newer or the user's own changes;
-    "missing"."""
+    """status(item, where=None) ... whether an index's vise or clamp is here: "missing", or as
+    state says of the file of its name here: "current", "update" or "modified"."""
     path = localPath(item, where)
     if not os.path.exists(path):
         return "missing"
-    return "installed" if _sha256(path) == item["sha256"] else "changed"
+    return state(_sha256(path), item)
+
+
+def libraryKey(address):
+    """libraryKey(address) ... what tells two addresses of a library the same one: a GitHub
+    repository's owner and name, on any branch; any other's index's address."""
+    parsed = urllib.parse.urlparse(address)
+    parts = [p for p in parsed.path.split("/") if p]
+    host = parsed.netloc.lower()
+    if host in ("github.com", "www.github.com", "raw.githubusercontent.com") and len(parts) >= 2:
+        name = parts[1][: -len(".git")] if parts[1].endswith(".git") else parts[1]
+        return "github:%s/%s" % (parts[0].lower(), name.lower())
+    return indexAddress(address)
+
+
+def localStates(items, addresses=None):
+    """localStates(items, addresses=None) ... the vises or clamps on this computer, as
+    localItems lists them, against the indexes kept of the libraries at addresses, the user's
+    when None, never fetched: for each, (state, the library's item), state as state says, or
+    (None, None) for one no library among them lists. One is found in the library it is stamped
+    with, by its id there; one not stamped, by its sha256 among those each has published."""
+    addresses = sources() if addresses is None else addresses
+    keys = {}
+    for address in addresses:
+        keys.setdefault(libraryKey(address), address)
+    indexes = {}
+
+    def index(address, kind):
+        if (address, kind) not in indexes:
+            try:
+                indexes[(address, kind)] = loadIndex(address, kind, online=False)
+            except ValueError:
+                indexes[(address, kind)] = []
+        return indexes[(address, kind)]
+
+    found = []
+    for item in items:
+        sha = fileSha256(item["path"])
+        listed = None
+        if item.get("library"):
+            address = keys.get(libraryKey(item["library"]))
+            if address is not None and item.get("libraryItem"):
+                listed = next(
+                    (i for i in index(address, item["kind"]) if i["id"] == item["libraryItem"]),
+                    None,
+                )
+        else:
+            for address in keys.values():
+                listed = next(
+                    (
+                        i
+                        for i in index(address, item["kind"])
+                        if sha == i["sha256"] or sha in i.get("history", [])
+                    ),
+                    None,
+                )
+                if listed is not None:
+                    break
+        found.append((state(sha, listed), listed) if listed is not None else (None, None))
+    return found
 
 
 def download(item, where=None):
-    """download(item, where=None) ... an index's vise saved where vises are kept, replacing one of
-    its name: checked against the index's size and sha256, and as a vise's file, holding no
-    Python, before it is put there. Returns its path; raises ValueError for one refused."""
+    """download(item, where=None) ... an index's vise or clamp saved where they are kept, replacing
+    one of its name: checked against the index's size and sha256, and as a vise's or a clamp's
+    file, holding no Python, before it is put there. Returns its path; raises ValueError for one
+    refused."""
     data = fetch(item["url"])
     if item.get("size") is not None and len(data) != item["size"]:
         raise ValueError(
@@ -158,7 +372,10 @@ def download(item, where=None):
     try:
         with os.fdopen(handle, "wb") as f:
             f.write(data)
-        errors = PathCheck.checkZip(temporary)
+        if item.get("kind", "vise") == "clamp":
+            errors = _checkClamp(temporary)
+        else:
+            errors = PathCheck.checkZip(temporary)
         if errors:
             raise ValueError("%s: %s" % (item["file"], "; ".join(errors)))
         path = localPath(item, where)
@@ -173,6 +390,144 @@ def download(item, where=None):
             os.remove(temporary)
     Path.Log.info(translate("CAM", "%s saved in %s") % (item.get("label", item["file"]), path))
     return path
+
+
+def _checkClamp(path):
+    """What is wrong with a clamp's file: Python in it, run when it is opened; no clamp in it."""
+    import Path.Main.WorkholdingItems as PathItems
+
+    errors = []
+    found = PathCheck.pythonObjects(path)
+    if found:
+        errors.append(
+            translate("CAM", "Holds Python, run when opened: %s")
+            % ", ".join("%s (%s)" % f for f in found)
+        )
+    if PathItems.clampFile(path) is None:
+        errors.append(translate("CAM", "No clamp: no part, or no VarSet saying what kind it is"))
+    return errors
+
+
+# what a vise's or clamp's file says of itself, stamped in it where it was published: an About
+# group in its settings VarSet, each property and the field it is read as
+ABOUT = "About"
+AboutFields = {
+    "Library": "library",
+    "LibraryItem": "id",
+    "Type": "type",
+    "Maker": "maker",
+    "Model": "model",
+    "Licence": "licence",
+    "Attribution": "attribution",
+    "Source": "source",
+}
+
+
+def about(path):
+    """about(path) ... what the vise's or clamp's file at path says of itself, read from it
+    without opening it: label, its part's, and as stamped where it was published library, the
+    library's address, id, type, maker, model, licence, attribution and source; kind, "vise" or
+    "clamp", and its settings, a vise's jawWidth and maxOpening in mm. Those not stamped are
+    missing; {} for a file that cannot be read or holds no vise or clamp."""
+    from xml.etree import ElementTree
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(path) as archive:
+            root = ElementTree.fromstring(archive.read("Document.xml"))
+    except (OSError, KeyError, zipfile.BadZipFile, ElementTree.ParseError):
+        return {}
+    kinds = {o.get("name"): o.get("type") for o in root.iter("Object") if o.get("type")}
+    found = {}
+    labels = {}
+    groups = {}
+    settings = None
+    data = root.find("ObjectData")
+    for obj in data.findall("Object") if data is not None else []:
+        name = obj.get("name")
+        props = {p.get("name"): p for p in obj.iter("Property")}
+        label = props.get("Label")
+        if label is not None and label.find("String") is not None:
+            labels[name] = label.find("String").get("value")
+        if kinds.get(name) == "App::Part" and props.get("Group") is not None:
+            groups[name] = [link.get("value") for link in props["Group"].iter("Link")]
+        if kinds.get(name) != "App::VarSet" or not ("Opening" in props or "Kind" in props):
+            continue
+        if settings is None:
+            settings = name
+            if "Opening" in props:
+                found["kind"] = "vise"
+                found["settings"] = {}
+                for prop_name, key in (("JawWidth", "jawWidth"), ("MaxOpening", "maxOpening")):
+                    value = props.get(prop_name)
+                    if value is not None and value.find("Float") is not None:
+                        found["settings"][key] = float(value.find("Float").get("value"))
+            else:
+                kind = props["Kind"].find("String")
+                if kind is None or kind.get("value") not in ("HoldDown", "Push"):
+                    settings = None
+                    continue
+                found["kind"] = "clamp"
+        for prop_name, field in AboutFields.items():
+            prop = props.get(prop_name)
+            if prop is not None and prop.get("group") == ABOUT and prop.find("String") is not None:
+                value = prop.find("String").get("value")
+                if value:
+                    found[field] = value
+    # the part holding the settings, else the first
+    parts = [n for n, links in groups.items() if settings in links] or list(groups)
+    if settings is None or not parts:
+        return {}
+    if parts[0] in labels:
+        found["label"] = labels[parts[0]]
+    return found
+
+
+def thumbnail(path):
+    """thumbnail(path) ... the thumbnail a FreeCAD file keeps, as PNG bytes; None if none."""
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(path) as archive:
+            return archive.read("thumbnails/Thumbnail.png")
+    except (OSError, KeyError, zipfile.BadZipFile):
+        return None
+
+
+def localItems(kind="vise", folders=None):
+    """localItems(kind="vise", folders=None) ... the vises, or clamps, on this computer, in
+    folders, where they are kept when None: each a dict as a library's index has its items, as
+    its file says of itself, with path, its file's, its id its file's name and its label the
+    file's name if it says none."""
+    folders = [folder(kind)] if folders is None else folders
+    items = []
+    seen = set()
+    for where in folders:
+        if not where or not os.path.isdir(where):
+            continue
+        for name in sorted(os.listdir(where)):
+            path = os.path.join(where, name)
+            if not name.lower().endswith(".fcstd") or os.path.realpath(path) in seen:
+                continue
+            found = about(path)
+            if found.get("kind") != kind:
+                continue
+            seen.add(os.path.realpath(path))
+            stem = os.path.splitext(name)[0]
+            item = dict(found, path=path, file=name, kind=kind)
+            item["libraryItem"] = item.pop("id", "")
+            item["id"] = stem
+            item.setdefault("label", stem.replace("_", " "))
+            items.append(item)
+    return items
+
+
+def fileSha256(path):
+    """fileSha256(path) ... the sha256 of the file at path, "" if it cannot be read."""
+    try:
+        return _sha256(path)
+    except OSError:
+        return ""
 
 
 def _sameDevice(a, b):

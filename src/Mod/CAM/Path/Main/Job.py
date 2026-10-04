@@ -105,9 +105,10 @@ def createModelResourceClone(obj, orig):
 def workholdingParts(job, cuttable=False):
     """workholdingParts(job, cuttable=False) ... the pieces of the job's workholding in use, as
     (part, shape) pairs, each shape where it stands, the part the one it shows as: a vise's parts
-    shown, hard jaw plates swapped for soft jaws being hidden, and out of the tools' way; clamps
-    and the like whole; and the stock of the other Jobs sharing a vise, in its other stations.
-    With cuttable, only what may be cut into, soft jaws and soft parallels; without, the rest."""
+    shown, hard jaw plates swapped for soft jaws being hidden, and out of the tools' way; a clamp
+    from a file of its own by its parts too; clamps and the like whole; and the stock of the other
+    Jobs sharing a vise, in its other stations, or a stop, on its other side. With cuttable, only
+    what may be cut into, soft jaws and soft parallels; without, the rest."""
     import Part
     import Path.Main.Workholding as PathWorkholding
 
@@ -122,7 +123,7 @@ def workholdingParts(job, cuttable=False):
         if not getattr(obj, "Active", True):
             continue
         try:
-            if hasattr(obj, "Group") and PathWorkholding.viseSetup(obj) is not None:
+            if hasattr(obj, "Group") and obj.hasExtension("App::GeoFeatureGroupExtension"):
                 for part in obj.Group:
                     if not part.Visibility or PathWorkholding.isCuttable(part) != cuttable:
                         continue
@@ -134,14 +135,14 @@ def workholdingParts(job, cuttable=False):
                     shape = shape.copy()
                     shape.Placement = obj.Placement.multiply(shape.Placement)
                     parts.append((part, shape))
-                # the parts of the Jobs sharing it, as big as they can be: their stock
-                others += [o for o in PathWorkholding.sharedWith(obj) if o not in others]
             elif not cuttable:
                 shape = Part.getShape(
                     obj, "", needSubElement=False, transform=True, noElementMap=True
                 )
                 if not shape.isNull() and shape.Solids:
                     parts.append((obj, shape))
+            # the parts of the Jobs sharing it, as big as they can be: their stock
+            others += [o for o in PathWorkholding.sharedWith(obj) if o not in others]
         except Exception as e:
             Path.Log.warning(f"Workholding {obj.Label} has no shape: {e}")
     if not cuttable:
@@ -828,9 +829,9 @@ class ObjectJob:
             Path.Log.debug("taking down workholding")
             import Path.Main.Workholding as PathWorkholding
 
-            # a vise shared with other Jobs no longer shared: theirs stay where they are
-            for vise in PathWorkholding.vises(obj):
-                PathWorkholding.release(vise)
+            # a vise or a stop shared with other Jobs no longer shared: theirs stay where they are
+            for member in list(obj.Workholding.Group):
+                PathWorkholding.release(member)
             obj.Workholding.Group = []
             doc.removeObject(obj.Workholding.Name)
             obj.Workholding = None

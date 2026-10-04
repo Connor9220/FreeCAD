@@ -114,7 +114,6 @@ SET(PathPythonMainGui_SRCS
     Path/Main/Gui/WorkholdingCmd.py
     Path/Main/Gui/WorkholdingItems.py
     Path/Main/Gui/WorkholdingLibraryGui.py
-    Path/Main/Gui/WorkholdingWizard.py
     Path/Main/Gui/WorkplaneCmd.py
     Path/Main/Gui/JobDlg.py
     Path/Main/Gui/PreferencesJob.py
