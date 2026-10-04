@@ -56,6 +56,12 @@
         ],
         "subtypes": []
     },
+    "Lollipop": {
+        "aliases": [
+            "lollipop"
+        ],
+        "subtypes": []
+    },
     "Probe": {
         "aliases": [
             "probe"

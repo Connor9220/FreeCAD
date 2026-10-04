@@ -362,6 +362,38 @@ class TestPathToolShapeClasses(PathTestWithAssets):
         shape.apply_derived_parameters()
         self.assertAlmostEqual(shape.get_parameter("CuttingEdgeHeight").Value, 3.175)
 
+    def test_toolbitshapelollipop_defaults(self):
+        """Test ToolBitShapeLollipop default parameters and labels."""
+        shape = self._test_shape_common("lollipop")
+        self.assertEqual(shape["Diameter"].Value, 6.0)
+        self.assertEqual(unit(shape["Diameter"]), "mm")
+        self.assertEqual(shape["NeckDiameter"].Value, 3.0)
+        self.assertEqual(shape["NeckHeight"].Value, 12.0)
+        self.assertEqual(shape["ShankDiameter"].Value, 6.0)
+        self.assertEqual(shape["Length"].Value, 50.0)
+        self.assertAlmostEqual(shape["CuttingEdgeHeight"].Value, 3 + math.sqrt(9 - 2.25), 4)
+        uri = ToolBitShape.resolve_name("lollipop")
+        instance = self.assets.get(uri)
+        self.assertEqual(instance.get_parameter_label("Diameter"), "Ball diameter")
+        self.assertEqual(instance.get_parameter_label("NeckHeight"), "Neck length")
+        self.assertEqual(set(instance.derived_parameters()), {"CuttingEdgeHeight"})
+        self.assertIs(ToolBitShape.get_subclass_by_name("lollipop"), type(instance))
+
+    def test_lollipop_derived_cutting_edge_height(self):
+        """The lollipop cuts up to where its neck meets the ball."""
+        shape = self.assets.get(ToolBitShape.resolve_name("lollipop"))
+        shape.set_parameters(
+            Diameter=FreeCAD.Units.Quantity("6.35 mm"),
+            NeckDiameter=FreeCAD.Units.Quantity("3.175 mm"),
+            CuttingEdgeHeight=FreeCAD.Units.Quantity("0 mm"),
+        )
+        self.assertIn("CuttingEdgeHeight", shape.apply_derived_parameters())
+        height = shape.get_parameter("CuttingEdgeHeight")
+        r, n = 6.35 / 2, 3.175 / 2
+        self.assertAlmostEqual(height.Value, r + math.sqrt(r * r - n * n))
+        self.assertEqual(height.Unit, FreeCAD.Units.Unit("mm"))
+        self.assertEqual(shape.apply_derived_parameters(), {})
+
     def test_toolbitshapeendmill_defaults(self):
         """Test ToolBitShapeEndmill default parameters and labels."""
         # Provide a dummy filepath for instantiation.

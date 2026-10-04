@@ -22,14 +22,26 @@
 # ***************************************************************************
 
 from typing import cast
+import math
 import os
 import uuid
 import pathlib
 import FreeCAD
 from CAMTests.PathTestUtils import PathTestWithAssets
 from Path.Tool.library import Library
-from Path.Tool.shape import ToolBitShapeBullnose, ToolBitShapeDovetail, ToolBitShapeKeyway
-from Path.Tool.toolbit import ToolBitEndmill, ToolBitBullnose, ToolBitDovetail, ToolBitKeyway
+from Path.Tool.shape import (
+    ToolBitShapeBullnose,
+    ToolBitShapeDovetail,
+    ToolBitShapeKeyway,
+    ToolBitShapeLollipop,
+)
+from Path.Tool.toolbit import (
+    ToolBitEndmill,
+    ToolBitBullnose,
+    ToolBitDovetail,
+    ToolBitKeyway,
+    ToolBitLollipop,
+)
 from Path.Tool.toolbit.migration import ParameterAccessor, migrate_parameters
 
 TOOL_DIR = pathlib.Path(os.path.realpath(__file__)).parent.parent / "Tools"
@@ -203,3 +215,40 @@ class TestPathToolBitDerivedShapes(PathTestWithAssets):
         self._recompute(obj)
         self.assertAlmostEqual(obj.CuttingEdgeHeight.Value, 9.0)
         self.assertGreater(obj.BitBody.Shape.Volume, volume)
+
+    def testLollipop(self):
+        """Lollipop: CuttingEdgeHeight is where the neck meets the ball, read-only"""
+        shape = cast(ToolBitShapeLollipop, self.assets.get("toolbitshape://lollipop"))
+        obj = ToolBitLollipop(shape, id="lollipop").attach_to_doc(self.doc)
+        self._recompute(obj)
+        self.assertIn("ReadOnly", obj.getEditorMode("CuttingEdgeHeight"))
+        self.assertAlmostEqual(obj.CuttingEdgeHeight.Value, 3 + math.sqrt(9 - 2.25), places=6)
+
+        solid = obj.BitBody.Shape
+        self.assertTrue(solid.isValid())
+        self.assertAlmostEqual(solid.BoundBox.ZMin, 0.0, places=6)
+        self.assertAlmostEqual(solid.BoundBox.ZMax, 50.0, places=6)
+        self.assertAlmostEqual(solid.BoundBox.XMax, 3.0, places=6)
+
+        obj.NeckDiameter = FreeCAD.Units.Quantity("2 mm")
+        self._recompute(obj)
+        self.assertAlmostEqual(obj.CuttingEdgeHeight.Value, 3 + math.sqrt(9 - 1), places=6)
+
+    def testLollipopBallOnAShaft(self):
+        """A ball on a plain shaft (neck as wide as the shank) still builds"""
+        shape = cast(ToolBitShapeLollipop, self.assets.get("toolbitshape://lollipop"))
+        obj = ToolBitLollipop(shape, id="ballonshaft").attach_to_doc(self.doc)
+        obj.Diameter = FreeCAD.Units.Quantity("6 mm")
+        obj.NeckDiameter = FreeCAD.Units.Quantity("4 mm")
+        obj.ShankDiameter = FreeCAD.Units.Quantity("4 mm")
+        self._recompute(obj)
+        solid = obj.BitBody.Shape
+        self.assertTrue(solid.isValid())
+        self.assertGreater(solid.Volume, 0)
+        self.assertAlmostEqual(solid.BoundBox.ZMax, 50.0, places=6)
+        self.assertAlmostEqual(solid.BoundBox.XMax, 3.0, places=6)
+        # ball, plus a 2 mm radius shaft from where it leaves the ball to the top
+        junction = 3 + math.sqrt(9 - 4)
+        cap = math.pi * junction**2 * (9 - junction) / 3
+        shaft = math.pi * 4 * (50 - junction)
+        self.assertAlmostEqual(solid.Volume, cap + shaft, delta=0.05)
