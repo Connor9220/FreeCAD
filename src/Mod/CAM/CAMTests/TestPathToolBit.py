@@ -376,3 +376,40 @@ class TestPathToolBitDerivedShapes(PathTestWithAssets):
         labels = [bit.label for bit in library]
         self.assertIn("3/8in Keyway", labels)
         self.assertIn("1/4in Lollipop", labels)
+
+    def testSampleDrillsAndTaps(self):
+        """Shipped drills and taps load with their derived CuttingEdgeHeight"""
+        cases = (
+            ("5mm_Drill", None),
+            ("M8x1.25_Tap", 0.0),
+            ("375-16_Tap", 0.0),
+        )
+        for asset_id, expected in cases:
+            with self.subTest(asset_id=asset_id):
+                toolbit = self.assets.get(f"toolbit://{asset_id}")
+                obj = toolbit.attach_to_doc(self.doc)
+                self._recompute(obj)
+                self.assertIn("CuttingEdgeHeight", obj.PropertiesList)
+                self.assertIn("ReadOnly", obj.getEditorMode("CuttingEdgeHeight"))
+                if expected is None:
+                    radius = obj.Diameter.Value / 2
+                    expected = radius / math.tan(math.radians(obj.TipAngle.Value / 2))
+                self.assertAlmostEqual(obj.CuttingEdgeHeight.Value, expected, places=6)
+                self.assertTrue(obj.BitBody.Shape.isValid())
+                self.assertAlmostEqual(obj.BitBody.Shape.BoundBox.ZMax, obj.Length.Value, places=4)
+
+    def testOldTapDocumentGetsCuttingEdgeHeight(self):
+        """A tap saved before it had a CuttingEdgeHeight gains the derived one on reopening"""
+        toolbit = self.assets.get("toolbit://M8x1.25_Tap")
+        obj = toolbit.attach_to_doc(self.doc)
+        obj.removeProperty("CuttingEdgeHeight")
+        name = obj.Name
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "oldtap.FCStd")
+            self.doc.saveAs(path)
+            FreeCAD.closeDocument(self.doc.Name)
+            self.doc = FreeCAD.openDocument(path)
+            obj = self.doc.getObject(name)
+            self.assertIn("CuttingEdgeHeight", obj.PropertiesList)
+            self.assertEqual(obj.CuttingEdgeHeight, FreeCAD.Units.Quantity("0 mm"))
+            self.assertIn("ReadOnly", obj.getEditorMode("CuttingEdgeHeight"))

@@ -394,6 +394,42 @@ class TestPathToolShapeClasses(PathTestWithAssets):
         self.assertEqual(height.Unit, FreeCAD.Units.Unit("mm"))
         self.assertEqual(shape.apply_derived_parameters(), {})
 
+    def test_drill_derived_cutting_edge_height(self):
+        """A drill cuts sideways with its tip cone only: CuttingEdgeHeight is its length."""
+        shape = self.assets.get(ToolBitShape.resolve_name("drill"))
+        self.assertEqual(set(shape.derived_parameters()), {"CuttingEdgeHeight"})
+        cases = (
+            ("6 mm", "118 deg", 3 / math.tan(math.radians(59))),
+            ("10 mm", "90 deg", 5.0),
+            ("10 mm", "180 deg", 0.0),
+            ("10 mm", "0 deg", 0.0),
+        )
+        for diameter, angle, expected in cases:
+            with self.subTest(diameter=diameter, angle=angle):
+                shape.set_parameters(
+                    Diameter=FreeCAD.Units.Quantity(diameter),
+                    TipAngle=FreeCAD.Units.Quantity(angle),
+                )
+                shape.apply_derived_parameters()
+                height = shape.get_parameter("CuttingEdgeHeight")
+                self.assertAlmostEqual(height.Value, expected)
+                self.assertEqual(height.Unit, FreeCAD.Units.Unit("mm"))
+        shape.set_parameters(
+            Diameter=FreeCAD.Units.Quantity("6 mm"), TipAngle=FreeCAD.Units.Quantity("118 deg")
+        )
+        shape.apply_derived_parameters()
+        self.assertAlmostEqual(shape.get_parameter("CuttingEdgeHeight").Value, 1.8026, 4)
+
+    def test_tap_derived_cutting_edge_height(self):
+        """A tap cuts only at its point: CuttingEdgeHeight is 0."""
+        shape = self.assets.get(ToolBitShape.resolve_name("tap"))
+        self.assertEqual(set(shape.derived_parameters()), {"CuttingEdgeHeight"})
+        shape.set_parameter("CuttingEdgeHeight", FreeCAD.Units.Quantity("12 mm"))
+        shape.apply_derived_parameters()
+        height = shape.get_parameter("CuttingEdgeHeight")
+        self.assertEqual(height.Value, 0.0)
+        self.assertEqual(height.Unit, FreeCAD.Units.Unit("mm"))
+
     def test_toolbitshapeendmill_defaults(self):
         """Test ToolBitShapeEndmill default parameters and labels."""
         # Provide a dummy filepath for instantiation.
