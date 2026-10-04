@@ -38,7 +38,7 @@ from ...docobject import DetachedDocumentObject
 from ...assets.asset import Asset
 from ...shape import ToolBitShape, ToolBitShapeCustom, ToolBitShapeIcon
 from ..util import to_json, format_value, units_from_json
-from ..migration import ParameterAccessor, migrate_parameters
+from ..migration import ParameterAccessor, migrate_added_parameters, migrate_parameters
 
 # The Holder of a bit that is not in one
 NoHolder = "None"
@@ -208,6 +208,15 @@ class ToolBit(Asset, ABC):
             units = units_from_json(params)
             if units:
                 params = {**params, "Units": units}
+
+        # A file may predate parameters its shape has since gained. Add them
+        # now, before the shape's derived parameters overwrite anything they
+        # would be carried over from.
+        if isinstance(params, dict):
+            migrating = {"name": attrs.get("name"), "shape-type": tool_bit_shape.name}
+            migrating["parameter"] = dict(params)
+            if migrate_added_parameters(ParameterAccessor(migrating)):
+                params = migrating["parameter"]
 
         # Filter parameters if method exists
         if (

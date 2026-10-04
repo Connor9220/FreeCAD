@@ -22,8 +22,10 @@
 # ***************************************************************************
 
 from typing import cast
+import json
 import math
 import os
+import tempfile
 import uuid
 import pathlib
 import FreeCAD
@@ -34,6 +36,7 @@ from Path.Tool.shape import (
     ToolBitShapeDovetail,
     ToolBitShapeKeyway,
     ToolBitShapeLollipop,
+    ToolBitShapeReamer,
 )
 from Path.Tool.toolbit import (
     ToolBitEndmill,
@@ -41,6 +44,7 @@ from Path.Tool.toolbit import (
     ToolBitDovetail,
     ToolBitKeyway,
     ToolBitLollipop,
+    ToolBitReamer,
 )
 from Path.Tool.toolbit.migration import ParameterAccessor, migrate_parameters
 
@@ -161,6 +165,92 @@ class TestPathToolBitMigration(PathTestWithAssets):
         # NeckCuttingHeight is not geometry: the tool is drawn as before.
         self.doc.recompute()
         self.assertAlmostEqual(obj.BitBody.Shape.Volume, volume, places=6)
+
+    def _old_reamer_dict(self, height="20.0000 mm"):
+        return {
+            "version": 2,
+            "name": "Old reamer",
+            "shape": "reamer.fcstd",
+            "shape-type": "Reamer",
+            "parameter": {
+                "CuttingEdgeHeight": height,
+                "Diameter": "5.0000 mm",
+                "Length": "50.0000 mm",
+                "ShankDiameter": "3.0000 mm",
+            },
+            "attribute": {},
+        }
+
+    def testReamerDictGetsFluteLength(self):
+        """An old reamer .fctb keeps its fluted length, unit and all, as FluteLength"""
+        for height in ("20.0000 mm", "0.7500 in"):
+            with self.subTest(height=height):
+                attrs = self._old_reamer_dict(height)
+                self.assertTrue(migrate_parameters(ParameterAccessor(attrs)))
+                self.assertEqual(attrs["parameter"]["FluteLength"], height)
+                self.assertEqual(attrs["parameter"]["CuttingEdgeHeight"], height)
+        attrs = self._old_reamer_dict()
+        attrs["parameter"]["FluteLength"] = "12.0000 mm"
+        attrs["parameter"]["Units"] = "Metric"
+        self.assertFalse(migrate_parameters(ParameterAccessor(attrs)))
+        self.assertEqual(attrs["parameter"]["FluteLength"], "12.0000 mm")
+
+    def testReamerObjectGetsFluteLength(self):
+        """A reamer document object saved without FluteLength gains it from CuttingEdgeHeight"""
+        shape = cast(ToolBitShapeReamer, self.assets.get("toolbitshape://reamer"))
+        obj = ToolBitReamer(shape, id="oldreamer").attach_to_doc(self.doc)
+        obj.removeProperty("FluteLength")
+        # As restored from the file: no derived recompute has run yet.
+        obj.Proxy._suppress_visual_update = True
+        obj.CuttingEdgeHeight = FreeCAD.Units.Quantity("20 mm")
+        obj.Proxy._suppress_visual_update = False
+
+        self.assertTrue(migrate_parameters(ParameterAccessor(obj)))
+        self.assertEqual(obj.getGroupOfProperty("FluteLength"), "Shape")
+        self.assertEqual(obj.FluteLength, FreeCAD.Units.Quantity("20 mm"))
+        self.assertFalse(migrate_parameters(ParameterAccessor(obj)))
+
+    def testOldReamerDocumentRestores(self):
+        """A saved document with an old reamer reopens with FluteLength carried over"""
+        shape = cast(ToolBitShapeReamer, self.assets.get("toolbitshape://reamer"))
+        obj = ToolBitReamer(shape, id="oldreamer").attach_to_doc(self.doc)
+        obj.removeProperty("FluteLength")
+        obj.Proxy._suppress_visual_update = True
+        obj.CuttingEdgeHeight = FreeCAD.Units.Quantity("20 mm")
+        obj.Proxy._suppress_visual_update = False
+        name = obj.Name
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "oldreamer.FCStd")
+            self.doc.saveAs(path)
+            FreeCAD.closeDocument(self.doc.Name)
+            self.doc = FreeCAD.openDocument(path)
+            obj = self.doc.getObject(name)
+            self.assertEqual(obj.FluteLength, FreeCAD.Units.Quantity("20 mm"))
+            self.assertEqual(obj.CuttingEdgeHeight, FreeCAD.Units.Quantity("0 mm"))
+
+    def testOldReamerFileLoadsAsBefore(self):
+        """An old reamer .fctb is drawn as before, and now has no cutting edge height"""
+        old = self._old_reamer_dict()
+        new = self._old_reamer_dict()
+        new["parameter"]["FluteLength"] = new["parameter"].pop("CuttingEdgeHeight")
+        bodies = []
+        for asset_id, attrs in (("old_reamer", old), ("new_reamer", new)):
+            self.assets.add_raw(
+                "toolbit", asset_id, json.dumps(attrs).encode(), store=self.asset_store.name
+            )
+            toolbit = self.assets.get(f"toolbit://{asset_id}")
+            self.assertIsInstance(toolbit, ToolBitReamer)
+            obj = toolbit.attach_to_doc(self.doc)
+            self.doc.recompute()
+            self.assertEqual(obj.FluteLength, FreeCAD.Units.Quantity("20 mm"))
+            self.assertEqual(obj.CuttingEdgeHeight, FreeCAD.Units.Quantity("0 mm"))
+            self.assertIn("ReadOnly", obj.getEditorMode("CuttingEdgeHeight"))
+            bodies.append(obj.BitBody.Shape)
+        self.assertAlmostEqual(bodies[0].Volume, bodies[1].Volume, places=6)
+        self.assertTrue(bodies[0].BoundBox.isInside(bodies[1].BoundBox.Center))
+        # 20 mm of 5 mm flutes, then a 3 mm shank to 50 mm
+        expected = math.pi * (2.5**2 * 20 + 1.5**2 * 30)
+        self.assertAlmostEqual(bodies[0].Volume, expected, delta=0.5)
 
     def testDovetailNeckCuttingHeightIsNotGeometry(self):
         """Changing NeckCuttingHeight leaves the dovetail's solid alone"""

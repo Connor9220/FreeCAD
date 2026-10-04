@@ -104,7 +104,7 @@ def migrate_parameters(accessor: ParameterAccessor) -> bool:
     Currently handles:
     - TorusRadius → CornerRadius
     - FlatRadius/Diameter → CornerRadius
-    - Dovetail without NeckCuttingHeight → NeckCuttingHeight = 0
+    - Parameters added to a shape later, see migrate_added_parameters()
     - Infers Units from parameter strings if not set
 
     Args:
@@ -184,24 +184,69 @@ def migrate_parameters(accessor: ParameterAccessor) -> bool:
             except Exception as e:
                 Path.Log.error(f"Failed to migrate FlatRadius for toolbit {name}: {e}")
 
-    # Dovetails saved before NeckCuttingHeight existed have no fluted neck.
-    if shape_type and str(shape_type).lower() == "dovetail":
-        if not accessor.has("NeckCuttingHeight"):
-            diam_raw = accessor.get("Diameter") if has_diam else None
-            if isinstance(diam_raw, str) and diam_raw.strip().endswith("in"):
-                value = "0.0000 in"
-            else:
-                value = "0.0000 mm"
+    if migrate_added_parameters(accessor):
+        migrated = True
 
-            accessor.add_property(
-                "App::PropertyLength",
-                "NeckCuttingHeight",
-                "Shape",
-                "Fluted length of the neck above the head",
-            )
-            accessor.set_editor_mode("NeckCuttingHeight", 0)
-            accessor.set("NeckCuttingHeight", value)
-            Path.Log.info(f"Added NeckCuttingHeight={value} for {name}")
-            migrated = True
+    return migrated
+
+
+def migrate_added_parameters(accessor: ParameterAccessor) -> bool:
+    """
+    Gives a toolbit the parameters its shape gained after it was saved.
+
+    Currently handles:
+    - Dovetail without NeckCuttingHeight → NeckCuttingHeight = 0
+    - Reamer without FluteLength → FluteLength = its CuttingEdgeHeight, which
+      used to be the fluted length and is now derived (0)
+
+    This must run before the shape's derived parameters are applied, or a
+    value they overwrite is lost before it can be carried over.
+
+    Args:
+        accessor: ParameterAccessor instance wrapping dict or FreeCAD object
+
+    Returns:
+        True if migration occurred, False otherwise
+    """
+    migrated = False
+    name = accessor.name()
+    shape_type = str(accessor.get_shape_type() or "").lower()
+
+    # Dovetails saved before NeckCuttingHeight existed have no fluted neck.
+    if shape_type == "dovetail" and not accessor.has("NeckCuttingHeight"):
+        diam_raw = accessor.get("Diameter") if accessor.has("Diameter") else None
+        if isinstance(diam_raw, str) and diam_raw.strip().endswith("in"):
+            value = "0.0000 in"
+        else:
+            value = "0.0000 mm"
+
+        accessor.add_property(
+            "App::PropertyLength",
+            "NeckCuttingHeight",
+            "Shape",
+            "Fluted length of the neck above the head",
+        )
+        accessor.set_editor_mode("NeckCuttingHeight", 0)
+        accessor.set("NeckCuttingHeight", value)
+        Path.Log.info(f"Added NeckCuttingHeight={value} for {name}")
+        migrated = True
+
+    # A reamer's CuttingEdgeHeight used to be the length of its fluted body.
+    if (
+        shape_type == "reamer"
+        and not accessor.has("FluteLength")
+        and accessor.has("CuttingEdgeHeight")
+    ):
+        value = accessor.get("CuttingEdgeHeight")
+        accessor.add_property(
+            "App::PropertyLength",
+            "FluteLength",
+            "Shape",
+            "Length of the fluted body",
+        )
+        accessor.set_editor_mode("FluteLength", 0)
+        accessor.set("FluteLength", value)
+        Path.Log.info(f"Copied CuttingEdgeHeight to FluteLength={value} for {name}")
+        migrated = True
 
     return migrated
