@@ -791,6 +791,13 @@ bool SoFCUnifiedSelection::setPreselect(
                 currentHighlightPath = nullptr;
             }
             currentHighlightPath = Gui::toFullPath(path->copy());
+            if (!element || !element[0]) {
+                // PreselectWholeObject: from the object's root, not the node the cursor hit
+                int index = currentHighlightPath->findNode(vpd->getRoot());
+                if (index >= 0) {
+                    currentHighlightPath->truncate(index + 1);
+                }
+            }
             currentHighlightPath->ref();
             highlighted = true;
         }
@@ -800,7 +807,8 @@ bool SoFCUnifiedSelection::setPreselect(
         SoHighlightElementAction action;
         action.setHighlighted(highlighted);
         action.setColor(this->colorHighlight.getValue());
-        action.setElement(det);
+        // PreselectWholeObject: an empty element means the whole object was picked, so light all of it
+        action.setElement(element && element[0] ? det : nullptr);
         action.apply(currentHighlightPath);
         if (!highlighted) {
             currentHighlightPath->unref();
@@ -970,8 +978,19 @@ bool SoFCUnifiedSelection::setSelection(const std::vector<PickedInfo>& infos, bo
         FC_TRACE("applying action");
         SoSelectionElementAction action(type);
         action.setColor(this->colorSelection.getValue());
-        action.setElement(det);
-        action.apply(pPath);
+        // PreselectWholeObject: an empty element means the whole object was picked, so select all
+        // of it, from the object's root, not the node the cursor hit
+        SoFullPath* applyPath = pPath;
+        if (info.element.empty()) {
+            int index = pPath->findNode(vpd->getRoot());
+            if (index >= 0) {
+                applyPath = Gui::toFullPath(pPath->copy(0, index + 1));
+            }
+        }
+        applyPath->ref();
+        action.setElement(info.element.empty() ? nullptr : det);
+        action.apply(applyPath);
+        applyPath->unref();
         FC_TRACE("applied action");
         this->touch();
     }
