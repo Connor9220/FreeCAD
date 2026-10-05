@@ -98,6 +98,10 @@ PROPERTY_ADDED = 21
 # a stop or clamp put past its side's end keeps at least this much of its width across from the
 # stock, to touch it
 ACROSS_AT_LEAST = 0.25
+# a stop or clamp is moved in square to its side until it touches the stock itself, not its box:
+# in at most this many moves, each as far as it is from the stock, until it is this near, mm
+TOUCH_MOVES = 16
+TOUCH_NEAR = 0.01
 # a turn of a lever clamp with that dragger goes by this many degrees
 DRAG_TURN_STEP = 1.0
 # the piece being dragged: where it is shown in the panel every this many ms

@@ -58,7 +58,7 @@ import Path.Workholding.Source as PathSource
 
 from FreeCAD import Vector
 from Path.Workholding.Common import objectKinds, readDocumentXml, varsetProperties
-from Path.Workholding.Constants import ACROSS_AT_LEAST, CLAMP_KINDS
+from Path.Workholding.Constants import ACROSS_AT_LEAST, CLAMP_KINDS, TOUCH_MOVES, TOUCH_NEAR
 from PySide.QtCore import QT_TRANSLATE_NOOP
 
 translate = FreeCAD.Qt.translate
@@ -444,7 +444,7 @@ def create(job, which, name=None):
 def placeTable(job, table):
     """placeTable(job, table) ... the table under the stock: its waste board's top where the
     stock lies, the stock's front left corner at the table's, inset by a hole spacing."""
-    bb = job.Stock.Shape.BoundBox
+    bb = stockBox(job)
     inset = table.HoleSpacing.Value if hasattr(table, "HoleSpacing") else 0
     table.Placement = FreeCAD.Placement(
         Vector(bb.XMin - inset, bb.YMin - inset, bb.ZMin), FreeCAD.Rotation()
@@ -496,13 +496,19 @@ def _turnOf(along, inward):
     )
 
 
+def stockBox(job):
+    """stockBox(job) ... the box round the Job's stock, from its surfaces: a round stock's sides
+    where they are, not where the triangles drawing it put them."""
+    return job.Stock.Shape.optimalBoundingBox(False)
+
+
 def sideFrame(job, side):
     """sideFrame(job, side) ... the frame of the stock's side, the part's own side as sides names
     it, and how long the side is: its origin in the middle of the side on the surface the stock
     lies on, its +X along the side, its +Y into the stock, its +Z up. A stop or a side clamp is
     put in it as it is laid out, a hold-down as high up as the stock's top."""
     out = sideDirection(job, side)
-    bb = job.Stock.Shape.BoundBox
+    bb = stockBox(job)
     inward = out * -1
     along = inward.cross(Vector(0, 0, 1))
     middle = Vector(bb.Center.x, bb.Center.y, bb.ZMin)
@@ -530,7 +536,7 @@ def sideAxis(job, side):
 
 def _stockStart(job, axis):
     """Where the stock begins along the Job's axis, 0 for X and 1 for Y."""
-    bb = job.Stock.Shape.BoundBox
+    bb = stockBox(job)
     return bb.XMin if axis == 0 else bb.YMin
 
 
@@ -665,15 +671,50 @@ def _placeAt(job, piece, frame, x):
     if PathLever.isLever(piece):
         PathLever.placeOnSide(job, piece, frame, x)
         return
-    height = job.Stock.Shape.BoundBox.ZLength
+    height = stockBox(job).ZLength
     _, length = sideFrame(job, piece.StockSide)
     placement = frame.multiply(_touching(piece, x, height, length))
     if piece.Kind == Kind.HoldDown:
         placement = FreeCAD.Placement(placement.Base + Vector(0, 0, height), placement.Rotation)
         if hasattr(piece, "Drop") and abs(piece.Drop.Value - height) > 1e-9:
             piece.Drop = height
+    placement = _toStock(job, piece, placement, frame)
     if not piece.Placement.isSame(placement, 1e-9):
         piece.Placement = placement
+
+
+def _shapeOf(piece):
+    """The piece's shape where it stands in its own frame, made again first if a setting of it
+    changed or it was only just added: placing it goes by its size now."""
+    if hasattr(piece, "Shape") and (piece.Shape.isNull() or "Touched" in piece.State):
+        piece.recompute()
+    return Part.getShape(piece, transform=False)
+
+
+def _toStock(job, piece, placement, frame):
+    """The piece, placed against its side of the stock's box, moved in square to the side until
+    it touches the stock itself: on round stock, or a side that slants or has a step, where the
+    box's side is not the stock's. Each move as far as the piece is from the stock, so it never
+    goes into it. Left where it was when it would not come to touch the stock: past the side's
+    end, beside it."""
+    shape = _shapeOf(piece)
+    stock = job.Stock.Shape
+    if shape.isNull() or stock.isNull():
+        return placement
+    shape = shape.copy()
+    inward = frame.Rotation.multVec(Vector(0, 1, 0))
+    box = stockBox(job)
+    deepest = abs(inward.x) * box.XLength + abs(inward.y) * box.YLength
+    moved = 0.0
+    for _ in range(TOUCH_MOVES):
+        shape.Placement = FreeCAD.Placement(placement.Base + inward * moved, placement.Rotation)
+        gap = shape.distToShape(stock)[0]
+        if gap < TOUCH_NEAR:
+            return shape.Placement
+        moved += gap
+        if moved > deepest:
+            break
+    return placement
 
 
 def _alongLimits(job, piece):
@@ -688,10 +729,10 @@ def _alongLimits(job, piece):
 def _widthAlong(job, piece):
     """Where the piece reaches along its side from its origin, square to the side, beside the
     stock: (low, high) in the side's frame. Its width, not what turning it swings out."""
-    shape = Part.getShape(piece, transform=False)
+    shape = _shapeOf(piece)
     if shape.isNull():
         return 0.0, 0.0
-    height = job.Stock.Shape.BoundBox.ZLength
+    height = stockBox(job).ZLength
     box = shape.BoundBox
     beside = shape.common(
         Part.makeBox(
@@ -711,7 +752,7 @@ def _touching(piece, x, height, length):
     if piece.Kind != Kind.Push or angle is None or abs(angle.Value) < 1e-9:
         return FreeCAD.Placement(Vector(x, 0, 0), FreeCAD.Rotation())
     turned = FreeCAD.Placement(Vector(x, 0, 0), FreeCAD.Rotation(Vector(0, 0, 1), angle.Value))
-    shape = Part.getShape(piece, transform=False)
+    shape = _shapeOf(piece)
     if shape.isNull():
         return turned
     shape = shape.copy()
@@ -735,8 +776,15 @@ def contactFrame(job, piece):
         return None
     frame, _ = sideFrame(job, piece.StockSide)
     local = frame.inverse().multiply(PathWorkholding.placementOf(piece))
+    # in from the box's side as far as the piece was moved in to touch the stock
+    inset = 0.0
+    shape = Part.getShape(piece, "", transform=True)
+    if not shape.isNull() and not job.Stock.Shape.isNull():
+        gap, pairs, _ = shape.distToShape(job.Stock.Shape)
+        if gap < 10 * TOUCH_NEAR and pairs:
+            inset = max(0.0, frame.inverse().multVec(pairs[0][1]).y)
     return frame.multiply(
-        FreeCAD.Placement(Vector(local.Base.x, 0, local.Base.z), FreeCAD.Rotation())
+        FreeCAD.Placement(Vector(local.Base.x, inset, local.Base.z), FreeCAD.Rotation())
     )
 
 
@@ -755,7 +803,7 @@ def _toShared(job, shared):
             if (out - face).Length > 1e-6:
                 angle = math.degrees(math.atan2(out.cross(face).z, out.dot(face)))
                 PathWorkholding.turnModel(
-                    job, FreeCAD.Rotation(Vector(0, 0, 1), angle), job.Stock.Shape.BoundBox.Center
+                    job, FreeCAD.Rotation(Vector(0, 0, 1), angle), stockBox(job).Center
                 )
         frame, length = sideFrame(job, stop.StockSide)
         group = stopsOn(job, stop.StockSide)
@@ -957,7 +1005,7 @@ def _nearestSide(job, point, current):
     """The part's own side, as sides names it, whose side of the stock's box is nearest point
     seen from above, its ends and corners as they are: past a corner as near the one side as the
     other, current kept."""
-    bb = job.Stock.Shape.BoundBox
+    bb = stockBox(job)
     x0, x1, y0, y1 = bb.XMin, bb.XMax, bb.YMin, bb.YMax
     cx, cy = min(max(point.x, x0), x1), min(max(point.y, y0), y1)
     near = {
@@ -1019,7 +1067,7 @@ def _moveToSide(job, piece, side):
 def _pinWhereTheyAre(job, pieces):
     """Those spread along a side pinned where they are now, as no longer spread: one moved onto
     or off the side moves none of them."""
-    box = job.Stock.Shape.BoundBox
+    box = stockBox(job)
     for piece in pieces:
         if getattr(piece, "Pinned", False) or PathWorkholding.isShared(piece):
             continue
@@ -1207,7 +1255,7 @@ def addPieces(job, side, which, count=1):
 def _sideAt(job, point):
     """The part's own side, as sides names it, whose side of the stock's box is nearest point,
     seen from above."""
-    bb = job.Stock.Shape.BoundBox
+    bb = stockBox(job)
     near = {
         "-Y": abs(point.y - bb.YMin),
         "+Y": abs(point.y - bb.YMax),
