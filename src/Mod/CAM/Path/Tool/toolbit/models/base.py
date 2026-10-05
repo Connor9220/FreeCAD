@@ -564,6 +564,7 @@ class ToolBit(Asset, ABC):
         # as well.
         self._create_base_properties()
         self._promote_toolbit()
+        self._offer_holders()
 
         # Get the shape instance based on ShapeID/ShapeType. We try two
         # approaches to find the shape and shape class:
@@ -675,6 +676,7 @@ class ToolBit(Asset, ABC):
 
         # Ensure label is set
         self.obj.Label = label or self.label or self._tool_bit_shape.label
+        self._offer_holders()
 
         # Update the visual representation now that it's attached
         self._update_tool_properties()
@@ -1185,8 +1187,21 @@ class ToolBit(Asset, ABC):
         choices = [NoHolder] + sorted(available_holders())
         if current not in choices:
             choices.append(current)
+        if self.obj.getEnumerationsOfProperty("Holder") == choices:
+            return
         self.obj.Holder = choices
         self.obj.Holder = current
+
+    def _offer_holders(self):
+        """The holders there are offered in its Holder, not only in the tool editor: a bit in a
+        document, opened or just added, can be set in any of them. A holder that cannot be read
+        leaves the choices as they are."""
+        if not hasattr(self.obj, "Holder"):
+            return
+        try:
+            self.refresh_holder_choices()
+        except Exception as e:
+            Path.Log.debug(f"No holder choices for {self.obj.Label}: {e}")
 
     def get_holder(self, asset_manager=None):
         """The ToolHolder the bit is set in, or None if it is in none or it cannot be found."""
