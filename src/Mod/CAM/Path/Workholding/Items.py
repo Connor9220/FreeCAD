@@ -58,7 +58,7 @@ import Path.Workholding.Source as PathSource
 
 from FreeCAD import Vector
 from Path.Workholding.Common import objectKinds, readDocumentXml, varsetProperties
-from Path.Workholding.Constants import CLAMP_KINDS
+from Path.Workholding.Constants import ACROSS_AT_LEAST, CLAMP_KINDS
 from PySide.QtCore import QT_TRANSLATE_NOOP
 
 translate = FreeCAD.Qt.translate
@@ -536,11 +536,13 @@ def _stockStart(job, axis):
 
 def _alongSide(job, piece, frame, x):
     """Where along its side, in the side's frame, the piece goes: where it is pinned, else x,
-    where it is spread to."""
+    where it is spread to; between the side's ends, where there is stock to touch."""
     if not getattr(piece, "Pinned", False):
         return x
     axis, way = sideAxis(job, piece.StockSide)
-    return (_stockStart(job, axis) + piece.Along.Value - frame.Base[axis]) * way
+    at = (_stockStart(job, axis) + piece.Along.Value - frame.Base[axis]) * way
+    low, high = _alongLimits(job, piece)
+    return min(max(at, low), high)
 
 
 def isStop(obj):
@@ -663,14 +665,79 @@ def _placeAt(job, piece, frame, x):
     if PathLever.isLever(piece):
         PathLever.placeOnSide(job, piece, frame, x)
         return
-    placement = frame.multiply(FreeCAD.Placement(Vector(x, 0, 0), FreeCAD.Rotation()))
+    height = job.Stock.Shape.BoundBox.ZLength
+    _, length = sideFrame(job, piece.StockSide)
+    placement = frame.multiply(_touching(piece, x, height, length))
     if piece.Kind == Kind.HoldDown:
-        height = job.Stock.Shape.BoundBox.ZLength
         placement = FreeCAD.Placement(placement.Base + Vector(0, 0, height), placement.Rotation)
         if hasattr(piece, "Drop") and abs(piece.Drop.Value - height) > 1e-9:
             piece.Drop = height
     if not piece.Placement.isSame(placement, 1e-9):
         piece.Placement = placement
+
+
+def _alongLimits(job, piece):
+    """How far along its side, in the side's frame, the piece may go: past either end until only
+    ACROSS_AT_LEAST of its width, square to the side, is left across from the stock."""
+    _, length = sideFrame(job, piece.StockSide)
+    low, high = _widthAlong(job, piece)
+    keep = (high - low) * ACROSS_AT_LEAST
+    return -length / 2 - high + keep, length / 2 - low - keep
+
+
+def _widthAlong(job, piece):
+    """Where the piece reaches along its side from its origin, square to the side, beside the
+    stock: (low, high) in the side's frame. Its width, not what turning it swings out."""
+    shape = Part.getShape(piece, transform=False)
+    if shape.isNull():
+        return 0.0, 0.0
+    height = job.Stock.Shape.BoundBox.ZLength
+    box = shape.BoundBox
+    beside = shape.common(
+        Part.makeBox(
+            box.XLength + 2, box.YLength + 2, height, Vector(box.XMin - 1, box.YMin - 1, 0)
+        )
+    )
+    box = beside.BoundBox if not beside.isNull() and beside.Solids else box
+    return box.XMin, box.XMax
+
+
+def _touching(piece, x, height, length):
+    """Where the piece goes in its side's frame, at x along it: square to the side, or a side
+    clamp turned as its Angle says, moved square to the side until it just touches the stock,
+    height high and length along the side: what is below the table or above the stock, a bolt
+    or a knob, or past the side's ends, beyond a corner, not counted."""
+    angle = getattr(piece, "Angle", None)
+    if piece.Kind != Kind.Push or angle is None or abs(angle.Value) < 1e-9:
+        return FreeCAD.Placement(Vector(x, 0, 0), FreeCAD.Rotation())
+    turned = FreeCAD.Placement(Vector(x, 0, 0), FreeCAD.Rotation(Vector(0, 0, 1), angle.Value))
+    shape = Part.getShape(piece, transform=False)
+    if shape.isNull():
+        return turned
+    shape = shape.copy()
+    shape.Placement = turned
+    box = shape.BoundBox
+    beside = shape.common(
+        Part.makeBox(length, box.YLength + 2, height, Vector(-length / 2, box.YMin - 1, 0))
+    )
+    if beside.isNull() or not beside.Solids:
+        # all of it past the side's ends: nothing of the stock across from it
+        return turned
+    reach = beside.optimalBoundingBox().YMax
+    return FreeCAD.Placement(turned.Base - Vector(0, reach, 0), turned.Rotation)
+
+
+def contactFrame(job, piece):
+    """contactFrame(job, piece) ... where a stop or clamp placed against a side meets the stock,
+    square to the side, its +X along it and +Y into the stock; None for a lever clamp or one
+    not placed by side. A side clamp turned is dragged and turned about it."""
+    if piece is None or PathLever.isLever(piece) or not isPlaced(piece):
+        return None
+    frame, _ = sideFrame(job, piece.StockSide)
+    local = frame.inverse().multiply(PathWorkholding.placementOf(piece))
+    return frame.multiply(
+        FreeCAD.Placement(Vector(local.Base.x, 0, local.Base.z), FreeCAD.Rotation())
+    )
 
 
 def _toShared(job, shared):
@@ -701,10 +768,75 @@ def _toShared(job, shared):
             PathWorkholding.moveModel(job, move)
 
 
+# how deep in layout the code is: a placement changed meanwhile is layout's own
+_layingOut = [0]
+
+
+def layingOut():
+    """layingOut() ... whether layout is placing pieces now: a placement changed meanwhile is
+    its own, not a drag's."""
+    return _layingOut[0] > 0
+
+
 def layout(job):
     """layout(job) ... the Job's stops and clamps placed round its stock as each says: a stop
     shared with another Job stays where it is, the part moving to it first; the rest are put
     against the stock where it then is, spread along their sides, or where they are pinned."""
+    _layingOut[0] += 1
+    try:
+        _layout(job)
+    finally:
+        _layingOut[0] -= 1
+
+
+class _StockWatch:
+    """A Job's stock changed, its model taller or moved, its extents set: its stops and clamps
+    placed again round it once the recompute is done, not only when one of them is moved. Not
+    for what placing them changes itself, nor while a document loads or undoes."""
+
+    def __init__(self):
+        self.pending = set()
+
+    def slotChangedObject(self, obj, prop):
+        if prop not in ("Shape", "Placement") or layingOut():
+            return
+        doc = obj.Document
+        if doc is None or doc.Restoring or doc.Transacting:
+            return
+        for job in doc.Objects:
+            if getattr(job, "Stock", None) is obj and itemsOf(job):
+                self.pending.add((doc.Name, job.Name))
+
+    def slotRecomputedDocument(self, doc):
+        jobs = [name for docName, name in self.pending if docName == doc.Name]
+        self.pending = {key for key in self.pending if key[0] != doc.Name}
+        for name in jobs:
+            job = doc.getObject(name)
+            if job is not None and getattr(job, "Stock", None) is not None:
+                layout(job)
+
+
+_stockWatch = None
+
+
+def _watchStock():
+    global _stockWatch
+    if _stockWatch is None:
+        _stockWatch = _StockWatch()
+        FreeCAD.addDocumentObserver(_stockWatch)
+
+
+_watchStock()
+
+
+def layoutLater(job):
+    """layoutLater(job) ... the Job's stops and clamps placed again once the recompute running
+    is done: a setting changed by an expression while it runs."""
+    _watchStock()
+    _stockWatch.pending.add((job.Document.Name, job.Name))
+
+
+def _layout(job):
     shared = [p for p in stopsOn(job) if PathWorkholding.isShared(p)]
     if shared:
         _toShared(job, shared)
@@ -760,8 +892,9 @@ def positionOf(piece):
 
 def setPosition(piece, position):
     """setPosition(piece, position) ... a stop or clamp put at position along its side, its Job X
-    on the front or back, its Job Y on the left or right, and pinned there: it stays as the
-    side's count or the stock's size changes, kept from the stock's near end. A shared stop stays
+    on the front or back, its Job Y on the left or right, no further than the side's ends, and
+    pinned there: it stays as the side's count or the stock's size changes, kept from the stock's
+    near end. A shared stop stays
     where it is: it cannot be put elsewhere. The rest placed again."""
     job, piece = PathWorkholding.memberOf(piece)
     if piece is None or not isPlaced(piece):
@@ -770,10 +903,153 @@ def setPosition(piece, position):
         raise ValueError(
             translate("CAM", "%s is shared with another Job: it stays where it is") % piece.Label
         )
-    axis, _ = sideAxis(job, piece.StockSide)
+    axis, way = sideAxis(job, piece.StockSide)
+    frame, _ = sideFrame(job, piece.StockSide)
     piece.Pinned = True
-    piece.Along = position - _stockStart(job, axis)
+    # no further past the side's ends than leaves some of it across from the stock to touch
+    low, high = _alongLimits(job, piece)
+    at = min(max((position - frame.Base[axis]) * way, low), high)
+    piece.Along = frame.Base[axis] + at * way - _stockStart(job, axis)
     layout(job)
+
+
+def canTransform(piece):
+    """canTransform(piece) ... whether FreeCAD's Transform may move the piece, its new placement
+    kept as its settings: a lever clamp across the table and round where it presses, one placed
+    against a side along that side. Not a shared stop, which stays where the other Job has it,
+    nor the table."""
+    if piece is None or PathWorkholding.isShared(piece):
+        return False
+    return PathLever.isLever(piece) or isPlaced(piece)
+
+
+def fromTransform(piece, at=None):
+    """fromTransform(piece, at=None) ... a stop or clamp moved by FreeCAD's Transform kept where
+    it was moved to, as its settings: a lever clamp pressing where its placement's origin now is
+    and turned as it now is; one placed against a side moved to the side of the stock nearest
+    where it meets the stock, at, its placement when not given, and pinned there along it, a side
+    clamp turned as it now is, keeping its angle to a side it is moved to. Placed again from them.
+    A ValueError, the piece put back, for a side it cannot go on."""
+    job, piece = PathWorkholding.memberOf(piece)
+    if piece is None or not canTransform(piece):
+        return
+    if PathLever.isLever(piece):
+        PathLever.fromPlacement(job, piece)
+        return
+    placement = PathWorkholding.placementOf(piece)
+    at = at or placement
+    side = _nearestSide(job, at.Base, piece.StockSide)
+    moved = side is not None and side != piece.StockSide
+    if moved:
+        try:
+            _checkSide(job, side, isStop(piece), piece.Kind == Kind.Push, piece)
+        except ValueError:
+            layout(job)
+            raise
+        _moveToSide(job, piece, side)
+    if piece.Kind == Kind.Push and not moved:
+        _setAngle(piece, angleFrom(job, piece, placement.Rotation))
+    axis, _ = sideAxis(job, piece.StockSide)
+    setPosition(piece, at.Base[axis])
+
+
+def _nearestSide(job, point, current):
+    """The part's own side, as sides names it, whose side of the stock's box is nearest point
+    seen from above, its ends and corners as they are: past a corner as near the one side as the
+    other, current kept."""
+    bb = job.Stock.Shape.BoundBox
+    x0, x1, y0, y1 = bb.XMin, bb.XMax, bb.YMin, bb.YMax
+    cx, cy = min(max(point.x, x0), x1), min(max(point.y, y0), y1)
+    near = {
+        "-Y": math.hypot(point.x - cx, point.y - y0),
+        "+Y": math.hypot(point.x - cx, point.y - y1),
+        "-X": math.hypot(point.x - x0, point.y - cy),
+        "+X": math.hypot(point.x - x1, point.y - cy),
+    }
+    found = {}
+    for side in sides(job):
+        world = sideDirection(job, side)
+        for name, direction in PathWorkholding.Directions.items():
+            if name in near and (direction - world).Length < 1e-6:
+                found[side] = near[name]
+    if not found:
+        return None
+    best = min(found.values())
+    if current in found and found[current] <= best + 1e-6:
+        return current
+    return min(found, key=found.get)
+
+
+def setAngle(piece, angle):
+    """setAngle(piece, angle) ... a side clamp turned angle degrees from square to its side,
+    pushing at a slant, and placed again."""
+    job, piece = PathWorkholding.memberOf(piece)
+    if piece is None or piece.Kind != Kind.Push:
+        return
+    _setAngle(piece, angle)
+    layout(job)
+
+
+def angleFrom(job, piece, rotation):
+    """angleFrom(job, piece, rotation) ... how far a piece turned by rotation is turned from
+    square to its side, -180 to 180 degrees; a lever clamp's Angle."""
+    if PathLever.isLever(piece):
+        return PathLever.angleFrom(job, piece, rotation)
+    frame, _ = sideFrame(job, piece.StockSide)
+    facing = rotation.multVec(Vector(1, 0, 0))
+    along = frame.Rotation.multVec(Vector(1, 0, 0))
+    angle = math.degrees(math.atan2(facing.y, facing.x) - math.atan2(along.y, along.x))
+    angle = (angle + 180.0) % 360.0 - 180.0
+    # square, not a hair either side of it shown as -0.00
+    return 0.0 if abs(angle) < 1e-9 else angle
+
+
+def _moveToSide(job, piece, side):
+    """The piece put on another side, last along it, those left on its old side counted again;
+    those on either side stay where they are."""
+    old = piece.StockSide
+    on = stopsOn if isStop(piece) else clampsOn
+    _pinWhereTheyAre(job, [p for p in on(job, old) + on(job, side) if p != piece])
+    piece.SideIndex = len(on(job, side))
+    piece.StockSide = side
+    for i, other in enumerate(on(job, old)):
+        other.SideIndex = i
+
+
+def _pinWhereTheyAre(job, pieces):
+    """Those spread along a side pinned where they are now, as no longer spread: one moved onto
+    or off the side moves none of them."""
+    box = job.Stock.Shape.BoundBox
+    for piece in pieces:
+        if getattr(piece, "Pinned", False) or PathWorkholding.isShared(piece):
+            continue
+        base = PathWorkholding.placementOf(piece).Base
+        if PathLever.isLever(piece):
+            piece.Proxy.placing = True
+            try:
+                piece.Pinned = True
+                piece.PressX = base.x - box.XMin
+                piece.PressY = base.y - box.YMin
+            finally:
+                piece.Proxy.placing = False
+            continue
+        axis, _ = sideAxis(job, piece.StockSide)
+        piece.Pinned = True
+        piece.Along = base[axis] - _stockStart(job, axis)
+
+
+def _setAngle(piece, angle):
+    """How far a side clamp is turned from square to its side, kept on it."""
+    if not hasattr(piece, "Angle"):
+        piece.addProperty(
+            "App::PropertyAngle",
+            "Angle",
+            "Placed",
+            QT_TRANSLATE_NOOP(
+                "App::Property", "How far it is turned from square to its side, pushing at a slant"
+            ),
+        )
+    piece.Angle = angle
 
 
 def checkStopSides(job, stopSides):
@@ -854,6 +1130,121 @@ def setStops(job, stops):
         shareStop(owner, job, side)
     layout(job)
     return stopsOn(job)
+
+
+def _checkSide(job, side, stop, pushing, moving=None):
+    """A ValueError unless a stop, or a clamp pushing on the stock's side or not, can go on side,
+    the piece moving left out of those there: stops on one side or two next to each other, no
+    side clamp on a side with stops."""
+    if side not in sides(job):
+        raise ValueError(
+            translate("CAM", "The part's %s side faces up or down: nothing goes against it") % side
+        )
+    stopSides = {p.StockSide for p in stopsOn(job) if p != moving}
+    if stop:
+        checkStopSides(job, sorted(stopSides | {side}))
+        if any(pushes(p.Source) for p in clampsOn(job, side) if p != moving):
+            raise ValueError(
+                translate(
+                    "CAM",
+                    "A side clamp is on that side: it would push the part off stops there",
+                )
+            )
+    elif pushing and side in stopSides:
+        raise ValueError(
+            translate(
+                "CAM",
+                "A side clamp pushes the part onto the stops: not on a side with stops, it "
+                "would push it off them",
+            )
+        )
+
+
+def _isShare(which):
+    """Whether which, what an add puts in, is another Job's stop to share: the stop itself, or
+    ("share", its name)."""
+    return hasattr(which, "TypeId") or isinstance(which, (tuple, list))
+
+
+def addPieces(job, side, which, count=1):
+    """addPieces(job, side, which, count=1) ... count stops or clamps of which put on the part's
+    side, as sides names it, and spread along it with those there not moved elsewhere. which is
+    one of StopClasses or ClampClasses, the path of a clamp's own file, or another Job's stop to
+    share, the stop or ("share", its name). Refused with a ValueError as setStops and setClamps
+    refuse: stops on one side or two next to each other, no side clamp on a side with stops.
+    Returns the new pieces."""
+    count = max(1, int(count or 1))
+    if side not in sides(job):
+        raise ValueError(
+            translate("CAM", "The part's %s side faces up or down: nothing goes against it") % side
+        )
+    if _isShare(which):
+        owner = which
+        if isinstance(which, (tuple, list)):
+            owner = job.Document.getObject(which[1])
+        if owner is None:
+            raise ValueError(translate("CAM", "The stop to share is gone"))
+        return [shareStop(owner, job, side)]
+    stop = which in StopClasses
+    if not stop and which not in ClampClasses and clampFile(which) is None:
+        raise ValueError(translate("CAM", "%s holds no clamp") % os.path.basename(str(which)))
+    _checkSide(job, side, stop, not stop and pushes(which))
+    current = (stopsOn if stop else clampsOn)(job, side)
+    new = []
+    for i in range(count):
+        piece = create(job, which) if which in Classes else addClamp(job, which)
+        _setRole(piece, side, len(current) + i, which)
+        new.append(piece)
+    if which == "Fence":
+        # along their share of the side
+        _, length = sideFrame(job, side)
+        for piece in new:
+            piece.Length = length / (len(current) + count)
+    layout(job)
+    return new
+
+
+def _sideAt(job, point):
+    """The part's own side, as sides names it, whose side of the stock's box is nearest point,
+    seen from above."""
+    bb = job.Stock.Shape.BoundBox
+    near = {
+        "-Y": abs(point.y - bb.YMin),
+        "+Y": abs(point.y - bb.YMax),
+        "-X": abs(point.x - bb.XMin),
+        "+X": abs(point.x - bb.XMax),
+    }
+    world = PathWorkholding.Directions[min(near, key=near.get)]
+    for side in sides(job):
+        if (sideDirection(job, side) - world).Length < 1e-6:
+            return side
+    return None
+
+
+def edgeOf(job, piece):
+    """edgeOf(job, piece) ... the part's own side a stop or clamp is at now, as sides names it:
+    the side of the stock nearest where it touches it, wherever it was first put; None for the
+    table under the stock."""
+    if getattr(piece, "Kind", None) == Kind.Table:
+        return None
+    return _sideAt(job, PathWorkholding.placementOf(piece).Base)
+
+
+def sideOfShape(job, shape):
+    """sideOfShape(job, shape) ... the part's own side an edge or face of the stock picked in the
+    3D view is on, as sides names it, the shape where it stands. A ValueError for a face looking
+    up or down."""
+    if shape.ShapeType == "Face":
+        u0, u1, v0, v1 = shape.ParameterRange
+        normal = shape.normalAt((u0 + u1) / 2, (v0 + v1) / 2)
+        if abs(normal.z) > 0.5:
+            raise ValueError(
+                translate("CAM", "That face of the stock looks up or down: nothing goes on it")
+            )
+    side = _sideAt(job, shape.BoundBox.Center)
+    if side is None:
+        raise ValueError(translate("CAM", "Nothing goes against that side of the stock"))
+    return side
 
 
 def pushes(which):

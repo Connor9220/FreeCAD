@@ -93,7 +93,7 @@ def _words(kind):
     """What the dialog says for vises, or for clamps."""
     if kind == "clamp":
         return {
-            "title": translate("CAM_AddVise", "Choose a Clamp"),
+            "title": translate("CAM_AddVise", "Choose Workholding"),
             "icon": ":/icons/CAM_Job.svg",
             "search": translate(
                 "CAM_AddVise", "The clamps whose name, maker, model or type has every word"
@@ -107,6 +107,7 @@ def _words(kind):
                 "Other file….",
             ),
             "other": translate("CAM_AddVise", "Open a Clamp"),
+            "get": translate("CAM_AddVise", "Choose"),
             "update": translate("CAM_AddVise", "Update Clamp"),
         }
     return {
@@ -386,7 +387,8 @@ class LibraryDialog(QtWidgets.QDialog):
             )
         else:
             self.get = buttons.addButton(
-                translate("CAM_AddVise", "Add"), QtWidgets.QDialogButtonBox.AcceptRole
+                self.words.get("get", translate("CAM_AddVise", "Add")),
+                QtWidgets.QDialogButtonBox.AcceptRole,
             )
             buttons.addButton(QtWidgets.QDialogButtonBox.Cancel)
         self.get.clicked.connect(self.download)
@@ -660,7 +662,7 @@ class LibraryDialog(QtWidgets.QDialog):
             self.get.setText(
                 translate("CAM_AddVise", "Install")
                 if self.manage
-                else translate("CAM_AddVise", "Add")
+                else self.words.get("get", translate("CAM_AddVise", "Add"))
             )
             self.get.setEnabled(False)
             self.updateButton.setEnabled(False)
@@ -679,6 +681,11 @@ class LibraryDialog(QtWidgets.QDialog):
                 if installed
                 else translate("CAM_AddVise", "Install")
             )
+        elif self.kind == "clamp":
+            # installed first, then chosen: the task panel adds it
+            missing = not self.local() and self.states[index] == "missing"
+            self.get.setEnabled(not updating)
+            self.get.setText(translate("CAM_AddVise", "Install") if missing else self.words["get"])
         else:
             self.get.setEnabled(not installed and not updating)
             self.get.setText(
@@ -847,6 +854,10 @@ class LibraryDialog(QtWidgets.QDialog):
         if index is None or self.updatable(index):
             return
         if self.manage:
+            self.install(index)
+            return
+        if self.kind == "clamp" and not self.local() and self.states[index] == "missing":
+            # installed, the dialog left open: then chosen
             self.install(index)
             return
         item = self.items[index]

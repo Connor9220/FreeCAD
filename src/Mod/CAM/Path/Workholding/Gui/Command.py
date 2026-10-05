@@ -109,7 +109,7 @@ class CommandWorkholding:
                 piece = member
         import Path.Workholding.Gui.Vise as ViseGui
 
-        FreeCADGui.Control.showDialog(ViseGui.TaskPanelVise(job, vise, None if vise else piece))
+        ViseGui.showPanel(ViseGui.TaskPanelVise(job, vise, None if vise else piece))
 
 
 class CommandAddAnother:

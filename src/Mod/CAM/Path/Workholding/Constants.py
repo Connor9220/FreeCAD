@@ -88,6 +88,18 @@ STOCK_DRAWING_COLOR = (138, 109, 59)
 
 # a click or a turn of the wheel in a length box: a tenth of the unit it shows, 0.1 in. or 0.1 mm
 LENGTH_STEP = 0.1
+# FreeCAD's edit mode for Transform's dragger without its task panel, Gui::ViewProvider's
+# TransformNoDialog: a stop or clamp picked in the workholding panel dragged with it
+TRANSFORM_NO_DIALOG = 4
+
+# a stop or clamp put past its side's end keeps at least this much of its width across from the
+# stock, to touch it
+ACROSS_AT_LEAST = 0.25
+# a turn of a lever clamp with that dragger goes by this many degrees
+DRAG_TURN_STEP = 1.0
+# the piece being dragged: where it is shown in the panel every this many ms
+DRAG_SHOW_EVERY = 60
+
 # a lever clamp is placed again this many ms after the last turn of the wheel in its panel
 LEVER_EDIT_DELAY = 250
 

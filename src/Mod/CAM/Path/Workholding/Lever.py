@@ -415,7 +415,10 @@ class ObjectLever(PathWorkholding.LinkedGroup):
             return
         import Path.Workholding.Items as PathItems
 
-        PathItems.layout(job)
+        if doc.Recomputing:
+            PathItems.layoutLater(job)
+        else:
+            PathItems.layout(job)
 
     def onDocumentRestored(self, obj):
         # its file looked for again if it is not found
@@ -1671,6 +1674,39 @@ def another(job, obj):
         new.Proxy.placing = False
     PathItems.layout(job)
     return new
+
+
+def fromPlacement(job, obj):
+    """fromPlacement(job, obj) ... the lever clamp kept where its placement now puts it, moved
+    by FreeCAD's Transform: pressing at its origin, pinned there, turned by how far its
+    placement turns it from square to its side. Placed again."""
+    import Path.Workholding.Items as PathItems
+
+    base = obj.Placement.Base
+    box = job.Stock.Shape.BoundBox
+    obj.Proxy.placing = True
+    try:
+        obj.Angle = angleFrom(job, obj, obj.Placement.Rotation)
+        obj.Pinned = True
+        obj.PressX = base.x - box.XMin
+        obj.PressY = base.y - box.YMin
+    finally:
+        obj.Proxy.placing = False
+    PathItems.layout(job)
+
+
+def angleFrom(job, obj, rotation):
+    """angleFrom(job, obj, rotation) ... the lever clamp's Angle were it turned by rotation: how
+    far from square to its side, -180 to 180 degrees."""
+    import Path.Workholding.Items as PathItems
+
+    frame, _ = PathItems.sideFrame(job, obj.StockSide)
+    outward = frame.Rotation.multVec(Vector(0, -1, 0))
+    facing = rotation.multVec(Vector(1, 0, 0))
+    angle = math.degrees(math.atan2(facing.y, facing.x) - math.atan2(outward.y, outward.x))
+    angle = (angle + 180.0) % 360.0 - 180.0
+    # square, not a hair either side of it shown as -0.00
+    return 0.0 if abs(angle) < 1e-9 else angle
 
 
 def placeOnSide(job, obj, frame, x):

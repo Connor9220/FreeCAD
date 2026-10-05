@@ -595,3 +595,210 @@ class TestPathWorkholdingSharedStop(_Stock):
         Items.shareStop(self.dog, self.other, "-Y")
         self.assertIn(self.other.Stock, dict(PathJob.workholdingParts(self.job)))
         self.assertIn(self.job.Stock, dict(PathJob.workholdingParts(self.other)))
+
+
+class TestPathWorkholdingAdd(_Stock):
+    """Stops and clamps added to a side a few at a time, listed by the edge each is at."""
+
+    def setUp(self):
+        self.doc = FreeCAD.newDocument("TestPathWorkholdingAdd")
+        self.job = self.makeJob("Job")
+
+    def tearDown(self):
+        FreeCAD.closeDocument(self.doc.Name)
+
+    def test00_added_and_spread(self):
+        """Added to a side, spread along it with those there, more added later too."""
+        dogs = Items.addPieces(self.job, "-X", "Dog", 2)
+        self.assertEqual(len(dogs), 2)
+        more = Items.addPieces(self.job, "-X", "Dog", 1)
+        on = Items.stopsOn(self.job, "-X")
+        self.assertEqual(len(on), 3)
+        ys = sorted(round(PathWorkholding.placementOf(p).Base.y, 6) for p in on)
+        bb = self.bb()
+        self.assertRoughly(ys[1], bb.Center.y)
+        for stop in on:
+            self.assertTouches(stop)
+        clamps = Items.addPieces(self.job, "+Y", "EdgeClamp", 2)
+        self.assertEqual(Items.clampsOn(self.job, "+Y"), clamps)
+        self.assertEqual(more[0].StockSide, "-X")
+
+    def test01_refused(self):
+        """Stops on opposite sides, and a side clamp on a side with stops, refused."""
+        Items.addPieces(self.job, "-X", "Dog", 2)
+        with self.assertRaises(ValueError):
+            Items.addPieces(self.job, "+X", "Dog", 1)
+        with self.assertRaises(ValueError):
+            Items.addPieces(self.job, "-X", "SideClamp", 1)
+        Items.addPieces(self.job, "+X", "SideClamp", 1)
+        Items.addPieces(self.job, "-Y", "Dog", 1)
+        self.assertEqual({p.StockSide for p in Items.stopsOn(self.job)}, {"-X", "-Y"})
+
+    def test02_edge_each_is_at(self):
+        """A piece's edge is the one it is at now, wherever it was first put."""
+        dog = Items.addPieces(self.job, "-Y", "Dog", 1)[0]
+        self.assertEqual(Items.edgeOf(self.job, dog), "-Y")
+        bb = self.bb()
+        dog.Pinned = True
+        dog.Placement.Base = Vector(bb.XMax, bb.Center.y, bb.ZMin)
+        self.assertEqual(Items.edgeOf(self.job, dog), "+X")
+        table = Items.addTable(self.job)
+        self.assertIsNone(Items.edgeOf(self.job, table))
+
+    def test03_side_of_a_picked_face(self):
+        """A face or edge of the stock picked is on the part's side it faces; its top is on
+        none."""
+        shape = self.job.Stock.Shape
+        front = min(shape.Faces, key=lambda f: f.BoundBox.Center.y)
+        top = max(shape.Faces, key=lambda f: f.BoundBox.Center.z)
+        self.assertEqual(Items.sideOfShape(self.job, front), "-Y")
+        self.assertEqual(Items.sideOfShape(self.job, front.Edges[0]), "-Y")
+        with self.assertRaises(ValueError):
+            Items.sideOfShape(self.job, top)
+
+    def test04_dragged_to_another_side(self):
+        """Dragged near another side, a stop goes on it, pinned where it was let go; onto a side
+        stops cannot go on, it is put back."""
+        dogs = Items.addPieces(self.job, "-X", "Dog", 2)
+        front = Items.addPieces(self.job, "-Y", "Dog", 1)[0]
+        bb = self.bb()
+        stay = [FreeCAD.Placement(p.Placement) for p in (dogs[1], front)]
+        dogs[0].Placement = FreeCAD.Placement(
+            Vector(bb.XMin + 30, bb.YMin - 4, bb.ZMin), FreeCAD.Rotation()
+        )
+        Items.fromTransform(dogs[0])
+        self.assertEqual(dogs[0].StockSide, "-Y")
+        self.assertTrue(dogs[0].Pinned)
+        self.assertRoughly(PathWorkholding.placementOf(dogs[0]).Base.x, bb.XMin + 30)
+        self.assertTouches(dogs[0])
+        self.assertEqual([d.SideIndex for d in Items.stopsOn(self.job, "-X")], [0])
+        # those already on either side not moved
+        for piece, before in zip((dogs[1], front), stay):
+            self.assertTrue(piece.Placement.isSame(before, 1e-6))
+        before = FreeCAD.Placement(dogs[1].Placement)
+        dogs[1].Placement = FreeCAD.Placement(
+            Vector(bb.Center.x, bb.YMax + 4, bb.ZMin), FreeCAD.Rotation()
+        )
+        with self.assertRaises(ValueError):
+            Items.fromTransform(dogs[1])
+        self.assertEqual(dogs[1].StockSide, "-X")
+        self.assertTrue(dogs[1].Placement.isSame(before, 1e-6))
+
+    def test05_side_clamp_turned(self):
+        """A side clamp turned pushes at a slant, pulled back to just touch the stock."""
+        clamp = Items.addPieces(self.job, "+X", "SideClamp", 1)[0]
+        place = PathWorkholding.placementOf(clamp)
+        clamp.Placement = FreeCAD.Placement(
+            place.Base, place.Rotation.multiply(FreeCAD.Rotation(Vector(0, 0, 1), 20))
+        )
+        Items.fromTransform(clamp)
+        self.assertEqual(clamp.StockSide, "+X")
+        self.assertRoughly(clamp.Angle.Value, 20, 1e-6)
+        self.doc.recompute()
+        self.assertTouches(clamp)
+
+    def test06_clamp_dragged_moves_no_others(self):
+        """A clamp dragged to another side moves none of the clamps on either side."""
+        moving, left = Items.addPieces(self.job, "-Y", "EdgeClamp", 2)
+        right = Items.addPieces(self.job, "+X", "EdgeClamp", 1)[0]
+        stay = [FreeCAD.Placement(p.Placement) for p in (left, right)]
+        bb = self.bb()
+        moving.Placement = FreeCAD.Placement(
+            Vector(bb.XMax + 3, bb.YMin + 10, bb.ZMax), moving.Placement.Rotation
+        )
+        Items.fromTransform(moving)
+        self.assertEqual(moving.StockSide, "+X")
+        for piece, before in zip((left, right), stay):
+            self.assertTrue(piece.Placement.isSame(before, 1e-6))
+
+    def test07_side_clamp_dragged_where_it_meets_the_stock(self):
+        """A side clamp turned is dragged from where it meets the stock: moved along its side from
+        there, its angle kept; turned there by its Angle, only what is beside the stock pulled
+        back."""
+        clamp = Items.addPieces(self.job, "+X", "SideClamp", 1)[0]
+        Items.setAngle(clamp, 25)
+        self.doc.recompute()
+        self.assertTouches(clamp)
+        contact = Items.contactFrame(self.job, clamp)
+        bb = self.bb()
+        self.assertRoughly(contact.Base.x, bb.XMax)
+        moved = FreeCAD.Placement(contact.Base + Vector(0, 7, 0), contact.Rotation)
+        Items.fromTransform(clamp, moved)
+        self.assertRoughly(clamp.Angle.Value, 25, 1e-6)
+        self.assertRoughly(Items.contactFrame(self.job, clamp).Base.y, contact.Base.y + 7)
+        self.doc.recompute()
+        self.assertTouches(clamp)
+
+    def test08_side_clamp_turned_at_a_corner(self):
+        """A side clamp turned near a corner, its nose past the side's end, moved in until it
+        touches the stock's corner, not stopped short where the side would be were it longer."""
+        clamp = Items.addPieces(self.job, "+X", "SideClamp", 1)[0]
+        bb = self.bb()
+        Items.setPosition(clamp, bb.YMax - 5)
+        Items.setAngle(clamp, 40)
+        self.doc.recompute()
+        self.assertTouches(clamp)
+        Items.setAngle(clamp, -40)
+        self.doc.recompute()
+        self.assertTouches(clamp)
+
+    def test09_near_a_corner_stays_on_its_side(self):
+        """Dragged near a corner but still across from its side, a piece stays on it; past the
+        corner it goes to the other side."""
+        dog = Items.addPieces(self.job, "-X", "Dog", 1)[0]
+        bb = self.bb()
+        # nearer the front's line than the left's, but still across from the left
+        near = FreeCAD.Placement(Vector(bb.XMin - 3, bb.YMin + 1, bb.ZMin), FreeCAD.Rotation())
+        Items.fromTransform(dog, near)
+        self.assertEqual(dog.StockSide, "-X")
+        past = FreeCAD.Placement(Vector(bb.XMin + 10, bb.YMin - 3, bb.ZMin), FreeCAD.Rotation())
+        Items.fromTransform(dog, past)
+        self.assertEqual(dog.StockSide, "-Y")
+        # across to the opposite side, still between the front's ends
+        back = FreeCAD.Placement(Vector(bb.XMin + 10, bb.YMax + 3, bb.ZMin), FreeCAD.Rotation())
+        Items.fromTransform(dog, back)
+        self.assertEqual(dog.StockSide, "+Y")
+
+    def test10_kept_between_the_ends(self):
+        """Dragged along its side past the stock's end, a piece stops at the end, touching."""
+        clamp = Items.addPieces(self.job, "+X", "SideClamp", 1)[0]
+        Items.setAngle(clamp, 30)
+        bb = self.bb()
+        far = FreeCAD.Placement(Vector(bb.XMax + 2, bb.YMax + 80, bb.ZMin), FreeCAD.Rotation())
+        Items.fromTransform(clamp, far)
+        self.assertEqual(clamp.StockSide, "+X")
+        # past the end no further than leaves a quarter of it across from the stock
+        y = Items.contactFrame(self.job, clamp).Base.y
+        self.assertGreater(y, bb.YMax)
+        self.assertLess(y, bb.YMax + clamp.Width.Value)
+        self.doc.recompute()
+        self.assertTouches(clamp)
+
+    def test11_side_clamp_set_where_typed(self):
+        """A side clamp put where X and Y are typed goes as dragged there: onto the side whose
+        edge it is on, kept on its own past a corner as near the one as the other."""
+        clamp = Items.addPieces(self.job, "+X", "SideClamp", 1)[0]
+        bb = self.bb()
+        corner = FreeCAD.Placement(Vector(bb.XMax + 5, bb.YMax + 5, bb.ZMin), FreeCAD.Rotation())
+        Items.fromTransform(clamp, corner)
+        self.assertEqual(clamp.StockSide, "+X")
+        # where it was put, partly past the corner, touching
+        self.assertRoughly(Items.contactFrame(self.job, clamp).Base.y, bb.YMax + 5)
+        self.doc.recompute()
+        self.assertTouches(clamp)
+        back = FreeCAD.Placement(Vector(bb.XMin + 30, bb.YMax, bb.ZMin), FreeCAD.Rotation())
+        Items.fromTransform(clamp, back)
+        self.assertEqual(clamp.StockSide, "+Y")
+        self.assertRoughly(Items.contactFrame(self.job, clamp).Base.x, bb.XMin + 30)
+
+    def test12_placed_again_when_the_model_grows(self):
+        """The model made taller and recomputed: the clamps over its top edge follow it up, with
+        nothing of the workholding touched."""
+        clamp = Items.addPieces(self.job, "+Y", "EdgeClamp", 1)[0]
+        top = self.bb().ZMax
+        self.doc.getObject("Box").Height = 35
+        self.doc.recompute()
+        bb = self.bb()
+        self.assertRoughly(bb.ZMax, top + 15)
+        self.assertRoughly(PathWorkholding.placementOf(clamp).Base.z, bb.ZMax)
+        self.assertTouches(clamp)

@@ -27,12 +27,41 @@ its own."""
 import FreeCAD
 import Path.Workholding.Vise as PathWorkholding
 
-from Path.Workholding.Constants import STOP_COLOR, TABLE_COLOR, TABLE_TRANSPARENCY, THIN_LINE_WIDTH
+translate = FreeCAD.Qt.translate
+
+from Path.Workholding.Constants import (
+    DRAG_TURN_STEP,
+    STOP_COLOR,
+    TABLE_COLOR,
+    TABLE_TRANSPARENCY,
+    THIN_LINE_WIDTH,
+    TRANSFORM_NO_DIALOG,
+)
 from Path.Workholding.Gui.Source import closeFilesAfter
 
 if FreeCAD.GuiUp:
     import FreeCADGui
     from PySide import QtCore
+
+
+# while the workholding panel is open a stop, clamp or vise is hovered over and picked whole,
+# not a face of it
+wholePicks = False
+
+
+def setWholePicks(on):
+    """setWholePicks(on) ... the workholding hovered over and picked whole in the 3D view, or by
+    face as anything else is."""
+    global wholePicks
+    wholePicks = bool(on)
+
+
+def _picked(pp):
+    """What of a part of the workholding a click or hover picks: all of it while the panel is
+    open, else what FreeCAD picks."""
+    if wholePicks:
+        return ""
+    raise NotImplementedError
 
 
 def _unselectable(vobj):
@@ -83,6 +112,9 @@ class _PartViewProvider:
         # one saved before it was so: not picked in the 3D view either
         _unselectable(getattr(self, "vobj", None))
 
+    def getElementPicked(self, pp):
+        return _picked(pp)
+
     def dumps(self):
         return None
 
@@ -118,9 +150,9 @@ def _showVise(obj):
     if member is None or FreeCADGui.Control.activeDialog():
         return False
     if PathWorkholding.isVise(member):
-        FreeCADGui.Control.showDialog(ViseGui.TaskPanelVise(job, member))
+        ViseGui.showPanel(ViseGui.TaskPanelVise(job, member))
     else:
-        FreeCADGui.Control.showDialog(ViseGui.TaskPanelVise(job, piece=member))
+        ViseGui.showPanel(ViseGui.TaskPanelVise(job, piece=member))
     return True
 
 
@@ -148,6 +180,119 @@ def _seatedDragger():
         dragger.set("%s { whichChild -1 }" % name)
 
 
+def canTransform(obj):
+    """canTransform(obj) ... whether FreeCAD's Transform moves this stop or clamp, as its kind
+    allows."""
+    import Path.Workholding.Items as Items
+
+    return Items.canTransform(PathWorkholding.memberOf(obj)[1])
+
+
+def findDragger():
+    """findDragger() ... FreeCAD's Transform dragger in the active 3D view, None if none."""
+    from pivy import coin
+
+    view = FreeCADGui.ActiveDocument.ActiveView if FreeCADGui.ActiveDocument else None
+    if view is None or not hasattr(view, "getSceneGraph"):
+        return None
+    search = coin.SoSearchAction()
+    search.setType(coin.SoType.fromName("SoTransformDragger"))
+    search.setInterest(coin.SoSearchAction.FIRST)
+    search.apply(view.getSceneGraph())
+    if search.getPath() is None:
+        return None
+    return search.getPath().getTail()
+
+
+def draggerPlacement(dragger):
+    """draggerPlacement(dragger) ... where the Transform dragger stands now, mid-drag too: where
+    the piece it moves will be put."""
+    from pivy import coin
+
+    at = coin.cast(dragger.getField("translation"), "SoSFVec3f").getValue().getValue()
+    turn = coin.cast(dragger.getField("rotation"), "SoSFRotation").getValue().getValue()
+    return FreeCAD.Placement(FreeCAD.Vector(*at), FreeCAD.Rotation(*turn))
+
+
+def _limitedDragger(piece):
+    """The Transform dragger on piece showing only what moves it as its kind allows: across the
+    table, and a lever clamp or a side clamp turned too."""
+    import math
+    import Path.Workholding.Items as Items
+    import Path.Workholding.Lever as Lever
+
+    dragger = findDragger()
+    if dragger is None:
+        return
+    dragger.getField("rotationIncrement").set(repr(math.radians(DRAG_TURN_STEP)))
+    keep = ("xTranslatorDragger", "yTranslatorDragger")
+    if Lever.isLever(piece) or getattr(piece, "Kind", None) == Items.Kind.Push:
+        keep += ("zRotatorDragger",)
+    planes = ("xyPlanarTranslatorSwitch",)
+    for name in (
+        "xTranslatorDragger",
+        "yTranslatorDragger",
+        "zTranslatorDragger",
+        "xRotatorDragger",
+        "yRotatorDragger",
+        "zRotatorDragger",
+    ):
+        if name not in keep:
+            part = dragger.getPart(name, True)
+            if part is not None:
+                part.getField("visible").set("FALSE")
+    for name in (
+        "xyPlanarTranslatorSwitch",
+        "yzPlanarTranslatorSwitch",
+        "zxPlanarTranslatorSwitch",
+    ):
+        if name not in planes:
+            dragger.set("%s { whichChild -1 }" % name)
+
+
+def setDragOrigin(vobj):
+    """The Transform dragger of a stop or clamp placed against a side put where it meets the
+    stock, square to the side, however a side clamp is turned: dragged along the side, turned
+    about where it pushes."""
+    import Path.Workholding.Items as Items
+
+    if "TransformOrigin" not in vobj.PropertiesList:
+        return
+    job, piece = PathWorkholding.memberOf(vobj.Object)
+    contact = Items.contactFrame(job, piece) if piece is not None else None
+    origin = FreeCAD.Placement()
+    if contact is not None:
+        origin = PathWorkholding.placementOf(piece).inverse().multiply(contact)
+    vobj.TransformOrigin = origin
+
+
+def dragPlacement(vobj):
+    """Where the Transform dragger of the piece stands: its placement, from where it meets the
+    stock for one placed against a side."""
+    obj = vobj.Object
+    origin = vobj.TransformOrigin if "TransformOrigin" in vobj.PropertiesList else None
+    placement = PathWorkholding.placementOf(obj)
+    return placement.multiply(origin) if origin is not None else placement
+
+
+def _transformed(name, docName, before, at=None):
+    """Transform done on a piece: where it was moved to kept as its settings, if it moved."""
+    import Path.Workholding.Items as Items
+
+    doc = FreeCAD.getDocument(docName) if docName in FreeCAD.listDocuments() else None
+    piece = doc.getObject(name) if doc is not None else None
+    if piece is None:
+        return
+    if not piece.Placement.isSame(before, 1e-9):
+        doc.openTransaction(translate("CAM_Workholding", "Move workholding"))
+        try:
+            Items.fromTransform(piece, at)
+        except ValueError as e:
+            FreeCAD.Console.PrintWarning(str(e) + "\n")
+        finally:
+            doc.commitTransaction()
+
+
 class _ViewProvider:
     """A piece of a Job's Workholding: double-clicked, the workholding panel; set inactive, the
     icon an inactive operation has."""
@@ -171,6 +316,33 @@ class _ViewProvider:
 
     def doubleClicked(self, vobj):
         return _showVise(vobj.Object)
+
+    def getElementPicked(self, pp):
+        return _picked(pp)
+
+    def setEdit(self, vobj, mode):
+        # Transform, with its panel or without in the workholding panel: FreeCAD's dragger, once
+        # made, showing only what moves this piece
+        if mode in (1, TRANSFORM_NO_DIALOG) and canTransform(vobj.Object):
+            obj = vobj.Object
+            if mode == 1:
+                self.transformStart = FreeCAD.Placement(obj.Placement)
+            setDragOrigin(vobj)
+            QtCore.QTimer.singleShot(0, lambda: _limitedDragger(obj))
+        return None
+
+    def unsetEdit(self, vobj, mode):
+        # Transform done: where it was moved to kept as its settings, once FreeCAD is done
+        start = getattr(self, "transformStart", None)
+        if mode == 1 and start is not None:
+            self.transformStart = None
+            obj = vobj.Object
+            name, docName = obj.Name, obj.Document.Name
+            at = dragPlacement(vobj)
+            QtCore.QTimer.singleShot(0, lambda: _transformed(name, docName, start, at))
+        if mode in (1, TRANSFORM_NO_DIALOG) and "TransformOrigin" in vobj.PropertiesList:
+            vobj.TransformOrigin = FreeCAD.Placement()
+        return False
 
 
 class _GroupViewProvider(_ViewProvider):
@@ -206,6 +378,9 @@ class ViewProviderVise(_GroupViewProvider):
 
 
 class ViewProvider(_ViewProvider):
+    """A stop, side or edge clamp, or table made here: not picked in the 3D view but while the
+    workholding panel is open, as a vise's parts are not; picked in the tree."""
+
     def __init__(self, vobj):
         vobj.Proxy = self
         obj = vobj.Object
@@ -215,6 +390,14 @@ class ViewProvider(_ViewProvider):
         else:
             vobj.ShapeColor = STOP_COLOR
         thinLines(vobj)
+
+    def attach(self, vobj):
+        super().attach(vobj)
+        _unselectable(vobj)
+
+    def finishRestoring(self):
+        # one saved before it was so: not picked in the 3D view either
+        _unselectable(getattr(getattr(self, "Object", None), "ViewObject", None))
 
     def onDelete(self, vobj, subelements):
         # a stop shared with another Job no longer shared: theirs stays where it is

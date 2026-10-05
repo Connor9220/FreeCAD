@@ -107,15 +107,24 @@ class Note(QtWidgets.QLabel if FreeCAD.GuiUp else object):
 
 
 def combo(wide=False):
-    """combo(wide=False) ... a drop-down that drops down below itself as a list; a wide one no wider than its shortest
-    choices in the panel, its list as wide as its longest."""
+    """combo(wide=False) ... a drop-down; a wide one no wider than its shortest choices in the
+    panel, its list as wide as its longest."""
     combo = QtWidgets.QComboBox()
-    combo.setStyleSheet("QComboBox { combobox-popup: 0; }")
     combo.setMaxVisibleItems(16)
     if wide:
         combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
         combo.setMinimumContentsLength(6)
     return combo
+
+
+def header(combo, text):
+    """header(combo, text) ... a heading in a drop-down's list, not picked: bold and grayed."""
+    combo.addItem(text)
+    item = combo.model().item(combo.count() - 1)
+    item.setEnabled(False)
+    font = item.font()
+    font.setBold(True)
+    item.setFont(font)
 
 
 def fitList(combo):

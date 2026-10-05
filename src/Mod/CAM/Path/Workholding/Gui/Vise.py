@@ -445,14 +445,7 @@ def _imperial():
     return "in" in unit or '"' in unit
 
 
-def _header(combo, text):
-    """A heading in a drop-down's list, not picked: bold and grayed."""
-    combo.addItem(text)
-    item = combo.model().item(combo.count() - 1)
-    item.setEnabled(False)
-    font = item.font()
-    font.setBold(True)
-    item.setFont(font)
+_header = Widgets.header
 
 
 class _ComboChoice:
@@ -734,6 +727,16 @@ def _showSection(form, visible):
     (box or form).setVisible(visible)
 
 
+def showPanel(panel):
+    """showPanel(panel) ... the panel shown, closed by Undo or Redo, or with its Job's document."""
+    dialog = FreeCADGui.Control.showDialog(panel)
+    if dialog is not None:
+        dialog.setDocumentName(panel.job.Document.Name)
+        dialog.setAutoCloseOnTransactionChange(True)
+        dialog.setAutoCloseOnDeletedDocument(True)
+    return dialog
+
+
 class TaskPanelVise:
     """A vise of a Job: one it has, its stock seated in it again, or one added from the library.
 
@@ -823,7 +826,6 @@ class TaskPanelVise:
                 "CAM_Workholding", "The station of the vise the stock goes in, one no other Job has"
             )
         )
-        self.station.setStyleSheet("QComboBox { combobox-popup: 0; }")
         self.stationLabel = QtWidgets.QLabel(translate("CAM_Workholding", "Station"))
         layout.addRow(self.stationLabel, self.station)
         # how the part sits in it: the side of the part on the vise's bottom, the floor or the
@@ -1739,6 +1741,7 @@ class TaskPanelVise:
                 self.updateGrip()
 
     def accept(self):
+        self.previewTimer.stop()
         if self.applyStops() if self.byStops.isChecked() else self.apply():
             self.seatFaces.hide()
             FreeCADGui.Control.closeDialog()
@@ -1771,6 +1774,22 @@ class TaskPanelVise:
             )
         )
         return True
+
+    def autoClosedOnTransactionChange(self):
+        """Undone or redone while open: what the panel did is in the undo list as it is now,
+        the panel closed without undoing more."""
+        self.previewTimer.stop()
+        self.seatFaces.hide()
+        self.pending = False
+        if self.adding:
+            self.adding.finish(keep=False)
+        self.stops.finish()
+
+    def autoClosedOnDeletedDocument(self):
+        """The Job's document closed while open: the panel let go of it."""
+        self.previewTimer.stop()
+        self.seatFaces.hide()
+        self.stops.finish(gone=True)
 
     def reject(self):
         self.previewTimer.stop()
