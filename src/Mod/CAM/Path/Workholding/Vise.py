@@ -48,7 +48,7 @@ import Path.Workholding.Source as PathSource
 
 from FreeCAD import Vector
 from Path.Workholding.Common import userLength
-from Path.Workholding.Constants import Sides
+from Path.Workholding.Constants import PROPERTY_ADDED, Sides
 from PySide.QtCore import QT_TRANSLATE_NOOP
 
 translate = FreeCAD.Qt.translate
@@ -452,7 +452,7 @@ def _copySettings(source, vise):
     and how they are edited. How a vise was seated is not copied, nor its jaws: setJaws makes
     them; nor where a clamp or a stop is placed round the stock."""
     for name in source.PropertiesList:
-        if name in vise.PropertiesList or 21 not in source.getPropertyStatus(name):
+        if name in vise.PropertiesList or PROPERTY_ADDED not in source.getPropertyStatus(name):
             continue
         group = source.getGroupOfProperty(name)
         # FreeCAD's own, like Part's shape cache, start with an underscore
@@ -588,9 +588,9 @@ def refreshSettings(vise):
     for varset in [o for o in source.Group if o.TypeId == "App::VarSet"]:
         names[varset.Name] = vise.Name
         for name in varset.PropertiesList:
-            if 21 not in varset.getPropertyStatus(name) or "ReadOnly" not in varset.getEditorMode(
+            if PROPERTY_ADDED not in varset.getPropertyStatus(
                 name
-            ):
+            ) or "ReadOnly" not in varset.getEditorMode(name):
                 continue
             if varset.getGroupOfProperty(name) in ("Seat", "Jaws") or name.startswith("_"):
                 continue
@@ -841,8 +841,12 @@ def turnModel(job, rotation, center):
 
 
 def _extents(shape, origin, direction):
-    values = [(v.Point - origin).dot(direction) for v in shape.Vertexes]
-    return min(values), max(values)
+    """How far shape reaches along direction from origin, (lowest, highest): from its surfaces,
+    not its corners, so a round stock counts its sides."""
+    turn = FreeCAD.Placement(Vector(), FreeCAD.Rotation(direction, Vector(0, 0, 1)))
+    box = shape.transformed(turn.toMatrix()).optimalBoundingBox(False)
+    at = origin.dot(direction)
+    return box.ZMin - at, box.ZMax - at
 
 
 def _remember(vise, onParallels, close, parallels, step=0, kit=None):

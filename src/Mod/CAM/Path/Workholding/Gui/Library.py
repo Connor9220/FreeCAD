@@ -22,6 +22,7 @@
 """The vises or clamps on this computer and in the libraries, to choose one to add to a Job: what
 each is, where it came from, its license, whether it is here; one a library has downloaded."""
 
+import html
 import os
 import threading
 
@@ -693,19 +694,26 @@ class LibraryDialog(QtWidgets.QDialog):
                 if installed
                 else translate("CAM_AddVise", "Add")
             )
+        # what the library's index says, shown as text: it may say anything
         source = item.get("source", "")
-        lines = ["<b>%s</b>" % item.get("label", item["id"])]
+        lines = ["<b>%s</b>" % html.escape(str(item.get("label", item["id"])))]
         made = "%s %s" % (item.get("maker", ""), item.get("model", ""))
         if made.strip():
-            lines.append(made)
+            lines.append(html.escape(made))
         if item.get("license"):
-            lines.append("%s: %s" % (translate("CAM_AddVise", "License"), item["license"]))
+            lines.append(
+                "%s: %s" % (translate("CAM_AddVise", "License"), html.escape(str(item["license"])))
+            )
         if item.get("attribution"):
-            lines.append(item["attribution"])
+            lines.append(html.escape(str(item["attribution"])))
         if source:
-            lines.append("<a href='%s'>%s</a>" % (source, source))
+            text = html.escape(str(source))
+            if str(source).lower().startswith(("http://", "https://")):
+                lines.append("<a href='%s'>%s</a>" % (html.escape(str(source), quote=True), text))
+            else:
+                lines.append(text)
         if item.get("path"):
-            lines.append(item["path"])
+            lines.append(html.escape(str(item["path"])))
         self.details.setText("<br>".join(lines))
 
     def otherFile(self):

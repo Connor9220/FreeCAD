@@ -409,6 +409,9 @@ def _checkClamp(path):
     found = PathCheck.pythonObjects(path)
     if found:
         errors.append(PathCheck.pythonMessage(found))
+    files = PathCheck.filesLinked(path)
+    if files:
+        errors.append(PathCheck.linksMessage(files))
     if PathItems.clampFile(path) is None:
         errors.append(translate("CAM", "No clamp: no part, or no VarSet saying what kind it is"))
     return errors

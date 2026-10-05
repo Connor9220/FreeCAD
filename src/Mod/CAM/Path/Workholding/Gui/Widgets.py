@@ -32,15 +32,14 @@ if FreeCAD.GuiUp:
 translate = FreeCAD.Qt.translate
 
 
-def mmBox(ui, tip=None, value=None, step=None, minimum=None):
-    """mmBox(ui, tip=None, value=None, step=None, minimum=None) ... a box for a length in mm, as
+def mmBox(ui, tip=None, value=None, step=None, minimum=0.0):
+    """mmBox(ui, tip=None, value=None, step=None, minimum=0.0) ... a box for a length in mm, as
     the user's units show it, made by ui, a FreeCADGui.UiLoader: its tooltip, value, the step a
-    click takes in the unit it shows, a tenth of it when not given, and its minimum where
-    given."""
+    click takes in the unit it shows, a tenth of it when not given, and its minimum: none below
+    0 unless given, a coordinate's lower."""
     box = ui.createWidget("Gui::QuantitySpinBox")
     box.setProperty("unit", "mm")
-    if minimum is not None:
-        box.setProperty("minimum", minimum)
+    box.setProperty("minimum", minimum)
     box.setProperty("singleStep", LENGTH_STEP if step is None else step)
     if value is not None:
         box.setProperty("rawValue", value)

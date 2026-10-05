@@ -38,7 +38,7 @@ import FreeCAD
 import Path.Workholding.Vise as PathWorkholding
 import Path.Workholding.Source as PathSource
 
-from Path.Workholding.Common import objectKinds, readDocumentXml, varsetProperties
+from Path.Workholding.Common import objectKinds, readDocumentXml, readMember, varsetProperties
 
 translate = FreeCAD.Qt.translate
 
@@ -50,7 +50,29 @@ def pythonObjects(path):
     """pythonObjects(path) ... the objects in the FreeCAD file at path that would import Python
     when it is opened, as (name, type) pairs: none in a file that is safe to open. Raises for a
     file that cannot be read."""
-    return _pythonIn(readDocumentXml(path, strict=True))
+    found = _pythonIn(readDocumentXml(path, strict=True))
+    # its view providers' settings are read in a GUI, and may import Python too
+    gui = readMember(path, "GuiDocument.xml")
+    if gui:
+        try:
+            found += _pythonIn(ElementTree.fromstring(gui))
+        except ElementTree.ParseError:
+            pass
+    return found
+
+
+def filesLinked(path):
+    """filesLinked(path) ... the other files the FreeCAD file at path links to, opened with it."""
+    root = readDocumentXml(path)
+    if root is None:
+        return []
+    return sorted({x.get("file") for x in root.iter("XLink") if x.get("file")})
+
+
+def linksMessage(files):
+    """linksMessage(files) ... what is said of a file linking to others, files as filesLinked
+    gives them."""
+    return translate("CAM", "Links to other files, opened with it: %s") % ", ".join(files)
 
 
 def _pythonIn(root):
@@ -84,9 +106,12 @@ def checkZip(path):
     except (OSError, KeyError, zipfile.BadZipFile, ElementTree.ParseError) as e:
         return [translate("CAM", "Not a FreeCAD file: %s") % e]
     errors = []
-    found = _pythonIn(root)
+    found = pythonObjects(path)
     if found:
         errors.append(pythonMessage(found))
+    files = filesLinked(path)
+    if files:
+        errors.append(linksMessage(files))
     kinds = objectKinds(root)
     if "App::Part" not in kinds.values():
         errors.append(translate("CAM", "No vise: no part holding it"))
@@ -198,24 +223,30 @@ def checkDocument(doc):
         before = {o.Name: FreeCAD.Vector(o.Placement.Base) for o, _ in driven}
         opening = getattr(holder, name).Value
         setattr(holder, name, opening + 10.0)
-        doc.recompute()
-        for o, _ in driven:
-            moved = o.Placement.Base - before[o.Name]
-            if (moved - closing).Length > 1e-6:
-                if number == 1:
-                    errors.append(
-                        translate("CAM", "%s moves %s for 10 mm more Opening, not 10 mm along -Y")
-                        % (o.Label, tuple(round(c, 3) for c in moved))
-                    )
-                else:
-                    errors.append(
-                        translate(
-                            "CAM", "%s moves %s for 10 mm more %s, not 10 mm along its station's -Y"
+        try:
+            doc.recompute()
+            for o, _ in driven:
+                moved = o.Placement.Base - before[o.Name]
+                if (moved - closing).Length > 1e-6:
+                    if number == 1:
+                        errors.append(
+                            translate(
+                                "CAM", "%s moves %s for 10 mm more Opening, not 10 mm along -Y"
+                            )
+                            % (o.Label, tuple(round(c, 3) for c in moved))
                         )
-                        % (o.Label, tuple(round(c, 3) for c in moved), name)
-                    )
-        setattr(holder, name, opening)
-        doc.recompute()
+                    else:
+                        errors.append(
+                            translate(
+                                "CAM",
+                                "%s moves %s for 10 mm more %s, not 10 mm along its station's -Y",
+                            )
+                            % (o.Label, tuple(round(c, 3) for c in moved), name)
+                        )
+        finally:
+            # the vise left as it was, even if its parts failed to move
+            setattr(holder, name, opening)
+            doc.recompute()
         # the moving jaw's face the opening in front of the fixed one, at Y 0, facing it; a
         # screw moving with the jaw may reach further
         if not any(_facesFixedJaw(f, -opening, frame) for o, _ in driven for f in o.Shape.Faces):
@@ -271,9 +302,9 @@ def checkDocument(doc):
 def check(path):
     """check(path) ... (errors, warnings) for the vise's own file at path. One with Python in it
     is not opened."""
-    found = pythonObjects(path)
-    if found:
-        return [pythonMessage(found)], []
+    found, files = pythonObjects(path), filesLinked(path)
+    if found or files:
+        return [pythonMessage(found)] * bool(found) + [linksMessage(files)] * bool(files), []
     doc, opened = PathSource.openFile(os.path.abspath(path))
     try:
         return checkDocument(doc)

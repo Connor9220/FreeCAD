@@ -29,6 +29,7 @@ import tempfile
 
 import Part
 import Path.Main.Job as PathJob
+import Path.Main.Stock as PathStock
 import Path.Workholding.Vise as PathWorkholding
 import Path.Workholding.Source as PathSource
 import Path.Workholding.Check as PathWorkholdingCheck
@@ -179,6 +180,16 @@ class TestPathWorkholding(PathTestUtils.PathTestBase):
         self.assertRoughly(self.setup.Opening.Value, 40)
         self.setup.MaxOpening = 200
         self.assertTrue(PathWorkholding.seat(self.job, self.vise, grip=12)["fits"])
+
+    def test10_round_stock(self):
+        """Round stock is measured by its sides, not the corners of its seam."""
+        old = self.job.Stock
+        self.job.Stock = PathStock.CreateCylinder(self.job, 20, 40)
+        self.doc.removeObject(old.Name)
+        self.doc.recompute()
+        needed, _, turned = PathWorkholding.opening(self.job, self.vise)
+        self.assertGreater(needed, 40 - 1e-6)
+        self.assertRoughly(needed, turned)
 
 
 class TestPathWorkholdingAdd(PathTestUtils.PathTestBase):

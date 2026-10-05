@@ -24,6 +24,7 @@
 where they are not found when the Job's document is opened, looked for, asking one thing at a
 time."""
 
+import html
 import os
 
 import FreeCAD
@@ -169,7 +170,11 @@ def _askChanged(doc, changed):
         )
         lines.append(
             "<p style='margin: 0 0 6px 0'><b>%s</b> — %s<br>&nbsp;&nbsp;&nbsp;&nbsp;%s</p>"
-            % (os.path.basename(entry["path"]), _usedBy(entry["rows"]), why)
+            % (
+                html.escape(os.path.basename(entry["path"])),
+                html.escape(_usedBy(entry["rows"])),
+                html.escape(why),
+            )
         )
     box = QtWidgets.QMessageBox(FreeCADGui.getMainWindow())
     box.setIcon(QtWidgets.QMessageBox.Information)
@@ -179,7 +184,7 @@ def _askChanged(doc, changed):
         "<p>%s</p>%s<p>%s</p>"
         % (
             translate("CAM_Workholding", "These files have changed since they were added to %s:")
-            % doc.Label,
+            % html.escape(doc.Label),
             "".join(lines),
             translate(
                 "CAM_Workholding",

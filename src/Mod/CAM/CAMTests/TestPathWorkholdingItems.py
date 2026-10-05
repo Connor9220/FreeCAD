@@ -597,11 +597,11 @@ class TestPathWorkholdingSharedStop(_Stock):
         self.assertIn(self.job.Stock, dict(PathJob.workholdingParts(self.other)))
 
 
-class TestPathWorkholdingAdd(_Stock):
+class TestPathWorkholdingAddPieces(_Stock):
     """Stops and clamps added to a side a few at a time, listed by the edge each is at."""
 
     def setUp(self):
-        self.doc = FreeCAD.newDocument("TestPathWorkholdingAdd")
+        self.doc = FreeCAD.newDocument("TestPathWorkholdingAddPieces")
         self.job = self.makeJob("Job")
 
     def tearDown(self):

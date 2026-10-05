@@ -92,6 +92,9 @@ LENGTH_STEP = 0.1
 # TransformNoDialog: a stop or clamp picked in the workholding panel dragged with it
 TRANSFORM_NO_DIALOG = 4
 
+# the status bit getPropertyStatus gives a property added to an object, not one of its own:
+# App::Property::PropDynamic, which has no name of its own there
+PROPERTY_ADDED = 21
 # a stop or clamp put past its side's end keeps at least this much of its width across from the
 # stock, to touch it
 ACROSS_AT_LEAST = 0.25
