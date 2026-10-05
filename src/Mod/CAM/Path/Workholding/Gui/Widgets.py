@@ -24,7 +24,7 @@ browse button and the part's sides."""
 
 import FreeCAD
 
-from Path.Workholding.Constants import ICON_BLACK, ICON_SWAP, ICON_WHITE
+from Path.Workholding.Constants import ICON_BLACK, ICON_SWAP, ICON_WHITE, LENGTH_STEP
 
 if FreeCAD.GuiUp:
     from PySide import QtCore, QtGui, QtWidgets
@@ -35,13 +35,13 @@ translate = FreeCAD.Qt.translate
 def mmBox(ui, tip=None, value=None, step=None, minimum=None):
     """mmBox(ui, tip=None, value=None, step=None, minimum=None) ... a box for a length in mm, as
     the user's units show it, made by ui, a FreeCADGui.UiLoader: its tooltip, value, the step a
-    click takes and its minimum where given."""
+    click takes in the unit it shows, a tenth of it when not given, and its minimum where
+    given."""
     box = ui.createWidget("Gui::QuantitySpinBox")
     box.setProperty("unit", "mm")
     if minimum is not None:
         box.setProperty("minimum", minimum)
-    if step is not None:
-        box.setProperty("singleStep", step)
+    box.setProperty("singleStep", LENGTH_STEP if step is None else step)
     if value is not None:
         box.setProperty("rawValue", value)
     if tip is not None:

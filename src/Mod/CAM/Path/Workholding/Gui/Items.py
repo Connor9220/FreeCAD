@@ -28,9 +28,10 @@ import os
 import FreeCAD
 import Path.Workholding.Vise as PathWorkholding
 import Path.Workholding.Items as Items
+import Path.Workholding.Lever as Lever
 import Path.Workholding.Gui.Widgets as Widgets
 
-from Path.Workholding.Constants import ERROR_TEXT_COLOR, STOCK_DRAWING_COLOR
+from Path.Workholding.Constants import ERROR_TEXT_COLOR, LEVER_EDIT_DELAY, STOCK_DRAWING_COLOR
 from Path.Workholding.Gui.Source import _closeIfUnused
 
 if FreeCAD.GuiUp:
@@ -293,6 +294,120 @@ class _StopsClamps:
         row.addWidget(self.offset, 1)
         row.addWidget(self.remove)
         layout.addRow(translate("CAM_Workholding", "Position"), row)
+        self.positionLabel = layout.labelForField(row)
+        # a lever clamp picked: where it presses and how it stands, in place of where it is along
+        # its side
+        self.leverRows = []
+        self.pressX = Widgets.mmBox(
+            self.ui,
+            translate("CAM_Workholding", "Where it presses on the stock, the Job's X"),
+            minimum=-10000.0,
+        )
+        self.pressY = Widgets.mmBox(
+            self.ui,
+            translate("CAM_Workholding", "Where it presses on the stock, the Job's Y"),
+            minimum=-10000.0,
+        )
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(QtWidgets.QLabel("X"))
+        row.addWidget(self.pressX, 1)
+        row.addWidget(QtWidgets.QLabel("Y"))
+        row.addWidget(self.pressY, 1)
+        self._leverRow(layout, translate("CAM_Workholding", "Presses at"), row)
+        self.angle = self.ui.createWidget("Gui::QuantitySpinBox")
+        self.angle.setProperty("unit", "deg")
+        self.angle.setProperty("minimum", -180.0)
+        self.angle.setProperty("maximum", 180.0)
+        self.angle.setToolTip(
+            translate(
+                "CAM_Workholding",
+                "Its angle round where it presses, seen from above: 0 square to the stock's side",
+            )
+        )
+        self.presses = Widgets.combo()
+        self.presses.addItem(translate("CAM_Workholding", "Toe presses"), "Toe")
+        self.presses.addItem(translate("CAM_Workholding", "Heel presses"), "Heel")
+        self.presses.setToolTip(
+            translate(
+                "CAM_Workholding",
+                "The end pressing on the stock: its toe, or its heel for thin stock",
+            )
+        )
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(self.angle, 1)
+        row.addWidget(self.presses, 1)
+        self._leverRow(layout, translate("CAM_Workholding", "Angle"), row)
+        self.leverClamp = Widgets.combo(wide=True)
+        self.leverClamp.setToolTip(
+            translate("CAM_Workholding", "Its step clamp, of those in the kit")
+        )
+        self._leverRow(layout, translate("CAM_Workholding", "Clamp"), self.leverClamp)
+        self.restsOn = Widgets.combo()
+        self.restsOn.setToolTip(
+            translate(
+                "CAM_Workholding",
+                "What its other end rests on: a step block, a step block on a riser, a riser or the table",
+            )
+        )
+        self.block = Widgets.combo(wide=True)
+        self.block.setToolTip(
+            translate(
+                "CAM_Workholding",
+                "Its step block: Auto, the one bringing its heel level, or one of the kit's",
+            )
+        )
+        self.riser = Widgets.mmBox(
+            self.ui,
+            translate("CAM_Workholding", "How thick the riser under its other end is"),
+            minimum=0.0,
+        )
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(self.restsOn, 1)
+        row.addWidget(self.block, 1)
+        row.addWidget(self.riser, 1)
+        self._leverRow(layout, translate("CAM_Workholding", "Rests on"), row)
+        self.boltFit = QtWidgets.QCheckBox(translate("CAM_Workholding", "Cut to fit"))
+        self.boltFit.setToolTip(
+            translate(
+                "CAM_Workholding",
+                "Cut its bolt to the shortest that clears what is on it, in quarter-inch steps",
+            )
+        )
+        self.boltLength = Widgets.mmBox(
+            self.ui,
+            translate("CAM_Workholding", "How long its bolt is cut to; 0 as shipped"),
+            minimum=0.0,
+        )
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(self.boltFit)
+        row.addWidget(self.boltLength, 1)
+        self._leverRow(layout, translate("CAM_Workholding", "Bolt"), row)
+        # a kit's step clamp: where its bolt is in its slot
+        self.boltAuto = QtWidgets.QCheckBox(translate("CAM_Workholding", "Auto"))
+        self.boltAuto.setToolTip(
+            translate(
+                "CAM_Workholding",
+                "Its bolt as near the stock as its slot lets it, the stud clear of the stock",
+            )
+        )
+        self.boltAt = Widgets.mmBox(
+            self.ui,
+            translate(
+                "CAM_Workholding",
+                "How far its bolt is from the end pressing on the stock, along the clamp, within "
+                "its slot",
+            ),
+            minimum=0.0,
+        )
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(self.boltAuto)
+        row.addWidget(self.boltAt, 1)
+        self._leverRow(layout, translate("CAM_Workholding", "Bolt at"), row)
+        self.leverFound = Widgets.Note()
+        self._leverRow(layout, "", self.leverFound)
+        self.leverNote = Widgets.Note()
+        self.leverNote.setStyleSheet("color: %s" % ERROR_TEXT_COLOR)
+        self._leverRow(layout, "", self.leverNote)
         # the one picked's size, the others of its kind on its side with it; a picture of it,
         # its drawing or a clamp's own thumbnail
         self.sizes = QtWidgets.QWidget()
@@ -333,8 +448,52 @@ class _StopsClamps:
             row["count"].valueChanged.connect(self.changed)
         self.list.currentRowChanged.connect(self.picked)
         self.offset.valueChanged.connect(self.nudged)
+        # a number turned with the wheel placed once it stops, not at every click
+        self.leverPending = {}
+        self.leverTimer = QtCore.QTimer()
+        self.leverTimer.setSingleShot(True)
+        self.leverTimer.setInterval(LEVER_EDIT_DELAY)
+        self.leverTimer.timeout.connect(self.applyLever)
+        self.pressX.valueChanged.connect(lambda *args: self.later("Press", None))
+        self.pressY.valueChanged.connect(lambda *args: self.later("Press", None))
+        self.angle.valueChanged.connect(
+            lambda *args: self.later("Angle", self.angle.property("rawValue"))
+        )
+        self.presses.currentIndexChanged.connect(
+            lambda *args: self.setLever("Presses", self.presses.currentData())
+        )
+        self.leverClamp.currentIndexChanged.connect(
+            lambda *args: self.setLever("Clamp", self.leverClamp.currentData())
+        )
+        self.restsOn.currentIndexChanged.connect(
+            lambda *args: self.setLever("RestsOn", self.restsOn.currentData())
+        )
+        self.block.currentIndexChanged.connect(
+            lambda *args: self.setLever("Block", self.block.currentData())
+        )
+        self.riser.valueChanged.connect(
+            lambda *args: self.later("RiserThickness", self.riser.property("rawValue"))
+        )
+        self.boltFit.toggled.connect(lambda checked: self.setLever("BoltFit", checked))
+        self.boltAuto.toggled.connect(self.boltAutoToggled)
+        self.boltAt.valueChanged.connect(
+            lambda *args: self.later("BoltAt", self.boltAt.property("rawValue"))
+        )
+        self.boltLength.valueChanged.connect(
+            lambda *args: self.later("BoltLength", self.boltLength.property("rawValue"))
+        )
         self.remove.clicked.connect(self.removeChosen)
         self.table.clicked.connect(self.addTable)
+
+    def _leverRow(self, layout, label, field):
+        """A row of the Placed section shown only while a lever clamp is picked."""
+        if isinstance(field, QtWidgets.QLayout):
+            holder = QtWidgets.QWidget()
+            field.setContentsMargins(0, 0, 0, 0)
+            holder.setLayout(field)
+            field = holder
+        layout.addRow(label, field)
+        self.leverRows.append(field)
 
     def changed(self, *args):
         """Something the panel says changed: put in a moment after, not as it is read in."""
@@ -670,11 +829,176 @@ class _StopsClamps:
         self.offset.blockSignals(False)
         self.offset.setEnabled(placed and not PathWorkholding.isShared(piece))
         self.remove.setEnabled(piece is not None)
+        # a lever clamp is placed where it presses, not along its side
+        lever = Lever.isLever(piece)
+        self.offset.setVisible(not lever)
+        if self.positionLabel is not None:
+            self.positionLabel.setVisible(not lever)
+        self.showLever(piece if lever else None)
         self.showSize(piece)
+
+    def showLever(self, piece):
+        """The lever clamp picked: where it presses, how it stands and what placing it found; the
+        rows gone when none is. Edits not yet put in are dropped."""
+        self.leverTimer.stop()
+        self.leverPending = {}
+        form = self.layouts[2]
+        for field in self.leverRows:
+            field.setVisible(piece is not None)
+            label = form.labelForField(field)
+            if label is not None:
+                label.setVisible(piece is not None)
+        if piece is None:
+            return
+        kit = hasattr(piece, "Clamp")
+        widgets = (
+            self.pressX,
+            self.pressY,
+            self.angle,
+            self.presses,
+            self.leverClamp,
+            self.restsOn,
+            self.block,
+            self.riser,
+            self.boltFit,
+            self.boltLength,
+            self.boltAuto,
+            self.boltAt,
+        )
+        for widget in widgets:
+            widget.blockSignals(True)
+        try:
+            x, y = Lever.pressOf(self.job, piece)
+            self.pressX.setProperty("rawValue", x)
+            self.pressY.setProperty("rawValue", y)
+            self.angle.setProperty("rawValue", piece.Angle.Value)
+            self.presses.setCurrentIndex(max(0, self.presses.findData(piece.Presses)))
+            self.leverClamp.clear()
+            if kit:
+                for label in piece.getEnumerationsOfProperty("Clamp"):
+                    self.leverClamp.addItem(label, label)
+                self.leverClamp.setCurrentIndex(max(0, self.leverClamp.findData(piece.Clamp)))
+                Widgets.fitList(self.leverClamp)
+            self.restsOn.clear()
+            names = {
+                "StepBlock": translate("CAM_Workholding", "Step block"),
+                "RiserAndStepBlock": translate("CAM_Workholding", "Riser and step block"),
+                "Riser": translate("CAM_Workholding", "Riser"),
+                "Table": translate("CAM_Workholding", "Table"),
+            }
+            for value in piece.getEnumerationsOfProperty("RestsOn"):
+                self.restsOn.addItem(names.get(value, value), value)
+            self.restsOn.setCurrentIndex(max(0, self.restsOn.findData(piece.RestsOn)))
+            self.block.clear()
+            if kit:
+                for label in piece.getEnumerationsOfProperty("Block"):
+                    shown = translate("CAM_Workholding", "Auto") if label == Lever.Auto else label
+                    self.block.addItem(shown, label)
+                self.block.setCurrentIndex(max(0, self.block.findData(piece.Block)))
+                Widgets.fitList(self.block)
+            self.riser.setProperty("rawValue", piece.RiserThickness.Value)
+            if hasattr(piece, "BoltAt"):
+                # no further than its slot runs
+                slot = Lever.boltRange(piece)
+                if slot is not None:
+                    self.boltAt.setProperty("minimum", slot[0])
+                    self.boltAt.setProperty("maximum", slot[1])
+                auto = piece.BoltAt.Value <= 0
+                self.boltAuto.setChecked(auto)
+                self.boltAt.setProperty(
+                    "rawValue", piece.BoltFound.Value if auto else piece.BoltAt.Value
+                )
+            bolt = hasattr(piece, "BoltFit")
+            if bolt:
+                self.boltFit.setChecked(piece.BoltFit)
+                self.boltLength.setProperty("rawValue", piece.BoltLength.Value)
+        finally:
+            for widget in widgets:
+                widget.blockSignals(False)
+        self.leverClamp.setVisible(kit)
+        bolt = hasattr(piece, "BoltFit")
+        holder = self.boltFit.parentWidget()
+        holder.setVisible(bolt)
+        label = form.labelForField(holder)
+        if label is not None:
+            label.setVisible(bolt)
+        self.boltLength.setEnabled(bolt and not piece.BoltFit)
+        slot = hasattr(piece, "BoltAt")
+        holder = self.boltAuto.parentWidget()
+        holder.setVisible(slot)
+        label = form.labelForField(holder)
+        if label is not None:
+            label.setVisible(slot)
+        self.boltAt.setEnabled(slot and piece.BoltAt.Value > 0)
+        label = form.labelForField(self.leverClamp)
+        if label is not None:
+            label.setVisible(kit)
+        self.block.setVisible(kit and piece.RestsOn in ("StepBlock", "RiserAndStepBlock"))
+        self.riser.setVisible(piece.RestsOn in ("Riser", "RiserAndStepBlock"))
+        found = [translate("CAM_Workholding", "On %s") % piece.Support] if piece.Support else []
+        found.append(translate("CAM_Workholding", "tilted %.1f°") % piece.Tilt.Value)
+        if getattr(piece, "Stud", ""):
+            found.append(piece.Stud)
+        if bolt and piece.BoltLength.Value > 0:
+            found.append(
+                translate("CAM_Workholding", "its bolt %s long") % piece.BoltLength.UserString
+            )
+        self.leverFound.setText(", ".join(found))
+        self.leverNote.setText(piece.Note)
+
+    def later(self, name, value):
+        """A number of the lever clamp picked changed: put in once the edits stop coming."""
+        self.leverPending[name] = value
+        self.leverTimer.start()
+
+    def applyLever(self):
+        """The numbers changed since the edits stopped put in, the clamp placed again."""
+        pending, self.leverPending = self.leverPending, {}
+        for name, value in pending.items():
+            if name == "Press":
+                self.pressMoved()
+            else:
+                self.setLever(name, value)
+
+    def setLever(self, name, value):
+        """A setting of the lever clamp picked changed: it is placed again."""
+        piece = self.chosen()
+        if not Lever.isLever(piece) or value is None or not hasattr(piece, name):
+            return
+        current = getattr(piece, name)
+        if getattr(current, "Value", current) == value:
+            return
+        self.panel.begin()
+        try:
+            setattr(piece, name, value)
+        except ValueError as e:
+            self.leverNote.setText(str(e))
+            return
+        self.showLever(piece)
+
+    def boltAutoToggled(self, auto):
+        """Its bolt put as near the stock as clears it, or kept where it now is, to set."""
+        piece = self.chosen()
+        if not hasattr(piece, "BoltAt"):
+            return
+        self.setLever("BoltAt", 0.0 if auto else max(piece.BoltFound.Value, 1e-3))
+
+    def pressMoved(self, *args):
+        """The lever clamp picked put where X and Y say it presses, and kept there."""
+        piece = self.chosen()
+        if not Lever.isLever(piece):
+            return
+        self.panel.begin()
+        Lever.setPress(
+            self.job, piece, self.pressX.property("rawValue"), self.pressY.property("rawValue")
+        )
+        self.showLever(piece)
 
     def sizeNames(self, piece):
         """The sizes of a piece made here, as it has them; none of a clamp from its own file."""
-        if piece is None or isinstance(getattr(piece, "Proxy", None), Items.ObjectClamp):
+        if piece is None or isinstance(
+            getattr(piece, "Proxy", None), (Items.ObjectClamp, Lever.ObjectLever)
+        ):
             return []
         names = [
             name

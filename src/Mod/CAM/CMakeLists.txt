@@ -104,6 +104,7 @@ SET(PathPythonWorkholding_SRCS
     Path/Workholding/Constants.py
     Path/Workholding/Items.py
     Path/Workholding/Jaws.py
+    Path/Workholding/Lever.py
     Path/Workholding/Library.py
     Path/Workholding/Parallels.py
     Path/Workholding/Source.py
@@ -726,6 +727,7 @@ SET(Tests_SRCS
     CAMTests/TestPathJobModelLinks.py
     CAMTests/TestPathWorkholding.py
     CAMTests/TestPathWorkholdingItems.py
+    CAMTests/TestPathWorkholdingLever.py
     CAMTests/TestPathWorkholdingLibrary.py
     CAMTests/TestPathSharedWorkplane.py
     CAMTests/TestProcessorOptimizations.py

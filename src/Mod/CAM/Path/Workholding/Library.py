@@ -42,6 +42,7 @@ import Path
 import Path.Workholding.Check as PathCheck
 
 from Path.Workholding.Common import objectKinds, objectProperties, readDocumentXml, readMember
+from Path.Workholding.Constants import CLAMP_KINDS
 
 translate = FreeCAD.Qt.translate
 
@@ -461,7 +462,7 @@ def about(path):
                         found["settings"][key] = float(value.find("Float").get("value"))
             else:
                 kind = props["Kind"].find("String")
-                if kind is None or kind.get("value") not in ("HoldDown", "Push"):
+                if kind is None or kind.get("value") not in CLAMP_KINDS:
                     settings = None
                     continue
                 found["kind"] = "clamp"
@@ -471,11 +472,11 @@ def about(path):
                 value = prop.find("String").get("value")
                 if value:
                     found[field] = value
-    # the part holding the settings, else the first
-    parts = [n for n, links in groups.items() if settings in links] or list(groups)
-    if settings is None or not parts:
+    if settings is None or not groups:
         return {}
-    if parts[0] in labels:
+    # the part holding the settings; a kit's, at the file's root, names none of its pieces
+    parts = [n for n, links in groups.items() if settings in links]
+    if parts and parts[0] in labels:
         found["label"] = labels[parts[0]]
     return found
 

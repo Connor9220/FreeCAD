@@ -26,6 +26,8 @@ Each piece is of a kind that says how it holds:
 - a Stop, a dog in the table or a fence along the stock's side, the stock pushed against it;
 - a Push, a side clamp pushing the stock onto the stops;
 - a HoldDown, a clamp over the stock's top edge, an edge clamp or a toe clamp;
+- a Lever, a bar pressing on the stock's top, its other end on the table, a riser or a step
+  block, placed where it presses and at an angle (Path.Workholding.Lever);
 - a Table, the bed the rest stands on: its T-track rails, its dog holes, the waste board the
   stock lies on. Cut into on purpose, it is shown but nothing is found hitting it.
 
@@ -50,11 +52,13 @@ import os
 import FreeCAD
 import Part
 import Path
+import Path.Workholding.Lever as PathLever
 import Path.Workholding.Vise as PathWorkholding
 import Path.Workholding.Source as PathSource
 
 from FreeCAD import Vector
 from Path.Workholding.Common import objectKinds, readDocumentXml, varsetProperties
+from Path.Workholding.Constants import CLAMP_KINDS
 from PySide.QtCore import QT_TRANSLATE_NOOP
 
 translate = FreeCAD.Qt.translate
@@ -64,6 +68,8 @@ class Kind:
     Stop = "Stop"
     Push = "Push"
     HoldDown = "HoldDown"
+    Lever = "Lever"
+    StrapKit = "StrapKit"
     Table = "Table"
 
 
@@ -543,8 +549,9 @@ def isStop(obj):
 
 
 def isClamp(obj):
-    """isClamp(obj) ... whether obj is a clamp: a side clamp, or a hold-down over the top."""
-    return getattr(obj, "Kind", None) in (Kind.Push, Kind.HoldDown)
+    """isClamp(obj) ... whether obj is a clamp: a side clamp, a hold-down over the top, or a lever
+    clamp."""
+    return getattr(obj, "Kind", None) in (Kind.Push, Kind.HoldDown, Kind.Lever)
 
 
 def isPlaced(obj):
@@ -651,7 +658,11 @@ def _addContact(stop, contact):
 
 def _placeAt(job, piece, frame, x):
     """The piece put at x along the side whose frame is given: a hold-down on the stock's top
-    edge, its body down to the table; a stop or a side clamp on the surface the stock lies on."""
+    edge, its body down to the table; a stop or a side clamp on the surface the stock lies on; a
+    lever clamp where it presses, unless it was put elsewhere."""
+    if PathLever.isLever(piece):
+        PathLever.placeOnSide(job, piece, frame, x)
+        return
     placement = frame.multiply(FreeCAD.Placement(Vector(x, 0, 0), FreeCAD.Rotation()))
     if piece.Kind == Kind.HoldDown:
         height = job.Stock.Shape.BoundBox.ZLength
@@ -1026,18 +1037,21 @@ def addTable(job):
 
 def clampFile(path):
     """clampFile(path) ... the clamp a clamp's own file holds, read from the file without opening
-    it: its name, the file's, and its Kind, HoldDown or Push. None if it holds none: no part, or
-    no VarSet saying it is one of those."""
+    it: its name, the file's, and its Kind, HoldDown, Push, Lever or StrapKit, a strap clamp kit.
+    None if it holds none: no part, or no VarSet saying it is one of those."""
     root = readDocumentXml(path)
     if root is None:
         return None
     types = objectKinds(root)
+    # the first VarSet saying it is a clamp: the pieces of a kit have Kinds of their own
     kind = None
     for _, props in varsetProperties(root, types):
         prop = props.get("Kind")
         if prop is not None and prop.find("String") is not None:
-            kind = prop.find("String").get("value")
-    if kind not in (Kind.HoldDown, Kind.Push) or "App::Part" not in types.values():
+            if prop.find("String").get("value") in CLAMP_KINDS:
+                kind = prop.find("String").get("value")
+                break
+    if kind not in CLAMP_KINDS or "App::Part" not in types.values():
         return None
     return os.path.splitext(os.path.basename(path))[0].replace("_", " "), kind
 
@@ -1051,11 +1065,12 @@ def _kindIn(container):
 
 def clampIn(doc):
     """clampIn(doc) ... the clamp a clamp's own file holds: its outermost container with a
-    VarSet whose Kind is HoldDown or Push, or None."""
+    VarSet whose Kind is HoldDown, Push or Lever, or None."""
     for obj in doc.RootObjects:
         if obj.hasExtension("App::GeoFeatureGroupExtension") and _kindIn(obj) in (
             Kind.HoldDown,
             Kind.Push,
+            Kind.Lever,
         ):
             return obj
     return None
@@ -1064,7 +1079,11 @@ def clampIn(doc):
 def addClamp(job, path):
     """addClamp(job, path) ... a clamp put in the Job's Workholding from the clamp's own file at
     path, as a vise is: its parts linked from the file, its settings copied onto it. setClamps
-    places it. Returns it."""
+    places it. A lever clamp, from its own file or a strap clamp kit, is made by
+    Path.Workholding.Lever. Returns it."""
+    found = clampFile(path)
+    if found is not None and found[1] in (Kind.Lever, Kind.StrapKit):
+        return PathLever.addLever(job, path)
     source = clampIn(PathSource.openFile(path, job.Document)[0])
     if source is None:
         raise ValueError(

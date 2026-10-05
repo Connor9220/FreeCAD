@@ -53,8 +53,43 @@ LIT_FACE_GLOW = 0.5
 LIT_FACE_LIFT = 0.05
 LIT_FACE_TOLERANCE = 0.1
 
+# what a clamp's file says it is, its VarSet's Kind: a side clamp, a hold-down over the top
+# edge, a lever clamp the panel places by its points, and a strap clamp kit, one of each piece
+CLAMP_KINDS = ("HoldDown", "Push", "Lever", "StrapKit")
+
+# lever clamps, as quantities FreeCAD reads: the stud's end above its nut; the gap kept between
+# the stock's side and the washer or nut when a clamp is spread along a side; the least it
+# presses in from the stock's edge; a riser's length under the clamp's end, the margin it has to
+# either side of it, and how thick one is made at first
+LEVER_STUD_ABOVE_NUT = "0.125 in"
+LEVER_EDGE_CLEARANCE = "0.125 in"
+LEVER_LEAST_OVERLAP = "0.125 in"
+LEVER_RISER_LENGTH = "1.5 in"
+LEVER_RISER_MARGIN = "0.125 in"
+LEVER_RISER_THICKNESS = "0.125 in"
+# where it was to press lifted off the stock by more than this is said
+LEVER_LIFT_NOTED = "0.002 in"
+# a lever clamp's other end this many degrees above level, or more, is said to be too high
+LEVER_TILT_NOTED = 10.0
+# a step block's top read every this many mm along it, to mesh two teeth into teeth
+LEVER_PROFILE_STEP = 0.1
+# how nearly a step clamp's heel just touches its step block's teeth, mm
+LEVER_SEAT_TOLERANCE = 0.05
+# how far in from a lever clamp's other end it is looked at for what stands on its support
+LEVER_END_REACH = "0.75 in"
+# a bolt in the table's track cut to fit is cut in steps of this
+LEVER_BOLT_STEP = "0.25 in"
+# a riser, wood; a bolt cut to length, black oxide
+RISER_COLOR = (0.80, 0.70, 0.52)
+BOLT_COLOR = (0.15, 0.15, 0.17)
+
 # the stock in the drawing of a stop or clamp made here, as red, green and blue of 255
 STOCK_DRAWING_COLOR = (138, 109, 59)
+
+# a click or a turn of the wheel in a length box: a tenth of the unit it shows, 0.1 in. or 0.1 mm
+LENGTH_STEP = 0.1
+# a lever clamp is placed again this many ms after the last turn of the wheel in its panel
+LEVER_EDIT_DELAY = 250
 
 # what the panels say in: something wrong, a clearance the tools have, one they do not
 ERROR_TEXT_COLOR = "#d04040"

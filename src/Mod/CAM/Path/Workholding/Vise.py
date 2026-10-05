@@ -457,7 +457,7 @@ def _copySettings(source, vise):
         group = source.getGroupOfProperty(name)
         # FreeCAD's own, like Part's shape cache, start with an underscore
         if (
-            group in ("Seat", "Jaws", "Placed", "Source", "About")
+            group in ("Seat", "Jaws", "Placed", "Source", "About", "Lever")
             or name == "Active"
             or name.startswith("_")
         ):
@@ -646,6 +646,11 @@ def addAnother(member, offset=None):
     job, member = memberOf(member)
     if member is None:
         raise ValueError("Not a piece of a Job's workholding")
+    import Path.Workholding.Lever as PathLever
+
+    if PathLever.isLever(member):
+        # one more on its side, standing as it does
+        return PathLever.another(job, member)
     doc = job.Document
     if offset is None:
         # its width across, in its own frame, and a gap
