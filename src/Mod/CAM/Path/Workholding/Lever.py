@@ -1183,6 +1183,10 @@ class _Made:
         return None
 
 
+def _role(obj):
+    return getattr(obj, "LeverRole", None)
+
+
 def _cutBolts(obj):
     """The bolts in the table's track cut to length, as the clamp says: cut to fit, the shortest
     reaching past the top of what is on the clamp by a little, in quarter-inch steps; else as
@@ -1190,10 +1194,13 @@ def _cutBolts(obj):
     by a trimmed copy, its link hidden."""
     if not hasattr(obj, "BoltFit"):
         return
-    rides = [o for o in obj.Group if getattr(o, "LeverRole", None) == "Rides"]
-    top = max((Part.getShape(o, "", transform=True).BoundBox.ZMax for o in rides), default=None)
-    for link in [o for o in obj.Group if getattr(o, "LeverRole", None) == "Anchored"]:
+    # a part whose file is missing has no shape: left out
+    rides = [Part.getShape(o, "", transform=True) for o in obj.Group if _role(o) == "Rides"]
+    top = max((s.BoundBox.ZMax for s in rides if not s.isNull()), default=None)
+    for link in [o for o in obj.Group if _role(o) == "Anchored"]:
         shape = Part.getShape(link, "", transform=True)
+        if shape.isNull():
+            continue
         box = shape.BoundBox
         full = box.ZLength
         if obj.BoltFit and top is not None:
