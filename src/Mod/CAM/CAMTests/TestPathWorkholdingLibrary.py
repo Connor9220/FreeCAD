@@ -217,6 +217,15 @@ class TestPathWorkholdingLibrary(PathTestUtils.PathTestBase):
         self.assertEqual(PathLibrary.state("new", item), "current")
         self.assertEqual(PathLibrary.state("older", item), "update")
         self.assertEqual(PathLibrary.state("mine", item), "modified")
+        # an index that keeps the commit that published each version
+        item = {
+            "sha256": "new",
+            "history": [{"sha256": "old", "commit": "c1"}, {"sha256": "older"}],
+        }
+        self.assertEqual(PathLibrary.history(item), ["old", "older"])
+        self.assertEqual(PathLibrary.state("old", item), "update")
+        self.assertEqual(PathLibrary.publishedIn(item, "old"), "c1")
+        self.assertIsNone(PathLibrary.publishedIn(item, "older"))
         self.assertEqual(
             PathLibrary.libraryKey("https://github.com/Owner/Lib/tree/dev"),
             PathLibrary.libraryKey("https://github.com/owner/lib"),

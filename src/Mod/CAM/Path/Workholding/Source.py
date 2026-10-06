@@ -391,7 +391,7 @@ def updatedFrom(row, path, indexes=None):
         for item in indexes.items(address, None):
             if ids and item["id"] not in ids:
                 continue
-            if item["sha256"] == sha and used in item.get("history", []):
+            if item["sha256"] == sha and used in PathLibrary.history(item):
                 return PathLibrary.libraryName(address)
     return None
 

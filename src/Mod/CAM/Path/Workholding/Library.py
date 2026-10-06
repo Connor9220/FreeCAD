@@ -297,12 +297,28 @@ def _sha256(path):
     return h.hexdigest()
 
 
+def history(item):
+    """history(item) ... the sha256s an index's item was published with before, oldest first.
+    An entry is a sha256, or, from indexes that keep it, {"sha256", "commit"}: the commit that
+    published it."""
+    return [e.get("sha256") if isinstance(e, dict) else e for e in item.get("history", [])]
+
+
+def publishedIn(item, sha):
+    """publishedIn(item, sha) ... the commit that published the version of sha256 sha of an
+    index's item, None if the index does not say."""
+    for e in item.get("history", []):
+        if isinstance(e, dict) and e.get("sha256") == sha:
+            return e.get("commit")
+    return None
+
+
 def state(sha, item):
     """state(sha, item) ... a file of sha256 sha against an index's item: "current", the file
     the library has now; "update", one it published before; "modified", one it never did."""
     if sha == item["sha256"]:
         return "current"
-    return "update" if sha in item.get("history", []) else "modified"
+    return "update" if sha in history(item) else "modified"
 
 
 def status(item, where=None):
@@ -351,7 +367,7 @@ def localStates(items, addresses=None):
                     (
                         i
                         for i in index(address, item["kind"])
-                        if sha == i["sha256"] or sha in i.get("history", [])
+                        if sha == i["sha256"] or sha in history(i)
                     ),
                     None,
                 )
