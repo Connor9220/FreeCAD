@@ -38,7 +38,7 @@ from ...docobject import DetachedDocumentObject
 from ...assets.asset import Asset
 from ...shape import ToolBitShape, ToolBitShapeCustom, ToolBitShapeIcon
 from ..util import to_json, format_value, units_from_json
-from ..migration import ParameterAccessor, migrate_added_parameters, migrate_parameters
+from ..migration import ParameterAccessor, migrate_parameters
 
 # The Holder of a bit that is not in one
 NoHolder = "None"
@@ -215,7 +215,7 @@ class ToolBit(Asset, ABC):
         if isinstance(params, dict):
             migrating = {"name": attrs.get("name"), "shape-type": tool_bit_shape.name}
             migrating["parameter"] = dict(params)
-            if migrate_added_parameters(ParameterAccessor(migrating)):
+            if migrate_parameters(ParameterAccessor(migrating)):
                 params = migrating["parameter"]
 
         # Filter parameters if method exists
