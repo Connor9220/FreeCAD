@@ -2161,7 +2161,10 @@ class _StopsClamps:
         origin = getattr(piece.ViewObject, "TransformOrigin", None)
         own = at.multiply(origin.inverse()) if origin is not None else at
         angle = Items.angleFrom(self.job, piece, own.Rotation) if turned else None
-        if lever:
+        if piece is not self.chosen():
+            # one Add only shows has no settings to show yet
+            pass
+        elif lever:
             for box, value in ((self.pressX, at.Base.x), (self.pressY, at.Base.y)):
                 box.blockSignals(True)
                 box.setProperty("rawValue", value)
