@@ -1772,6 +1772,9 @@ class TaskPanelVise:
         import Part
 
         along = station.Rotation.multVec(FreeCAD.Vector(1, 0, 0))
+        if abs(along.z) > 0.9:
+            # on its end: the jaws upright, no turn about the vertical to square
+            return station
         yaw = math.degrees(math.atan2(along.y, along.x))
         best = None
         for edge in self.job.Stock.Shape.Edges:
@@ -1791,10 +1794,11 @@ class TaskPanelVise:
             FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), -best).multiply(station.Rotation),
         )
 
-    def turnAt(self, placement, snap=False):
+    def turnAt(self, placement, snap=False, tilt=False):
         """How the vise at placement holds the part: (up, fixed, angle), the sides square to it
         nearest and how far it is turned off them about the vertical, degrees; with snap, turned
-        square to a straight edge of the stock it is near. None if it is not upright."""
+        square to a straight edge of the stock it is near. None if it is not upright, unless
+        tilt: then the side nearest up taken, onto its side or over a quarter turn at a time."""
         import math
 
         job, vise = self.current()
@@ -1805,7 +1809,7 @@ class TaskPanelVise:
         upward = turn.multVec(FreeCAD.Vector(0, 0, 1))
         fixed = turn.multVec(FreeCAD.Vector(0, 1, 0))
         up, u = max(PathWorkholding.Directions.items(), key=lambda each: each[1].dot(upward))
-        if u.dot(upward) < 0.99:
+        if u.dot(upward) < 0.99 and not tilt:
             return None
         jaw, j = max(
             (each for each in PathWorkholding.Directions.items() if abs(each[1].dot(u)) < 1e-9),
@@ -1820,6 +1824,20 @@ class TaskPanelVise:
         """The vise turned as the dragger left it, (up, fixed, angle), shown: the side against
         the fixed jaw, and how far off square to it it is kept. Not seated again for it."""
         up, jaw, angle = turn
+        seat = _opposite(up)
+        if self.seat.currentData() != seat:
+            # onto its side or over: another side of the part on its bottom
+            self.seat.blockSignals(True)
+            self.seat.setCurrentIndex(max(0, self.seat.findData(seat)))
+            self.seat.blockSignals(False)
+            self.seatChanged(jaw=jaw)
+            if self.adding:
+                rows = self.stops
+                rows.viseSeat.blockSignals(True)
+                rows.viseSeat.setCurrentIndex(max(0, rows.viseSeat.findData(seat)))
+                rows.viseSeat.blockSignals(False)
+                rows.viseJawsFor(jaw)
+                self.addingTurn = (seat, jaw)
         if self.jaw.currentData() != jaw:
             self.showJaw(jaw)
         self.turnAngle = angle

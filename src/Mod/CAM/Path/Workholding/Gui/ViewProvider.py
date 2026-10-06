@@ -175,7 +175,7 @@ def _showVise(obj):
 def _seatedDragger(along=False):
     """The Transform dragger of a seated vise without what would move it into the jaws or turn
     it: along the jaws and up, and the plane of the two, are left; along, along the jaws only and
-    turned about the vertical."""
+    turned every way."""
     from pivy import coin
 
     view = FreeCADGui.ActiveDocument.ActiveView if FreeCADGui.ActiveDocument else None
@@ -191,10 +191,11 @@ def _seatedDragger(along=False):
     hidden = ["yTranslatorDragger", "xRotatorDragger", "yRotatorDragger"]
     planes = ["xyPlanarTranslatorSwitch", "yzPlanarTranslatorSwitch"]
     if along:
-        # along the jaws, and turned a degree at a time, as a lever clamp is
+        # along the jaws, and turned about all three: about the vertical a degree at a time,
+        # about the others onto its side or over, a quarter turn once let go
         import math
 
-        hidden.append("zTranslatorDragger")
+        hidden = ["yTranslatorDragger", "zTranslatorDragger"]
         planes.append("zxPlanarTranslatorSwitch")
         dragger.getField("rotationIncrement").set(repr(math.radians(DRAG_TURN_STEP)))
     else:

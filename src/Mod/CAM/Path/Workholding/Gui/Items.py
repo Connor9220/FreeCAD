@@ -1184,6 +1184,122 @@ class _StopsClamps:
                     return None
         return None
 
+    def viseSidesPicked(self):
+        """The sides of the part a vise's jaws take from an edge or face of the stock picked in
+        the 3D view, (bottom side, fixed jaw side) as the part's own: an edge along the top or
+        bottom goes in the corner of the fixed jaw and the floor, its upright face against the
+        jaw and its flat one down; a face against the fixed jaw, the bottom side None, kept as it
+        is. None if none is picked; a ValueError for one that cannot be."""
+        import Part
+
+        stock = getattr(self.job, "Stock", None)
+        if stock is None:
+            return None
+        part = PathWorkholding.partTurn(self.job).inverted()
+
+        def named(normal):
+            normal = part.multVec(normal)
+            name, d = max(PathWorkholding.Directions.items(), key=lambda e: e[1].dot(normal))
+            return name if d.dot(normal) > 0.99 else None
+
+        def normalOf(face):
+            u0, u1, v0, v1 = face.ParameterRange
+            return face.normalAt((u0 + u1) / 2, (v0 + v1) / 2)
+
+        for sel in FreeCADGui.Selection.getSelectionEx(self.job.Document.Name):
+            if sel.Object != stock:
+                continue
+            for name, shape in zip(sel.SubElementNames, sel.SubObjects):
+                if shape.ShapeType == "Face":
+                    side = named(normalOf(shape))
+                    if side is None:
+                        raise ValueError(
+                            translate("CAM_Workholding", "That face is not square to the part")
+                        )
+                    return None, side
+                if shape.ShapeType != "Edge" or not name.startswith("Edge"):
+                    continue
+                edge = stock.Shape.Edges[int(name[4:]) - 1]
+                faces = [f for f in stock.Shape.ancestorsOfType(edge, Part.Face)]
+                normals = [normalOf(f) for f in faces]
+                flat = [n for n in normals if abs(n.z) > 0.99]
+                upright = [n for n in normals if abs(n.z) < 0.01]
+                if len(flat) != 1 or len(upright) != 1:
+                    raise ValueError(
+                        translate(
+                            "CAM_Workholding",
+                            "Pick an edge along the top or the bottom of the stock",
+                        )
+                    )
+                seat, jaw = named(flat[0]), named(upright[0])
+                if seat is None or jaw is None:
+                    raise ValueError(
+                        translate("CAM_Workholding", "That edge is not square to the part")
+                    )
+                return seat, jaw
+        return None
+
+    def pickViseSides(self):
+        """An edge or face of the stock picked in the 3D view for the vise Add shows, or the
+        one picked in Placed: its bottom side and fixed jaw side set from it, seated so."""
+        adding = _kindOf(self.item.currentData()) == "vise"
+        chosen = self.chosen()
+        placed = chosen is not None and PathWorkholding.isVise(chosen)
+        if not (adding or placed):
+            return
+        try:
+            picked = self.viseSidesPicked()
+        except ValueError as e:
+            self.error.setText(str(e))
+            return
+        if picked is None:
+            return
+        seat, jaw = picked
+        if adding:
+            seat = seat or self.viseSeat.currentData()
+        else:
+            seat = seat or self.panel.seat.currentData()
+        if (
+            seat is None
+            or abs(PathWorkholding.Directions[seat].dot(PathWorkholding.Directions[jaw])) > 1e-9
+        ):
+            self.error.setText(
+                translate(
+                    "CAM_Workholding",
+                    "That face is the bottom side or opposite it: pick one square to it",
+                )
+            )
+            return
+        self.error.setText("")
+        if adding:
+            self.viseSeat.blockSignals(True)
+            self.viseSeat.setCurrentIndex(max(0, self.viseSeat.findData(seat)))
+            self.viseSeat.blockSignals(False)
+            self.viseJawsFor(jaw)
+            self.viseJaw.blockSignals(True)
+            self.viseJaw.setCurrentIndex(max(0, self.viseJaw.findData(jaw)))
+            self.viseJaw.blockSignals(False)
+            self.previewPicked()
+        else:
+            self.panel.seat.blockSignals(True)
+            self.panel.seat.setCurrentIndex(max(0, self.panel.seat.findData(seat)))
+            self.panel.seat.blockSignals(False)
+            self.panel.seatChanged(jaw=jaw)
+            self.panel.preview()
+        # the stock's pick let go, so the next registers; the vise picked in Placed kept picked
+        keep = chosen if placed else None
+        QtCore.QTimer.singleShot(50, lambda: self._afterSidesPicked(keep))
+
+    def _afterSidesPicked(self, vise):
+        # let go without the rows following it, the vise's row picked again after
+        self.syncing = True
+        try:
+            FreeCADGui.Selection.clearSelection()
+        finally:
+            self.syncing = False
+        if vise is not None and vise.isAttachedToDocument():
+            self.fillList(vise)
+
     def fillItems(self, choose=None):
         """What the row can put on a side, each with its picture: the stops made here; the
         clamps' files this Job uses; those browsed to and not placed yet; those used lately, the
@@ -1580,6 +1696,7 @@ class _StopsClamps:
             # the panel's widgets gone with it
             FreeCADGui.Selection.removeObserver(self)
             return
+        self.pickViseSides()
         self.selectFromView()
 
     def addSelection(self, doc, obj, sub, pos):
@@ -2362,8 +2479,9 @@ class _StopsClamps:
                 if self._slid(at):
                     self.panel.showOffset(PathWorkholding.seating(self.job, piece)["offset"])
                 else:
-                    # turned: where it is along the jaws kept, seated again turned so
-                    turn = self.panel.turnAt(at, snap=True)
+                    # turned: where it is along the jaws kept, seated again turned so; onto its
+                    # side or over, a quarter turn at a time
+                    turn = self.panel.turnAt(at, snap=True, tilt=True)
                     if turn is not None:
                         self.panel.showTurn(turn)
                 self.panel.preview()
