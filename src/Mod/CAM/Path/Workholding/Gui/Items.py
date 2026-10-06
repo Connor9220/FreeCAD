@@ -34,6 +34,7 @@ import Path.Workholding.Gui.Widgets as Widgets
 
 from Path.Workholding.Constants import (
     STOCK_SNAP_WIDTHS,
+    TOUCH_NEAR,
     DRAG_SHOW_EVERY,
     ERROR_TEXT_COLOR,
     ITEM_ICON,
@@ -532,9 +533,9 @@ class _StockDrag(_Drag):
 
     def againstStops(self, slid):
         """How much further the stock moves, slid by slid, to rest against the stops it comes
-        within STOCK_SNAP_WIDTHS of their own widths of; one it is let go on top of, pushed off
-        the shortest way, however far that is. The nearest each way, those square to one
-        another only."""
+        within STOCK_SNAP_WIDTHS of their own widths of, on any side of them; one it is let go on
+        top of, pushed off it to the side its middle is on, however far that is. The nearest each way,
+        those square to one another only."""
         import Part
 
         stock = self.job.Stock.Shape
@@ -554,25 +555,34 @@ class _StockDrag(_Drag):
             if out.Length < 1e-9:
                 continue
             out.normalize()
-            along = FreeCAD.Vector(-out.y, out.x, 0)
-            low, high = PathWorkholding._extents(stock, FreeCAD.Vector(), along)
-            first, last = PathWorkholding._extents(shape, FreeCAD.Vector(), along)
-            # beside the stock's end, not across from it
-            if last <= low or first >= high:
-                continue
-            back, reach = PathWorkholding._extents(stock, FreeCAD.Vector(), out)
-            near, far = PathWorkholding._extents(shape, FreeCAD.Vector(), out)
-            if near < reach and far > back:
-                # on top of it: off it the shortest way, before any other
-                moves = (
-                    out * (near - reach),
-                    out * (far - back),
-                    along * (first - high),
-                    along * (last - low),
-                )
-                found.append((-1.0, min(moves, key=lambda m: m.Length)))
-            elif 0.0 <= near - reach <= STOCK_SNAP_WIDTHS * (far - near):
-                found.append((near - reach, out * (near - reach)))
+            # round, or long: against it from any side, across the way it faces or along it
+            offs = []
+            for axis in (out, FreeCAD.Vector(-out.y, out.x, 0)):
+                side = FreeCAD.Vector(-axis.y, axis.x, 0)
+                low, high = PathWorkholding._extents(stock, FreeCAD.Vector(), side)
+                first, last = PathWorkholding._extents(shape, FreeCAD.Vector(), side)
+                # beside the stock, not across from it this way: touching it end on is beside
+                if last <= low + TOUCH_NEAR or first >= high - TOUCH_NEAR:
+                    continue
+                gaps = []
+                for way in (axis, -axis):
+                    reach = PathWorkholding._extents(stock, FreeCAD.Vector(), way)[1]
+                    near, far = PathWorkholding._extents(shape, FreeCAD.Vector(), way)
+                    gaps.append((way, near - reach, far - near))
+                if gaps[0][1] < -TOUCH_NEAR and gaps[1][1] < -TOUCH_NEAR:
+                    # on top of it: off it to the side of it the stock's middle is on
+                    beyond = stock.BoundBox.Center.dot(axis) > shape.BoundBox.Center.dot(axis)
+                    way, gap, _ = gaps[1] if beyond else gaps[0]
+                    back, reach = PathWorkholding._extents(stock, FreeCAD.Vector(), axis)
+                    # the way that is least of the stock's own length that way
+                    offs.append((abs(gap) / max(reach - back, 1e-9), way * gap))
+                    continue
+                for way, gap, width in gaps:
+                    if -TOUCH_NEAR <= gap <= STOCK_SNAP_WIDTHS * width:
+                        found.append((gap, way * gap))
+            if offs:
+                # off it however far, before any other
+                found.append((-1.0, min(offs, key=lambda o: o[0])[1]))
         more = FreeCAD.Vector()
         taken = []
         for _, move in sorted(found, key=lambda f: f[0]):
