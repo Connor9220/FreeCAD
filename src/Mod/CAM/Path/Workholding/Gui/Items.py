@@ -2477,6 +2477,18 @@ class _StopsClamps:
                 # the jaws as it was; else where it was let go along them
                 at = PathWorkholding.placementOf(piece)
                 if self._slid(at):
+                    # moved across the jaws: the part held in it moved with it, the stock and
+                    # what is placed on it; along them: where it is along the stock
+                    start = getattr(self, "dragFrom", None)
+                    if start is not None:
+                        closing = PathWorkholding.stationPlacement(piece).Rotation.multVec(
+                            FreeCAD.Vector(0, 1, 0)
+                        )
+                        across = closing * (at.Base - start.Base).dot(closing)
+                        across.z = 0.0
+                        if across.Length > 1e-6:
+                            PathWorkholding.moveModel(self.job, across)
+                            PathWorkholding.recompute(self.job.Document)
                     self.panel.showOffset(PathWorkholding.seating(self.job, piece)["offset"])
                 else:
                     # turned: where it is along the jaws kept, seated again turned so; onto its

@@ -195,8 +195,10 @@ def _seatedDragger(along=False):
         # about the others onto its side or over, a quarter turn once let go
         import math
 
-        hidden = ["yTranslatorDragger", "zTranslatorDragger"]
-        planes.append("zxPlanarTranslatorSwitch")
+        # across the table too, by X, Y and the square of the two: across the jaws, the part
+        # held in it with it
+        hidden = ["zTranslatorDragger"]
+        planes = ["yzPlanarTranslatorSwitch", "zxPlanarTranslatorSwitch"]
         dragger.getField("rotationIncrement").set(repr(math.radians(DRAG_TURN_STEP)))
     else:
         hidden.append("zRotatorDragger")
