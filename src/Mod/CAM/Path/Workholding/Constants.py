@@ -115,6 +115,8 @@ DRAG_TURN_STEP = 1.0
 LEVER_SNAP_DEGREES = 10.0
 # the part's sides on the vise's bottom and against its fixed jaw lit in color: off for now
 SHOW_LIT_SIDES = False
+# the least a vise's jaws are left gripping the stock when it is stood higher by dragging, mm
+VISE_LEAST_GRIP = 3.0
 # what Add shows put in again this many ms after the last change of its side or how many
 ADD_PREVIEW_DELAY = 300
 # the piece being dragged: where it is shown in the panel every this many ms

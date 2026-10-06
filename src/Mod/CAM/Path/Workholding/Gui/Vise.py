@@ -49,6 +49,7 @@ from Path.Workholding.Constants import (
     NOT_CLEAR_TEXT_COLOR,
     SEAT_COLOR,
     SHOW_LIT_SIDES,
+    VISE_LEAST_GRIP,
 )
 from Path.Workholding.Gui.Items import _StopsClamps
 from Path.Workholding.Gui.Source import _closeIfUnused
@@ -1323,6 +1324,37 @@ class TaskPanelVise:
         for vise, x in zip(vises[1:], rest):
             self.seatVise(vise, -x, moveVise=True)
         self.stops.fillList()
+
+    def standAt(self, height):
+        """The stock stood height above the vise's floor, snapped: on the nearest pair of the
+        parallels chosen, or of the usual set; on the floor, lower than half the shortest."""
+        if not self.byParallels.isEnabled():
+            return
+        heights = [
+            self.parallels.heights.itemData(i)
+            for i in range(self.parallels.heights.count())
+            if self.parallels.heights.itemData(i) is not None
+        ]
+        if not heights and self.parallels.pickNear(max(height, 0.0)):
+            heights = [
+                self.parallels.heights.itemData(i)
+                for i in range(self.parallels.heights.count())
+                if self.parallels.heights.itemData(i) is not None
+            ]
+        # no taller than leaves the jaws gripping it
+        deep = self.jawHeight()
+        if deep is not None:
+            heights = [h for h in heights if h <= deep - VISE_LEAST_GRIP]
+        if not heights or height < min(heights) / 2:
+            self.byFloor.setChecked(True)
+            self.heightByChanged()
+            return
+        nearest = min(heights, key=lambda h: abs(h - height))
+        self.byParallels.setChecked(True)
+        self.parallels.heights.blockSignals(True)
+        self.parallels.heights.setCurrentIndex(self.parallels.heights.findData(nearest))
+        self.parallels.heights.blockSignals(False)
+        self.heightByChanged()
 
     def pinAdd(self):
         """The vise being added dragged along the jaws: where it is the others spread from."""

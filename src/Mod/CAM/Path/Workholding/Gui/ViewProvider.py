@@ -196,8 +196,8 @@ def _seatedDragger(along=False):
         import math
 
         # across the table too, by X, Y and the square of the two: across the jaws, the part
-        # held in it with it
-        hidden = ["zTranslatorDragger"]
+        # held in it with it; up and down, how high the stock stands in it
+        hidden = []
         planes = ["yzPlanarTranslatorSwitch", "zxPlanarTranslatorSwitch"]
         dragger.getField("rotationIncrement").set(repr(math.radians(DRAG_TURN_STEP)))
     else:

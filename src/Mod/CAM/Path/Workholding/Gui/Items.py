@@ -398,6 +398,18 @@ class _ViseDrag(_Drag):
             PathWorkholding.recompute(self.job.Document)
             return
         seated = getattr(self.stops, "dragSeated", True)
+        if seated and self.stops._slid(at) and start is not None:
+            # up or down: the stock standing as much lower or higher in it, on the nearest pair of
+            # parallels or the floor
+            station = PathWorkholding.stationPlacement(piece)
+            rise = (at.Base - start.Base).dot(station.Rotation.multVec(FreeCAD.Vector(0, 0, 1)))
+            if abs(rise) > 1e-6:
+                frame = PathWorkholding.jawFrame(piece)
+                grip = PathWorkholding.seating(self.job, piece)["grip"]
+                if frame is not None and frame.get("floor") is not None:
+                    # the stock's bottom above the floor as it was seated, lowered by the rise
+                    stood = frame["top"] - (grip - rise) - frame["floor"]
+                    panel.standAt(stood - rise)
         if seated and self.stops._slid(at):
             # across the jaws: the part held in it moved with it; along them: where it is along
             # the stock
