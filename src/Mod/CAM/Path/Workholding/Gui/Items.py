@@ -2311,7 +2311,7 @@ class _StopsClamps:
         dragged there; both greyed for one shared or not placed by side."""
         placed = piece is not None and Items.isPlaced(piece) and not Lever.isLever(piece)
         along = Items.sideAxis(self.job, piece.StockSide)[0] if placed else None
-        contact = Items.contactFrame(self.job, piece) if placed else None
+        contact = Items.contactFrame(self.job, piece) if placed and at is None else None
         where = at or (contact.Base if contact is not None else None)
         free = placed and not PathWorkholding.isShared(piece)
         pushes = placed and getattr(piece, "Kind", None) == Items.Kind.Push

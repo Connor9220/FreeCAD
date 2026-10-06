@@ -920,16 +920,37 @@ def contactFrame(job, piece):
         return None
     frame, _ = sideFrame(job, piece.StockSide)
     local = frame.inverse().multiply(PathWorkholding.placementOf(piece))
-    # in from the box's side as far as the piece was moved in to touch the stock
+    # in from the box's side as far as the piece was moved in to touch the stock: measured again
+    # only when it or the stock changed, slow on a real stock and asked for at every drag step
     inset = 0.0
     shape = Part.getShape(piece, "", transform=True)
-    if not shape.isNull() and not job.Stock.Shape.isNull():
-        gap, pairs, _ = shape.distToShape(job.Stock.Shape)
-        if gap < 10 * TOUCH_NEAR and pairs:
-            inset = max(0.0, frame.inverse().multVec(pairs[0][1]).y)
+    stock = job.Stock.Shape
+    if not shape.isNull() and not stock.isNull():
+        box = shape.BoundBox
+        state = (
+            tuple(
+                round(v, 6) for v in (box.XMin, box.YMin, box.ZMin, box.XMax, box.YMax, box.ZMax)
+            ),
+            stock.hashCode(),
+            str(job.Stock.Placement),
+            piece.StockSide,
+        )
+        key = (job.Document.Name, piece.Name)
+        known = _insets.get(key)
+        if known is not None and known[0] == state:
+            inset = known[1]
+        else:
+            gap, pairs, _ = shape.distToShape(stock)
+            if gap < 10 * TOUCH_NEAR and pairs:
+                inset = max(0.0, frame.inverse().multVec(pairs[0][1]).y)
+            _insets[key] = (state, inset)
     return frame.multiply(
         FreeCAD.Placement(Vector(local.Base.x, inset, local.Base.z), FreeCAD.Rotation())
     )
+
+
+# where each piece placed against a side last met the stock, and what it was measured from
+_insets = {}
 
 
 def _toShared(job, shared):
@@ -1135,7 +1156,7 @@ def setPosition(piece, position):
     on the front or back, its Job Y on the left or right, no further than the side's ends, and
     pinned there: it stays as the side's count or the stock's size changes, kept from the stock's
     near end. A shared stop stays
-    where it is: it cannot be put elsewhere. The rest placed again."""
+    where it is: it cannot be put elsewhere. Those on its side placed again."""
     job, piece = PathWorkholding.memberOf(piece)
     if piece is None or not isPlaced(piece):
         raise ValueError("Not a stop or clamp placed by side")
@@ -1151,7 +1172,8 @@ def setPosition(piece, position):
     low, high = _alongLimits(job, piece)
     at = min(max((position - frame.Base[axis]) * way, low), high)
     piece.Along = frame.Base[axis] + at * way - _stockStart(job, axis)
-    layout(job)
+    # its side only: one moved off another left those there where they are
+    layout(job, [piece.StockSide])
 
 
 def canTransform(piece):
