@@ -867,6 +867,27 @@ def _extents(shape, origin, direction):
     return box.ZMin - at, box.ZMax - at
 
 
+def _closingIn(job, placement, shiftA, width):
+    """The stock's extents along the way the jaws close, in the frame of placement, (near, far):
+    of what the jaws reach across, width centered on them, once the stock is moved shiftA across
+    them; a long stock turned in them is held by its slice there, not its whole length. The
+    whole stock when width is not known or nothing is there."""
+    import Part
+
+    closing = placement.Rotation.multVec(Vector(0, -1, 0))
+    shape = job.Stock.Shape
+    if width:
+        big = shape.BoundBox.DiagonalLength * 2 + width
+        slab = Part.makeBox(width, big, big)
+        slab.Placement = placement.multiply(
+            FreeCAD.Placement(Vector(-width / 2 - shiftA, -big / 2, -big / 2), FreeCAD.Rotation())
+        )
+        piece = shape.common(slab)
+        if not piece.isNull() and piece.Volume > 1e-9:
+            return _extents(piece, placement.Base, closing)
+    return _extents(shape, placement.Base, closing)
+
+
 def _remember(vise, onParallels, close, parallels, step=0, kit=None):
     """How the stock was seated in the vise, kept on it: seated, held to its seat from then on;
     on parallels, how high, thick and long they are, from which set, and whether soft; on a step
@@ -1422,15 +1443,20 @@ def seat(
             % (vise.Label, userLength(grip), userLength(top - floor))
         )
 
-    # the moving jaw's face, or its step's wall, against the stock's far side
+    # the moving jaw's face, or its step's wall, against the stock's far side: what of the stock
+    # the jaws reach across, where it will be along them
+    shiftA = (-(lowA + highA) / 2 if center else 0.0) + offset
+    nearC, farC = _closingIn(job, placement, shiftA, _jawWidth(vise))
     opening = farC - nearC + _jawLoss(frame, wall)
     maxOpening = setup["maxOpening"]
     fits = maxOpening is None or opening <= maxOpening + 1e-6
     if close and selfCentering(vise):
         # both jaws close about the body, which stays: the fixed jaw where they meet the stock
         setOpening(vise, opening if fits else maxOpening)
-        (nearC, farC), (lowA, highA), (bottom, _) = _stockIn(job, stationPlacement(vise))
-    shiftA = (-(lowA + highA) / 2 if center else 0.0) + offset
+        placement = stationPlacement(vise)
+        _, (lowA, highA), (bottom, _) = _stockIn(job, placement)
+        shiftA = (-(lowA + highA) / 2 if center else 0.0) + offset
+        nearC, farC = _closingIn(job, placement, shiftA, _jawWidth(vise))
     move = closing * (-wall - nearC) + across * shiftA + up * (top - grip - bottom)
     if moveVise:
         placement = FreeCAD.Placement(vise.Placement)

@@ -2047,6 +2047,8 @@ class _StopsClamps:
             self.panel.begin()
         if want is not None and gui.setEdit(piece, TRANSFORM_NO_DIALOG):
             self.editing = want
+            # where the drag starts: a vise turned by it, or slid along its jaws
+            self.dragFrom = FreeCAD.Placement(PathWorkholding.placementOf(piece))
             self.dragTimer.start()
 
     def showDragging(self):
@@ -2064,12 +2066,12 @@ class _StopsClamps:
         if PathWorkholding.isVise(piece):
             # along the jaws: where the stock is along them; turned: the side against the
             # fixed jaw and how far off square to it
-            turn = self.panel.turnAt(at, snap=True)
-            if turn is not None and self._turned(turn):
-                self.panel.showTurn(turn)
-            elif not self._turned(self.panel.turnAt(at)):
-                # slid, not turned: a turn snapped back leaves where it is along the jaws
+            if self._slid(at):
                 self.panel.showOffset(PathWorkholding.offsetAt(self.job, piece, at))
+            else:
+                turn = self.panel.turnAt(at, snap=True)
+                if turn is not None:
+                    self.panel.showTurn(turn)
             self.showRowAt(
                 piece, [_length(at.Base.x), _length(at.Base.y), _degrees(_viseAngle(at))]
             )
@@ -2096,14 +2098,11 @@ class _StopsClamps:
         words.append(_degrees(angle) if angle is not None else "")
         self.showRowAt(piece, words)
 
-    def _turned(self, turn):
-        """Whether the vise is turned, (up, fixed, angle), other than the panel has it; not
-        upright, so too."""
-        if turn is None:
-            return True
-        return (
-            turn[1] != self.panel.jaw.currentData() or abs(turn[2] - self.panel.angleNow()) > 1e-6
-        )
+    def _slid(self, at):
+        """Whether the vise being dragged, at placement at, is only slid from where the drag
+        started, not turned."""
+        start = getattr(self, "dragFrom", None)
+        return start is None or at.Rotation.isSame(start.Rotation, 1e-6)
 
     def showRowAt(self, piece, words):
         """The piece's row saying where it is, mid-drag: its X, Y and angle."""
@@ -2137,12 +2136,13 @@ class _StopsClamps:
                 # turned: the side against the fixed jaw it was turned to, seated there along
                 # the jaws as it was; else where it was let go along them
                 at = PathWorkholding.placementOf(piece)
-                turn = self.panel.turnAt(at, snap=True)
-                if turn is not None and self._turned(turn):
-                    self.panel.showTurn(turn)
-                elif not self._turned(self.panel.turnAt(at)):
-                    # slid, not turned: a turn snapped back leaves where it is along the jaws
+                if self._slid(at):
                     self.panel.showOffset(PathWorkholding.seating(self.job, piece)["offset"])
+                else:
+                    # turned: where it is along the jaws kept, seated again turned so
+                    turn = self.panel.turnAt(at, snap=True)
+                    if turn is not None:
+                        self.panel.showTurn(turn)
                 self.panel.preview()
             else:
                 Items.fromTransform(piece, ViewProviders.dragPlacement(piece.ViewObject))
