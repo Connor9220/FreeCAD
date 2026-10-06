@@ -631,17 +631,6 @@ def _addSettings(obj, kit, data):
     if kit:
         _add(
             obj,
-            "App::PropertyLength",
-            "BoltFound",
-            group,
-            QT_TRANSLATE_NOOP(
-                "App::Property",
-                "How far its bolt was put from the end pressing on the stock, along the clamp",
-            ),
-            mode=["ReadOnly"],
-        )
-        _add(
-            obj,
             "App::PropertyString",
             "Stud",
             group,
@@ -1725,8 +1714,8 @@ def _place(job, obj, data, press, outward):
             if _studsFor(data, need - bottom)[1] is not None:
                 radius = max(radius, coupler.get("radius", 2 * radius))
         bolt = _studInSlot(job, obj, data, frame, bolt, notes, radius)
-        if hasattr(obj, "BoltFound"):
-            obj.BoltFound = abs(bolt.x)
+        # where its bolt went, for the panel to show; not kept in the file: placing finds it
+        obj.Proxy.boltAt = abs(bolt.x)
     boltAt = tipped.multVec(bolt)
     ride = boltAt - bolt
 
@@ -2015,7 +2004,7 @@ def _heelSeat(bars, tipped, block, pose, at, base):
 
 def _studInSlot(job, obj, data, frame, bolt, notes, radius=None):
     """Where in its slot a kit's step clamp has its stud: where BoltAt puts it, as far from the
-    end pressing, kept in the slot; for Auto, as near the stock as the slot lets it, the stud
+    end pressing, kept in the slot; for Auto (0), as near the stock as the slot lets it, the stud
     clear of the stock's side. Said when the stud is in the stock."""
     end = _kitClamp(data, obj).get("boltEnd")
     if end is None:
@@ -2044,6 +2033,24 @@ def _studInSlot(job, obj, data, frame, bolt, notes, radius=None):
             )
         )
     return Vector(min(max(clear, low), high), bolt.y, bolt.z)
+
+
+def boltPosition(obj):
+    """boltPosition(obj) ... how far a kit's step clamp has its bolt from the end pressing on the
+    stock, along the clamp, as it was last placed: where BoltAt puts it, or where Auto did. None
+    for a clamp with no slot."""
+    if not hasattr(obj, "BoltAt"):
+        return None
+    found = getattr(obj.Proxy, "boltAt", None)
+    if found is not None:
+        return found
+    # not placed since it was opened: where placing would put it
+    job, _ = PathWorkholding.memberOf(obj)
+    data = dataOf(obj)
+    if job is None or not data:
+        return None
+    _, _, bolt, frame = _lever(data, obj)
+    return abs(_studInSlot(job, obj, data, frame, bolt, []).x)
 
 
 def boltRange(obj):

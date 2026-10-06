@@ -1410,7 +1410,8 @@ class _StopsClamps:
                     self.boltAt.setProperty("maximum", slot[1])
                 auto = piece.BoltAt.Value <= 0
                 self.boltAuto.setChecked(auto)
-                self.showValue(self.boltAt, piece.BoltFound.Value if auto else piece.BoltAt.Value)
+                shown = Lever.boltPosition(piece) if auto else piece.BoltAt.Value
+                self.showValue(self.boltAt, shown or 0.0)
             bolt = hasattr(piece, "BoltFit")
             if bolt:
                 self.boltFit.setChecked(piece.BoltFit)
@@ -1476,7 +1477,8 @@ class _StopsClamps:
         piece = self.chosen()
         if not hasattr(piece, "BoltAt"):
             return
-        self.setLever("BoltAt", 0.0 if auto else max(piece.BoltFound.Value, 1e-3))
+        # off: kept where Auto put it, to set from there
+        self.setLever("BoltAt", 0.0 if auto else max(Lever.boltPosition(piece) or 0.0, 1e-3))
 
     def pressMoved(self, *args):
         """The lever clamp picked put where X and Y say it presses, and kept there."""

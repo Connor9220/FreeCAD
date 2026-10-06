@@ -593,22 +593,27 @@ class TestPathWorkholdingStrapKit(_Lever):
         self.assertNotIn("Coupler", roles)
 
     def test04_bolt_where_put(self):
-        """Its bolt where Bolt at puts it from the end pressing, kept in its slot; Auto as near the
-        stock as clears it."""
+        """Its bolt where Bolt at puts it from the end pressing, kept in its slot; 0 is Auto, as
+        near the stock as clears it. Where it went is found, not kept."""
         clamp = Items.setClamps(self.job, [{"side": "-Y", "which": self.path}])[0]
-        auto = clamp.BoltFound.Value
+        self.assertRoughly(clamp.BoltAt.Value, 0)
+        auto = Lever.boltPosition(clamp)
         # the short clamp's slot runs 20 to 35 from its toe
         self.assertGreaterEqual(auto, 20 - 1e-6)
         self.assertLessEqual(auto, 35 + 1e-6)
         clamp.BoltAt = 32
         self.doc.recompute()
-        self.assertRoughly(clamp.BoltFound.Value, 32)
+        self.assertRoughly(Lever.boltPosition(clamp), 32)
         self.assertEqual(clamp.Note, "")
         self.assertClearOfStock(clamp)
         clamp.BoltAt = 50
         self.doc.recompute()
-        self.assertRoughly(clamp.BoltFound.Value, 35)
+        self.assertRoughly(Lever.boltPosition(clamp), 35)
         self.assertEqual([round(v, 6) for v in Lever.boltRange(clamp)], [20, 35])
         clamp.BoltAt = 0
         self.doc.recompute()
-        self.assertRoughly(clamp.BoltFound.Value, auto)
+        self.assertRoughly(Lever.boltPosition(clamp), auto)
+        # not placed since it was opened: found as placing would put it
+        del clamp.Proxy.boltAt
+        self.assertRoughly(Lever.boltPosition(clamp), auto)
+        self.assertFalse(hasattr(clamp, "BoltFound") or hasattr(clamp, "BoltAuto"))
