@@ -487,15 +487,46 @@ class _StockDrag(_Drag):
         delta = at.multiply(start.inverse())
         pivot = getattr(self.stops, "dragPivot", start.Base)
         turn = delta.Rotation
-        if not free and any(
-            not PathWorkholding.isShared(v) for v in PathWorkholding.vises(self.job)
-        ):
-            yaw = turn.toEuler()[0]
-            turn = FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), round(yaw / 90.0) * 90.0)
+        to = self.squaredTo()
+        if not free and PathWorkholding.isVise(to):
+            turn = FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), self.squareTurn(turn.toEuler()[0], to))
         # how far the pivot went, the turn about it
         shift = delta.Base - pivot + delta.Rotation.multVec(pivot)
         return FreeCAD.Placement(shift, FreeCAD.Rotation()).multiply(
             FreeCAD.Placement(FreeCAD.Vector(), turn, pivot)
+        )
+
+    def squaredTo(self):
+        """What the stock is squared to: the vise of this Job's picked, or its first; with none,
+        the table; None with neither."""
+        vises = [v for v in PathWorkholding.vises(self.job) if not PathWorkholding.isShared(v)]
+        if vises:
+            return self.panel.existing if self.panel.existing in vises else vises[0]
+        for table in Items.itemsOf(self.job):
+            if getattr(table, "Kind", None) == Items.Kind.Table:
+                return table
+        return None
+
+    def squareTurn(self, turn, to):
+        """turn, degrees the stock is turned about the vertical, made the nearest leaving it square
+        to to, which turns the other way as it does."""
+        off = to.Placement.Rotation.toEuler()[0] - self.job.Stock.Placement.Rotation.toEuler()[0]
+        return off - round((off - turn) / 90.0) * 90.0
+
+    def square(self):
+        """The stock turned back square to what holds it, about its middle, the least it takes."""
+        to = self.squaredTo()
+        if to is None:
+            return
+        center = self.job.Stock.Shape.BoundBox.Center
+        turn = self.squareTurn(0.0, to)
+        if abs(turn) < 1e-9:
+            return
+        self.carry(
+            FreeCAD.Placement(
+                FreeCAD.Vector(), FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), turn), center
+            ),
+            True,
         )
 
     def letGo(self, piece, start, at, free):
@@ -503,13 +534,16 @@ class _StockDrag(_Drag):
         _unhang(self.stops)
         if start is None:
             return
-        stock = piece
-        vises = [v for v in PathWorkholding.vises(self.job) if not PathWorkholding.isShared(v)]
         moved = self.landing(start, at, free)
+        piece.Placement = start
+        if not moved.isIdentity():
+            self.carry(moved, not free)
+
+    def carry(self, moved, seat):
+        """The stock moved by moved, none of it in the Job's coordinates: what holds it moved
+        back instead, the view with it; a vise seated again where the stock now is if seat."""
+        vises = [v for v in PathWorkholding.vises(self.job) if not PathWorkholding.isShared(v)]
         back = moved.inverse()
-        stock.Placement = start
-        if moved.isIdentity():
-            return
         for vise in vises:
             # held to no seat while it is moved
             proxy = getattr(vise, "Proxy", None)
@@ -525,7 +559,7 @@ class _StockDrag(_Drag):
             if getattr(table, "Kind", None) == Items.Kind.Table:
                 table.Placement = back.multiply(table.Placement)
         PathWorkholding.recompute(self.job.Document)
-        if vises and not free:
+        if vises and seat:
             # seated again where the stock now is in it, the vise moving, never the part
             panel = self.panel
             first = panel.existing if panel.existing in vises else vises[0]
@@ -932,8 +966,23 @@ class _StopsClamps:
                 "a vise it turns square to the jaws",
             )
         )
+        # lit while on, as the Job panel's pick target is, whatever the theme
+        pal = self.moveStock.palette()
+        self.moveStock.setStyleSheet(
+            "QPushButton:checked { background-color: %s; color: %s; }"
+            % (pal.highlight().color().name(), pal.highlightedText().color().name())
+        )
+        self.resetStock = QtWidgets.QPushButton(translate("CAM_Workholding", "Reset"))
+        self.resetStock.setToolTip(
+            translate(
+                "CAM_Workholding",
+                "Turn the stock back square to the vise's jaws, or to the table with no vise",
+            )
+        )
+        self.resetStock.setVisible(False)
         row = QtWidgets.QHBoxLayout()
         row.addWidget(self.moveStock)
+        row.addWidget(self.resetStock)
         row.addWidget(self.remove, 1)
         layout.addRow(row)
         # the one picked's settings, its picture beside them
@@ -1224,6 +1273,7 @@ class _StopsClamps:
         )
         self.remove.clicked.connect(self.removeChosen)
         self.moveStock.toggled.connect(self.stockToggled)
+        self.resetStock.clicked.connect(self.squareStock)
         self.viseSeat.currentIndexChanged.connect(lambda *args: self.viseJawsFor())
         self.viseSeat.currentIndexChanged.connect(lambda *args: self.previewPicked())
         self.viseJaw.currentIndexChanged.connect(lambda *args: self.previewPicked())
@@ -2243,6 +2293,7 @@ class _StopsClamps:
             self.moveStock.blockSignals(True)
             self.moveStock.setChecked(False)
             self.moveStock.blockSignals(False)
+            self.resetStock.setVisible(False)
         if picked is None and self.moveStock.isChecked():
             picked = self.job.Stock
         self.dragChosen(picked)
@@ -2661,8 +2712,23 @@ class _StopsClamps:
         start = getattr(self, "dragFrom", None)
         return start is None or at.Rotation.isSame(start.Rotation, 1e-6)
 
+    def squareStock(self):
+        """Reset: the stock turned back square to what holds it."""
+        rules = _StockDrag(self)
+        self.panel.begin()
+        self.applying = True
+        try:
+            rules.square()
+            self.error.setText("")
+        except ValueError as e:
+            self.error.setText(str(e))
+        finally:
+            self.applying = False
+        rules.after(self.job.Stock)
+
     def stockToggled(self, on):
         """Move stock: nothing else picked, the dragger on the stock; off, gone."""
+        self.resetStock.setVisible(on)
         if on:
             self.resetRow()
             self.list.clearSelection()
