@@ -457,6 +457,8 @@ class _StockDrag(_Drag):
         stops = self.stops
         _unhang(stops)
         start = getattr(stops, "dragFrom", None)
+        # turned about its middle, where its dragger is
+        stops.dragPivot = piece.Shape.BoundBox.Center
         held = _transformOf(piece)
         if start is None or held is None:
             return
@@ -483,7 +485,7 @@ class _StockDrag(_Drag):
         go, turned square to a vise's jaws a quarter at a time unless free."""
         free = _shiftHeld() if free is None else free
         delta = at.multiply(start.inverse())
-        pivot = start.Base
+        pivot = getattr(self.stops, "dragPivot", start.Base)
         turn = delta.Rotation
         if not free and any(
             not PathWorkholding.isShared(v) for v in PathWorkholding.vises(self.job)
@@ -2617,6 +2619,10 @@ class _StopsClamps:
             # the dragger moves the piece before the panel hears of it: the step its moves go
             # into opened first, so Cancel undoes the first drag too
             self.panel.begin()
+        if want is not None and piece is self.job.Stock:
+            # its dragger in its middle, not at its own origin, a corner of the part's
+            center = piece.Placement.inverse().multVec(piece.Shape.BoundBox.Center)
+            piece.ViewObject.TransformOrigin = FreeCAD.Placement(center, FreeCAD.Rotation())
         if want is not None and gui.setEdit(piece, TRANSFORM_NO_DIALOG):
             self.editing = want
             # where the drag starts: a vise turned by it, or slid along its jaws; seated then

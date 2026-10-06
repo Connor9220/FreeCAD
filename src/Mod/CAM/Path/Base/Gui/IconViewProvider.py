@@ -95,6 +95,9 @@ class ViewProvider(object):
     def unsetEdit(self, vobj, mode):
         if 0 == mode:
             self._onEditCallback(False)
+        elif 4 == mode and "TransformOrigin" in vobj.PropertiesList:
+            # the dragger's origin the caller moved put back
+            vobj.TransformOrigin = FreeCAD.Placement()
 
     def setupContextMenu(self, vobj, menu):
         Path.Log.track()
