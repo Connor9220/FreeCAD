@@ -545,6 +545,8 @@ class _StockDrag(_Drag):
         if stock.isNull():
             return FreeCAD.Vector()
         stock = stock.translated(slid)
+        if any(f.Surface.TypeId != "Part::GeomPlane" for f in stock.Faces):
+            return _againstRound(self.job, stock)
         stops = []
         for stop in Items.itemsOf(self.job):
             if not Items.isStop(stop):
@@ -701,6 +703,75 @@ def _offStop(stock, shape, axes):
         beyond = stock.BoundBox.Center.dot(axis) > shape.BoundBox.Center.dot(axis)
         moves.append(gaps[1] if beyond else gaps[0])
     return moves
+
+
+def _againstRound(job, stock):
+    """How much further a round stock, as stock is now, moves: off the stops it is on top of,
+    all together, out from their middle; then against those it comes within
+    STOCK_SNAP_WIDTHS of their own widths of, each the way it is nearest, in turn until it
+    touches them all, as a round sits between two dogs. Never into one."""
+    import Part
+
+    stops = []
+    for stop in Items.itemsOf(job):
+        if not Items.isStop(stop):
+            continue
+        shape = Part.getShape(stop, "", transform=True)
+        if not shape.isNull():
+            stops.append(shape)
+    more = FreeCAD.Vector()
+
+    def flat(v):
+        v = FreeCAD.Vector(v.x, v.y, 0)
+        return v.normalize() if v.Length > 1e-9 else None
+
+    # off those it is on top of, all together: out from their middle, as little as clears them
+    def over(at):
+        return [sh for sh in stops if at.common(sh).Volume > 1e-6]
+
+    for _ in range(4):
+        under = over(stock)
+        if not under:
+            break
+        middle = FreeCAD.Vector()
+        for sh in under:
+            middle += sh.BoundBox.Center
+        way = flat(stock.BoundBox.Center - middle * (1.0 / len(under)))
+        if way is None:
+            break
+        low, high = 0.0, stock.BoundBox.DiagonalLength + 1.0
+        for _ in range(30):
+            mid = (low + high) / 2
+            if over(stock.translated(way * mid)):
+                low = mid
+            else:
+                high = mid
+        stock = stock.translated(way * high)
+        more += way * high
+    # against those near, each in turn, until it touches them all
+    near = []
+    for shape in stops:
+        box = shape.BoundBox
+        width = min(box.XLength, box.YLength)
+        gap = stock.distToShape(shape)[0]
+        if gap <= STOCK_SNAP_WIDTHS * width:
+            near.append((gap, shape))
+    near = [shape for _, shape in sorted(near, key=lambda n: n[0])]
+    for _ in range(4 * TOUCH_MOVES):
+        moved = False
+        for shape in near:
+            gap, pairs, _ = stock.distToShape(shape)
+            if gap < TOUCH_NEAR or not pairs:
+                continue
+            way = flat(pairs[0][1] - pairs[0][0])
+            if way is None:
+                continue
+            stock = stock.translated(way * gap)
+            more += way * gap
+            moved = True
+        if not moved:
+            break
+    return more
 
 
 def _toward(toward, way, shape):
