@@ -491,30 +491,44 @@ class _StopsClamps:
         self.viseJaw.setToolTip(
             translate("CAM_Workholding", "The side of the part against the fixed jaw")
         )
+        # what Add shows taken out, nothing put in
+        self.cancelAdd = QtWidgets.QPushButton(translate("CAM_Workholding", "Cancel"))
+        self.cancelAdd.setToolTip(
+            translate("CAM_Workholding", "Put nothing in: what Add shows taken out again")
+        )
+        # how many, Add and Cancel, kept together at their own size: beside the side for stops
+        # and clamps, beside the fixed jaw's side for a vise
+        self.addButtons = QtWidgets.QWidget()
+        buttons = QtWidgets.QHBoxLayout(self.addButtons)
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.addWidget(self.count)
+        buttons.addWidget(self.add)
+        buttons.addWidget(self.cancelAdd)
+        # a vise's two sides, the buttons beside the second, as wide a space beside the first:
+        # the two boxes the same length
         self.viseRows = QtWidgets.QWidget()
-        rows = QtWidgets.QFormLayout(self.viseRows)
-        rows.setContentsMargins(0, 0, 0, 0)
-        rows.addRow(translate("CAM_Workholding", "Bottom side"), self.viseSeat)
-        rows.addRow(translate("CAM_Workholding", "Fixed jaw side"), self.viseJaw)
+        self.viseGrid = QtWidgets.QGridLayout(self.viseRows)
+        self.viseGrid.setContentsMargins(0, 0, 0, 0)
+        self.viseGrid.addWidget(QtWidgets.QLabel(translate("CAM_Workholding", "Bottom side")), 0, 0)
+        self.viseGrid.addWidget(self.viseSeat, 0, 1)
+        self.viseSpace = QtWidgets.QWidget()
+        self.viseGrid.addWidget(self.viseSpace, 0, 2)
+        self.viseGrid.addWidget(
+            QtWidgets.QLabel(translate("CAM_Workholding", "Fixed jaw side")), 1, 0
+        )
+        self.viseGrid.addWidget(self.viseJaw, 1, 1)
+        self.viseGrid.setColumnStretch(1, 1)
         layout.addRow(self.viseRows)
         self.viseSeat.setCurrentIndex(self.viseSeat.findData("-Z"))
         self.viseJawsFor("+Y")
         self.viseRows.setVisible(False)
         # the side, how many and Add, once something is picked to add
         self.addRow = QtWidgets.QWidget()
-        row = QtWidgets.QHBoxLayout(self.addRow)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(self.side, 1)
-        # how many, Add and Cancel kept their own size at the right, a vise's row without side too
-        row.addStretch(0)
-        row.addWidget(self.count)
-        row.addWidget(self.add)
-        # what Add shows taken out, nothing put in
-        self.cancelAdd = QtWidgets.QPushButton(translate("CAM_Workholding", "Cancel"))
-        self.cancelAdd.setToolTip(
-            translate("CAM_Workholding", "Put nothing in: what Add shows taken out again")
-        )
-        row.addWidget(self.cancelAdd)
+        self.addRowLayout = QtWidgets.QHBoxLayout(self.addRow)
+        self.addRowLayout.setContentsMargins(0, 0, 0, 0)
+        self.addRowLayout.addWidget(self.side, 1)
+        self.addRowLayout.addStretch(0)
+        self.addRowLayout.addWidget(self.addButtons)
         layout.addRow(self.addRow)
         # what Add puts in: its picture and what it is, while one is chosen
         self.addPicture = QtWidgets.QLabel()
@@ -1314,7 +1328,14 @@ class _StopsClamps:
         self.count.setEnabled(kind != "share")
         self.viseRows.setVisible(kind == "vise")
         self.add.setEnabled(which is not None)
-        self.addRow.setVisible(which is not None)
+        # a vise's buttons beside its fixed jaw's side; the others' on their own row
+        if kind == "vise":
+            self.viseGrid.addWidget(self.addButtons, 1, 2)
+            self.viseSpace.setFixedWidth(self.addButtons.sizeHint().width())
+            self.addRow.setVisible(False)
+        else:
+            self.addRowLayout.addWidget(self.addButtons)
+            self.addRow.setVisible(which is not None)
         self.showAdding(which)
         self.previewPicked()
 
