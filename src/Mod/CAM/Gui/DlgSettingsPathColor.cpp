@@ -70,7 +70,6 @@ void DlgSettingsPathColor::saveSettings()
     ui->ToolBitDimensionColorDark->onSave();
     ui->ToolBitDimensionHighlightColor->onSave();
     ui->ToolBitArtworkBrightness->onSave();
-    ui->SimulatorDexelCutting->onSave();
 }
 
 void DlgSettingsPathColor::loadSettings()
@@ -93,7 +92,6 @@ void DlgSettingsPathColor::loadSettings()
     ui->ToolBitDimensionColorDark->onRestore();
     ui->ToolBitDimensionHighlightColor->onRestore();
     ui->ToolBitArtworkBrightness->onRestore();
-    ui->SimulatorDexelCutting->onRestore();
 }
 
 /**

@@ -138,6 +138,61 @@
     </widget>
    </item>
    <item>
+    <widget class="QGroupBox" name="groupBoxSimulator">
+     <property name="title">
+      <string>Simulator</string>
+     </property>
+     <layout class="QGridLayout" name="gridLayoutSimulator">
+      <item row="0" column="0">
+       <widget class="QLabel" name="labelSimulatorRunsOn">
+        <property name="text">
+         <string>Simulator runs on</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QComboBox" name="SimulatorRunsOn">
+        <property name="toolTip">
+         <string>Where the simulator cuts its stock and looks for collisions. Automatic tests both on this computer once, the first time the simulator starts, and for each job uses whichever is faster, the graphics card only when the job's stock fits in its memory. Takes effect the next time the simulator starts.</string>
+        </property>
+        <item>
+         <property name="text">
+          <string>Automatic</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Processor</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Graphics card</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="1" column="0" colspan="2">
+       <widget class="QLabel" name="SimulatorAutoNote">
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QPushButton" name="SimulatorClearTest">
+        <property name="toolTip">
+         <string>Forget the test of this computer: Automatic tests it again the next time the simulator starts</string>
+        </property>
+        <property name="text">
+         <string>Clear test result</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <spacer name="verticalSpacer">
      <property name="orientation">
       <enum>Qt::Vertical</enum>

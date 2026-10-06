@@ -92,6 +92,15 @@ public:
         setGeometry(slider->rect());
     }
 
+    void setInk(const QColor& c)
+    {
+        if (c == ink) {
+            return;
+        }
+        ink = c;
+        update();
+    }
+
     void setStarts(const std::vector<float>& s)
     {
         if (s == starts) {
@@ -168,7 +177,7 @@ protected:
         if (starts.empty()) {
             return;
         }
-        painter.setPen(QPen(QColor(255, 255, 255, 200), 2));
+        painter.setPen(QPen(ink, 2));
         for (float f : starts) {
             const int x = x0 + (int)std::lround(f * (float)span);
             painter.drawLine(x, 1, x, height() - 2);
@@ -187,6 +196,8 @@ protected:
 
 private:
     QSlider* slider;
+    // the marks where each operation starts: white over a dark background, dark over a light
+    QColor ink {255, 255, 255, 200};
     std::vector<float> starts;
     std::vector<std::pair<float, float>> hits;
     std::vector<std::pair<float, float>> cuts;
@@ -525,11 +536,42 @@ void GuiDisplay::setFeedLabel(const QString& text, bool rapid)
 {
     relabel(ui->feedLabel, text);
     // rapids in red
+    feedRapid = rapid;
     const QString style = QStringLiteral("color:%1; padding-left:12px")
-                              .arg(rapid ? QStringLiteral("#ff5050") : QStringLiteral("white"));
+                              .arg((rapid ? rapidInk : ink).name());
     if (ui->feedLabel->styleSheet() != style) {
         ui->feedLabel->setStyleSheet(style);
     }
+}
+
+void GuiDisplay::setBackgroundColor(const QColor& background)
+{
+    // as bright as it looks: light enough, and white text on it is lost
+    const double luma =
+        0.299 * background.redF() + 0.587 * background.greenF() + 0.114 * background.blueF();
+    const bool light = luma > 0.55;
+    ink = light ? QColor(25, 25, 25) : QColor(Qt::white);
+    rapidInk = light ? QColor(200, 30, 30) : QColor(255, 80, 80);
+    restyle();
+}
+
+void GuiDisplay::restyle()
+{
+    const QString color = ink.name();
+    const QString style = QStringLiteral("color:%1").arg(color);
+    if (ui->speedLabel->styleSheet() != style) {
+        ui->speedLabel->setStyleSheet(style);
+    }
+    const QString padded = QStringLiteral("color:%1; padding-left:12px").arg(color);
+    for (QLabel* label : {ui->timeLabel, ui->fpsLabel}) {
+        if (label->styleSheet() != padded) {
+            label->setStyleSheet(padded);
+        }
+    }
+    setFeedLabel(ui->feedLabel->text(), feedRapid);
+    QColor mark = ink;
+    mark.setAlpha(200);
+    opMarkers->setInk(mark);
 }
 
 void GuiDisplay::setFeed(float feed, bool rapid)

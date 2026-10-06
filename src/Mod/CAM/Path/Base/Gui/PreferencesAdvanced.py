@@ -20,6 +20,7 @@
 # *                                                                         *
 # ***************************************************************************
 
+import FreeCAD
 import FreeCADGui
 import Path
 
@@ -28,6 +29,22 @@ if False:
     Path.Log.trackModule(Path.Log.thisModule())
 else:
     Path.Log.setLevel(Path.Log.Level.INFO, Path.Log.thisModule())
+
+translate = FreeCAD.Qt.translate
+
+# where the simulator runs, as the preferences keep it, and what Automatic's test of this computer
+# left: its date and what it last picked
+SimulatorRunsOn = "SimulatorDexelCutting"
+SimulatorAutoResults = (
+    "SimulatorAutoKey",
+    "SimulatorAutoTested",
+    "SimulatorAutoPick",
+    "SimulatorAutoCardUsable",
+    "SimulatorAutoCpuCut",
+    "SimulatorAutoCpuArea",
+    "SimulatorAutoCardCut",
+    "SimulatorAutoCardArea",
+)
 
 
 class AdvancedPreferencesPage:
@@ -39,6 +56,8 @@ class AdvancedPreferencesPage:
         else:  # Qt version < 6.7.0
             self.form.WarningSuppressAllSpeeds.stateChanged.connect(self.updateSelection)
             self.form.EnableAdvancedOCLFeatures.stateChanged.connect(self.updateSelection)
+        self.form.SimulatorRunsOn.currentIndexChanged.connect(self.showSimulatorPick)
+        self.form.SimulatorClearTest.clicked.connect(self.clearSimulatorTest)
 
     def saveSettings(self):
         Path.Preferences.setPreferencesAdvanced(
@@ -47,6 +66,9 @@ class AdvancedPreferencesPage:
             self.form.WarningSuppressRapidSpeeds.isChecked(),
             self.form.WarningSuppressSelectionMode.isChecked(),
             self.form.WarningSuppressOpenCamLib.isChecked(),
+        )
+        Path.Preferences.preferences().SetInt(
+            SimulatorRunsOn, self.form.SimulatorRunsOn.currentIndex()
         )
 
     def loadSettings(self):
@@ -62,7 +84,48 @@ class AdvancedPreferencesPage:
             Path.Preferences.advancedOCLFeaturesEnabled()
         )
         self.form.WarningSuppressOpenCamLib.setChecked(Path.Preferences.suppressOpenCamLibWarning())
+        self.form.SimulatorRunsOn.setCurrentIndex(
+            Path.Preferences.preferences().GetInt(SimulatorRunsOn, 0)
+        )
         self.updateSelection()
+        self.showSimulatorPick()
+
+    def showSimulatorPick(self, *args):
+        """What Automatic picked the last time the simulator ran, and when it tested this
+        computer; nothing for a side chosen here."""
+        note = self.form.SimulatorAutoNote
+        prefs = Path.Preferences.preferences()
+        tested = prefs.GetString("SimulatorAutoTested", "")
+        automatic = self.form.SimulatorRunsOn.currentIndex() == 0
+        note.setVisible(automatic)
+        self.form.SimulatorClearTest.setEnabled(bool(tested))
+        if not tested:
+            note.setText(
+                translate(
+                    "CAM_Preferences",
+                    "Automatic: not tested yet. It tests this computer the next time the "
+                    "simulator starts.",
+                )
+            )
+            return
+        picks = {
+            "Processor": translate("CAM_Preferences", "Processor"),
+            "Graphics card": translate("CAM_Preferences", "Graphics card"),
+        }
+        pick = prefs.GetString("SimulatorAutoPick", "")
+        note.setText(
+            translate("CAM_Preferences", "Automatic: %s (tested %s)")
+            % (picks.get(pick, pick), tested)
+        )
+
+    def clearSimulatorTest(self):
+        """The test of this computer forgotten: done again the next time the simulator starts."""
+        prefs = Path.Preferences.preferences()
+        for name in SimulatorAutoResults:
+            prefs.RemString(name)
+            prefs.RemFloat(name)
+            prefs.RemBool(name)
+        self.showSimulatorPick()
 
     def updateSelection(self, state=None):
         self.form.WarningSuppressOpenCamLib.setEnabled(

@@ -99,6 +99,9 @@ void DlgCAMSimulator::connectTo(GuiDisplay& gui, Dummy3DViewer& dv)
     // connect to gui
 
     mGui = &gui;
+    if (mBackground.isValid()) {
+        mGui->setBackgroundColor(mBackground);
+    }
     updateGui();
 
     connect(&gui, &GuiDisplay::play, this, [this](bool b) { mMillSimulator->SetPlaying(b); });
@@ -550,6 +553,10 @@ void DlgCAMSimulator::setRotateEnabled(bool b)
 void DlgCAMSimulator::setBackgroundColor(const QColor& c)
 {
     mMillSimulator->SetBackgroundColor({c.redF(), c.greenF(), c.blueF()});
+    mBackground = c;
+    if (mGui) {
+        mGui->setBackgroundColor(c);
+    }
     update();
 }
 

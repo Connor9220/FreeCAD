@@ -208,6 +208,8 @@ private:
     float mFps = 0;
 
     GuiDisplay* mGui = nullptr;
+    // the 3D view's background, for the readouts over it once they are there
+    QColor mBackground;
     Dummy3DViewer* mDummyViewer = nullptr;
 };
 

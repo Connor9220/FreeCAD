@@ -23,6 +23,7 @@
  ***************************************************************************/
 
 #include "MillSimulation.h"
+#include "DexelAuto.h"
 
 #include <Base/Console.h>
 #include <Base/Quantity.h>
@@ -77,8 +78,8 @@ void MillSimulation::Clear()
     mDexelTried = false;
     mProbes.clear();
     mCollisions.clear();
-    mCollisionOps.clear();
-    mStopOps.clear();
+    mWarnedHits.clear();
+    mStopHits.clear();
     mStopAt = -1;
     mWorkholding.Free();
     mWorkholdingTried = false;
@@ -110,8 +111,8 @@ void MillSimulation::InitSimulation(float quality, float maxStockDimension)
     mDexelTried = false;
     mProbes.clear();
     mCollisions.clear();
-    mCollisionOps.clear();
-    mStopOps.clear();
+    mWarnedHits.clear();
+    mStopHits.clear();
     mStopAt = -1;
     mWorkholding.Free();
     mWorkholdingTried = false;
@@ -1417,8 +1418,8 @@ void MillSimulation::SetArbitraryStock(
     mDexelTried = false;
     mProbes.clear();
     mCollisions.clear();
-    mCollisionOps.clear();
-    mStopOps.clear();
+    mWarnedHits.clear();
+    mStopHits.clear();
     mStopAt = -1;
     mWorkholding.Free();
     mWorkholdingTried = false;
@@ -1674,7 +1675,7 @@ bool MillSimulation::PrepareDexel()
     mDexelSnaps.clear();
     mSoftJawSnaps.clear();
     mSoftJaws.Reset();
-    if (!mDexel.Init(mStockVerts, mStockIndices, resolution)) {
+    if (!mDexel.Init(mStockVerts, mStockIndices, resolution, RunOnProcessor(DexelJobOf(resolution)))) {
         Base::Console().warning(
             "CAM Simulator: the dexel stock could not be set up on this OpenGL; drawing with CSG.\n"
         );
@@ -1684,6 +1685,29 @@ bool MillSimulation::PrepareDexel()
 }
 
 
+
+DexelJob MillSimulation::DexelJobOf(float resolution) const
+{
+    // What the program asks of the dexel stock: a cut a move, an arc's a piece at a time; the area
+    // its tools sweep; and the stock's rays on the graphics card, three grids of them, each two
+    // sets of six float textures and its first stretches, and the snapshots a long program keeps.
+    DexelJob job;
+    for (const MillPathSegment* p : MillPathSegments) {
+        if (!p->isCutting) {
+            continue;
+        }
+        job.cuts += p->isMultyPart ? p->numSimSteps : 1;
+        job.sweptArea += p->Length() * 2.0 * p->endmill->radius;
+    }
+    double dims[3];
+    for (int c = 0; c < 3; c++) {
+        dims[c] = std::floor(mStockObject.size[c] / resolution) + 2;
+    }
+    const double rays = dims[1] * dims[2] + dims[2] * dims[0] + dims[0] * dims[1];
+    const double snapshots = MillPathSegments.size() >= DexelSnapshotMinSegments ? DexelSnapshots : 0;
+    job.cardBytes = rays * (2 * 6 * 16 + 16 + snapshots * 6 * 16);
+    return job;
+}
 
 void MillSimulation::FlushDexel()
 {
@@ -1778,8 +1802,8 @@ void MillSimulation::ProbeAlong(MillPathSegment* p, int fromStep, int toStep, in
         });
         if (found < 0) {
             Base::Console().warning(
-                "CAM Simulator: collisions are found when the simulator cuts on the processor, "
-                "as set in the CAM preferences.\n"
+                "CAM Simulator: this graphics card cannot look for the holder meeting the "
+                "stock; set the simulator to run on the processor in the CAM preferences.\n"
             );
             mProbeWarned = true;
             return;
@@ -1811,13 +1835,20 @@ void MillSimulation::TakeCollisions()
     mDexel.TakeHits(hits);
     mWorkholding.TakeHits(hits);
     mSoftJaws.TakeHits(hits);
+    // in the order they happen, so each hit is known to follow on from the one before it or not
+    std::vector<std::pair<Collision, int>> found;
     for (const auto& [id, rays] : hits) {
         const auto it = mProbes.find(id);
         if (it == mProbes.end()) {
             continue;
         }
-        const Collision hit = it->second;
+        found.emplace_back(it->second, rays);
         mProbes.erase(it);
+    }
+    std::sort(found.begin(), found.end(), [](const auto& a, const auto& b) {
+        return a.first.seg < b.first.seg;
+    });
+    for (const auto& [hit, rays] : found) {
         const int key = hit.seg * CollisionKinds + hit.kind;
         // a ray or two is the grid, a sliver it left where a ray runs down a tool's axis, not
         // stock the tool meets
@@ -1825,20 +1856,26 @@ void MillSimulation::TakeCollisions()
             continue;
         }
         mCollisions[key] = hit;
+        // a strike of its own when the move before did not hit the same, the tool clear of it in
+        // between: each hole a drill crashes into the same clamp is one. A crash running on
+        // through the moves after is one strike, not one at each of them.
+        const int before = key - CollisionKinds;
+        const bool strike = hit.seg == 0
+            || (mCollisions.count(before) == 0 && mStopHits.count(before) == 0
+                && mWarnedHits.count(before) == 0);
         // found as it plays through it: stop there, the earliest found. One where playback was
         // moved to, a skip landing on it or play pressed where it stopped, lets it play on; and
-        // once an operation for each kind, as it is said: a crash running on through the moves
-        // after stops once, not at each of them, nor again as the dexels are cut again from a
-        // snapshot behind the stop, which finds it a step or so on. Moving playback back, or on
-        // the slider, has it stop at them afresh. A cut into soft jaws is only warned of.
+        // a strike is stopped at once, not again as the dexels are cut again from a snapshot
+        // behind the stop, which finds it again. Moving playback back, or on the slider, has it
+        // stop at them afresh. A cut into soft jaws is only warned of.
         const MillPathSegment* p = MillPathSegments[hit.seg];
         const float t = HitTime(hit);
         if (mStopOnCollision && mSimPlaying && t > mPlayFrom + 1e-4f && !IsCut(hit.kind)
-            && mStopOps.insert(p->op * CollisionKinds + hit.kind).second) {
+            && strike && mStopHits.insert(key).second) {
             mStopAt = mStopAt < 0 ? t : std::min(mStopAt, t);
         }
-        // said once an operation for each kind, where it first happens
-        if (mCollisionOps.insert(p->op * CollisionKinds + hit.kind).second) {
+        // each strike said once, where it happens, not again as it is played again
+        if (strike && mWarnedHits.insert(key).second) {
             const std::string op = p->op >= 0 && p->op < (int)mCodeParser.OpNames.size()
                 ? mCodeParser.OpNames[p->op]
                 : std::string();
@@ -1961,8 +1998,12 @@ bool MillSimulation::CanFindCollisions() const
     if (!mDexelEngine) {
         return false;
     }
+    // the stock looked at where it is cut, on the processor or on a card with occlusion
+    // queries; the workholding and soft jaws on the processor whichever cuts the stock, so with
+    // a card lacking them, what hits those is still found
+    const bool held = !mWorkholdingVerts.empty() || !mSoftJawVerts.empty();
     if (mDexel.IsValid()) {
-        return mDexel.OnProcessor();
+        return mDexel.CanProbe() || held;
     }
     return !mDexelTried;  // not set up yet; once it fails to be, drawn with CSG
 }
@@ -2406,7 +2447,7 @@ void MillSimulation::SkipToPreviousMark()
     mSimTime = previous;
     mPlayFrom = previous;
     mStopAt = -1;
-    mStopOps.clear();
+    mStopHits.clear();
     StepFromTime();
     CalcSegmentPositions();
     simDisplay.updateDisplay = true;
@@ -2463,7 +2504,7 @@ void MillSimulation::SetSimulationStage(float stage)
     mSimTime = std::clamp(stage, 0.f, 1.f) * mTotalTime;
     mPlayFrom = mSimTime;
     mStopAt = -1;
-    mStopOps.clear();
+    mStopHits.clear();
     const int oldStep = mCurStep;
     StepFromTime();
     if (mCurStep == oldStep) {

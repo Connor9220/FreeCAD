@@ -25,6 +25,7 @@
 #pragma once
 
 #include "AxisOverlay.h"
+#include "DexelAuto.h"
 #include "DexelStock.h"
 #include "GCodeParser.h"
 #include "MillPathLine.h"
@@ -235,6 +236,8 @@ protected:
     void GlsimEnd(void);
     void RenderSweeps(int first, bool fromScratch);
     bool PrepareDexel();
+    // what the program asks of the dexel stock, its rays resolution apart, for where to run it
+    DexelJob DexelJobOf(float resolution) const;
     bool CutDexel();
     bool PrepareWorkholding();
     void RenderWorkholding(bool dexel);
@@ -334,8 +337,8 @@ public:
     std::unordered_map<int, Collision> mProbes;  // the places looked at, by probe id
     int mNextProbe = 0;
     std::map<int, Collision> mCollisions;  // by segment and kind
-    std::set<int> mCollisionOps;  // operation * CollisionKinds + kind, for those reported
-    std::set<int> mStopOps;       // the same, for those stopped at, from where it was played
+    std::set<int> mWarnedHits;  // the collisions' keys of the strikes said
+    std::set<int> mStopHits;    // the same, for those stopped at, from where it was played
     bool mProbeWarned = false;
     bool mLostWarned = false;  // that the stock lost detail somewhere, said once
     float mStopAt = -1;    // a hit found while playing: the time to stop at, next frame

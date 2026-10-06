@@ -24,6 +24,7 @@
 #include "DexelStock.h"
 
 #include <App/Application.h>
+#include <QOpenGLContext>
 
 #include <algorithm>
 #include <cmath>
@@ -284,6 +285,54 @@ static const char* FragShaderDexelCopy = R"(
         gl_FragData[3] = texture2D(Src3, uv);
         gl_FragData[4] = texture2D(Src4, uv);
         gl_FragData[5] = texture2D(Src5, uv);
+    }
+)";
+
+// The probe: whether a volume drawn like a sweep, the holder at a place on its path say, reaches
+// into the material a ray still has further than reach. Runs over its footprint, one fragment a
+// ray; a ray it meets is drawn, the others discarded, and an occlusion query counts them.
+static const char* FragShaderDexelProbe = R"(
+    #version 120
+
+    uniform sampler2D End0;
+    uniform sampler2D End1;
+    uniform sampler2D End2;
+    uniform sampler2D CapIn;
+    uniform sampler2D CapOut;
+    uniform vec2 gridSize;
+    uniform vec2 captureSize;
+    uniform float reach;
+
+    void main()
+    {
+        vec2 uv = gl_FragCoord.xy / gridSize;
+        vec2 cuv = gl_FragCoord.xy / captureSize;
+        vec4 capIn = texture2D(CapIn, cuv);
+        vec4 capOut = texture2D(CapOut, cuv);
+        if (!(capIn.w > 0.5 && capOut.w > 0.5 && capIn.x < capOut.x)) {
+            discard;
+        }
+        float t0 = capIn.x;
+        float t1 = capOut.x;
+        vec4 e0 = texture2D(End0, uv);
+        vec4 e1 = texture2D(End1, uv);
+        vec4 e2 = texture2D(End2, uv);
+        float e[12];
+        e[0] = e0.x; e[1] = e0.y; e[2] = e0.z; e[3] = e0.w;
+        e[4] = e1.x; e[5] = e1.y; e[6] = e1.z; e[7] = e1.w;
+        e[8] = e2.x; e[9] = e2.y; e[10] = e2.z; e[11] = e2.w;
+        bool met = false;
+        for (int k = 0; k < 6; k++) {
+            float s = e[2 * k];
+            float f = e[2 * k + 1];
+            if (s < 1e29 && min(f, t1) - max(s, t0) > reach) {
+                met = true;
+            }
+        }
+        if (!met) {
+            discard;
+        }
+        gl_FragColor = vec4(1.0);
     }
 )";
 
@@ -625,6 +674,16 @@ void DexelStock::Free()
     mCaptureShader.Destroy();
     mSubtractShader.Destroy();
     mPointShader.Destroy();
+    mProbeShader.Destroy();
+    for (const GpuProbe& probe : mGpuProbes) {
+        mFreeQueries.insert(mFreeQueries.end(), probe.queries, probe.queries + probe.count);
+    }
+    mGpuProbes.clear();
+    if (!mFreeQueries.empty()) {
+        glDeleteQueries((GLsizei)mFreeQueries.size(), mFreeQueries.data());
+        mFreeQueries.clear();
+    }
+    mGpuProbing = false;
     gUniformCache.clear();
     mValid = false;
 }
@@ -632,19 +691,11 @@ void DexelStock::Free()
 bool DexelStock::Init(
     const std::vector<Vertex>& verts,
     const std::vector<unsigned short>& indices,
-    float resolution
+    float resolution,
+    bool cpu
 )
 {
-    // Where to cut, as the CAM preferences say: on the processor or the graphics card, or, by
-    // default, the processor when it has the threads for it. A card that cannot take the
-    // cutting leaves it to the processor.
-    const long choice = App::GetApplication()
-                            .GetParameterGroupByPath("User parameter:BaseApp/Preferences/Mod/CAM")
-                            ->GetInt("SimulatorDexelCutting", 0);
-    bool cpu = choice == 1 || (choice == 0 && std::thread::hardware_concurrency() >= 8);
-    if (const char* forced = std::getenv("CAMSIM_DEXEL_GPU")) {
-        cpu = forced[0] != '1';
-    }
+    // a card that cannot take the cutting leaves it to the processor
     const std::vector<unsigned int> wide(indices.begin(), indices.end());
     return InitOn(verts, wide, resolution, cpu) || (!cpu && InitOn(verts, wide, resolution, true));
 }
@@ -945,6 +996,13 @@ bool DexelStock::InitOn(
         Free();
         return false;
     }
+    // probes on the card: occlusion queries, OpenGL 1.5, and the probe pass; without them the
+    // stock is still cut on the card, its collisions not found
+    QOpenGLContext* context = QOpenGLContext::currentContext();
+    mGpuProbing = context && context->getProcAddress("glBeginQuery")
+        && context->getProcAddress("glGetQueryObjectuiv")
+        && mProbeShader.CompileShader("DexelProbe", VertShaderDexelQuad, FragShaderDexelProbe)
+            != 0xdeadbeef;
 
     // the whole surface to mesh, the first time it is drawn
     mMesher.Setup(mOrigin, mRes, dims);
@@ -1181,6 +1239,32 @@ void DexelStock::SetupCapture(const Grid& g)
     setUniform3f(mCaptureShader, "dirD", dir);
 }
 
+void DexelStock::CaptureSweep(const Grid& g, const int rect[4], const std::function<void()>& draw)
+{
+    // where each ray first meets the volume draw draws, and where it last leaves it
+    glBindFramebuffer(GL_FRAMEBUFFER, mCaptureFbo);
+    glViewport(0, 0, g.w, g.h);
+    glScissor(rect[0], rect[1], rect[2] - rect[0], rect[3] - rect[1]);
+    SetupCapture(g);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+
+    glDrawBuffers(1, &ColorAttachments[0]);
+    glClearColor(0, 0, 0, 0);
+    glClearDepthf(1.f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDepthFunc(GL_LESS);
+    draw();
+
+    glDrawBuffers(1, &ColorAttachments[1]);
+    glClearDepthf(0.f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDepthFunc(GL_GREATER);
+    draw();
+    glClearDepthf(1.f);
+    glDepthFunc(GL_LESS);
+}
+
 // a sweep's shape handed to the processor's cutter rather than drawn
 static void CaptureForCutter(void* context, const Shape& shape, const mat4x4& model, const mat4x4& normal)
 {
@@ -1242,13 +1326,17 @@ void DexelStock::Flush()
 
 int DexelStock::Probe(const vec3 lo, const vec3 hi, int id, const std::function<void()>& draw)
 {
-    if (!mValid || !mCpu) {
+    if (!CanProbe()) {
         return -1;
     }
     for (int c = 0; c < 3; c++) {
         if (hi[c] < mOrigin[c] || lo[c] > mOrigin[c] + mDims[c] * mRes) {
             return 0;
         }
+    }
+    if (!mCpu) {
+        ProbeOnCard(lo, hi, id, draw);
+        return 1;
     }
     mCutter.Begin(lo, hi, id);
     Shape::sCapture = &CaptureForCutter;
@@ -1258,6 +1346,88 @@ int DexelStock::Probe(const vec3 lo, const vec3 hi, int id, const std::function<
     Shape::sCaptureContext = nullptr;
     mCutter.End();
     return 1;
+}
+
+void DexelStock::ProbeOnCard(const vec3 lo, const vec3 hi, int id, const std::function<void()>& draw)
+{
+    // On each grid: the volume captured as a sweep is, then a pass over its footprint drawing
+    // the rays it reaches into material on, nothing written, an occlusion query counting them.
+    // The card does it in order with the cuts, so the stock is as the cuts before it left it.
+    GpuProbe probe;
+    probe.id = id;
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_STENCIL_TEST);
+    glEnable(GL_SCISSOR_TEST);
+    for (Grid& g : mGrids) {
+        int rect[4];
+        if (!GridRect(g, lo, hi, rect)) {
+            continue;
+        }
+        CaptureSweep(g, rect, draw);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, g.fbo[1]);
+        glDrawBuffers(1, &ColorAttachments[0]);
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+        mProbeShader.Activate();
+        const char* names[5] = {"End0", "End1", "End2", "CapIn", "CapOut"};
+        for (int i = 0; i < 5; i++) {
+            glActiveTexture(GL_TEXTURE0 + i);
+            glBindTexture(GL_TEXTURE_2D, i < 3 ? g.tex[0][i] : mCaptureTex[i - 3]);
+            setUniform1i(mProbeShader, names[i], i);
+        }
+        setUniform2f(mProbeShader, "gridSize", (float)g.w, (float)g.h);
+        setUniform2f(mProbeShader, "captureSize", (float)mCaptureW, (float)mCaptureH);
+        // as the processor's probes: one only touching the stock's face does not meet it
+        setUniform1f(mProbeShader, "reach", 0.25f * mRes);
+        glBindBuffer(GL_ARRAY_BUFFER, mQuadVbo);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+
+        unsigned int query = 0;
+        if (mFreeQueries.empty()) {
+            glGenQueries(1, &query);
+        }
+        else {
+            query = mFreeQueries.back();
+            mFreeQueries.pop_back();
+        }
+        glBeginQuery(GL_SAMPLES_PASSED, query);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glEndQuery(GL_SAMPLES_PASSED);
+        probe.queries[probe.count++] = query;
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    }
+    glDisable(GL_SCISSOR_TEST);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
+    glActiveTexture(GL_TEXTURE0);
+    mGpuProbes.push_back(probe);
+}
+
+void DexelStock::TakeHits(std::vector<std::pair<int, int>>& hits)
+{
+    if (mCpu) {
+        mCutter.TakeHits(hits);
+        return;
+    }
+    // each probe's count, the rays it met material on in all three grids, once the card has it
+    for (const GpuProbe& probe : mGpuProbes) {
+        unsigned int total = 0;
+        for (int i = 0; i < probe.count; i++) {
+            GLuint samples = 0;
+            glGetQueryObjectuiv(probe.queries[i], GL_QUERY_RESULT, &samples);
+            total += samples;
+            mFreeQueries.push_back(probe.queries[i]);
+        }
+        hits.emplace_back(probe.id, (int)total);
+    }
+    mGpuProbes.clear();
 }
 
 void DexelStock::Cut(const vec3 lo, const vec3 hi, const std::function<void()>& drawSweep)
@@ -1310,31 +1480,7 @@ void DexelStock::Cut(const vec3 lo, const vec3 hi, const std::function<void()>& 
         if (!GridRect(g, lo, hi, rect)) {
             continue;
         }
-        const int rw = rect[2] - rect[0];
-        const int rh = rect[3] - rect[1];
-
-        // where each ray first meets the sweep, and where it last leaves it
-        glBindFramebuffer(GL_FRAMEBUFFER, mCaptureFbo);
-        glViewport(0, 0, g.w, g.h);
-        glScissor(rect[0], rect[1], rw, rh);
-        SetupCapture(g);
-        glEnable(GL_DEPTH_TEST);
-        glDepthMask(GL_TRUE);
-
-        glDrawBuffers(1, &ColorAttachments[0]);
-        glClearColor(0, 0, 0, 0);
-        glClearDepthf(1.f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glDepthFunc(GL_LESS);
-        drawSweep();
-
-        glDrawBuffers(1, &ColorAttachments[1]);
-        glClearDepthf(0.f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glDepthFunc(GL_GREATER);
-        drawSweep();
-        glClearDepthf(1.f);
-        glDepthFunc(GL_LESS);
+        CaptureSweep(g, rect, drawSweep);
 
         // each ray less the sweep, into the second set
         glBindFramebuffer(GL_FRAMEBUFFER, g.fbo[1]);

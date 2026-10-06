@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include <QColor>
 #include <QWidget>
 #include <string>
 #include <utility>
@@ -77,6 +78,9 @@ public:
     // where the tool cuts into soft jaws, the same
     void setCuts(const std::vector<std::pair<float, float>>& stages);
     void setFps(float fps);
+    // the 3D view's background behind the readouts and the marks on the slider: dark text on a
+    // light one, white on a dark one
+    void setBackgroundColor(const QColor& background);
 
 Q_SIGNALS:
     void play(bool b);
@@ -135,6 +139,11 @@ private:
     void showView();
     // a label's text, set only when it changes
     void relabel(QLabel* label, const QString& text);
+    // the readouts drawn in ink, a rapid in rapidInk
+    QColor ink = Qt::white;
+    QColor rapidInk = QColor(255, 80, 80);
+    bool feedRapid = false;
+    void restyle();
 };
 
 }  // namespace CAMSimulator

@@ -54,12 +54,14 @@ public:
 
     ~DexelStock();
 
-    // Set up from the stock's mesh, in the part's coordinates, the rays resolution apart. Needs
-    // the GL context; false if the GL lacks what it takes, and the simulation keeps to CSG.
+    // Set up from the stock's mesh, in the part's coordinates, the rays resolution apart, cut on
+    // the processor or on the graphics card, the processor when the card cannot. Needs the GL
+    // context; false if the GL lacks what it takes, and the simulation keeps to CSG.
     bool Init(
         const std::vector<Vertex>& verts,
         const std::vector<unsigned short>& indices,
-        float resolution
+        float resolution,
+        bool cpu
     );
     // Set up from a mesh too big for short indices, as solid that is never cut, only looked
     // at by probes: the workholding. On the processor.
@@ -88,13 +90,17 @@ public:
     void Cut(const vec3 lo, const vec3 hi, const std::function<void()>& drawSweep);
 
     // Whether the volume draw draws, the holder at a place on its path say, meets the stock as
-    // the cuts before it leave it, cutting nothing: found with the cuts, on the processor
-    // only, and reported by TakeHits by id once they are done. 1 if it will be, 0 if it is away
-    // from the stock and meets nothing, -1 if it cannot be found.
+    // the cuts before it leave it, cutting nothing: found with the cuts, on the processor or on
+    // the card, and reported by TakeHits by id once they are done. 1 if it will be, 0 if it is
+    // away from the stock and meets nothing, -1 if it cannot be found.
     int Probe(const vec3 lo, const vec3 hi, int id, const std::function<void()>& draw);
-    void TakeHits(std::vector<std::pair<int, int>>& hits)
+    // the probes done since last asked: each one's id and the rays on which it met material
+    void TakeHits(std::vector<std::pair<int, int>>& hits);
+    // whether probes can be done: always on the processor; on the card where it has occlusion
+    // queries
+    bool CanProbe() const
     {
-        mCutter.TakeHits(hits);
+        return mValid && (mCpu || mGpuProbing);
     }
 
     // do the cuts gathered so far, when they are cut on the processor
@@ -195,6 +201,10 @@ private:
         const vec3 cutColor
     );
     void SetupCapture(const Grid& g);
+    // where each ray of g in rect first meets the volume draw draws, and last leaves it, into
+    // the capture's two textures
+    void CaptureSweep(const Grid& g, const int rect[4], const std::function<void()>& draw);
+    void ProbeOnCard(const vec3 lo, const vec3 hi, int id, const std::function<void()>& draw);
     bool GridRect(const Grid& g, const vec3 lo, const vec3 hi, int rect[4]) const;
 
     bool mValid = false;
@@ -215,6 +225,18 @@ private:
     Shader mPointShader;
     Shader mMeshShader;
     Shader mCopyShader;
+    Shader mProbeShader;
+
+    // probes on the card: each one's occlusion queries, a grid each, read once the card is done
+    struct GpuProbe
+    {
+        int id = -1;
+        unsigned int queries[3] = {};
+        int count = 0;
+    };
+    bool mGpuProbing = false;
+    std::vector<GpuProbe> mGpuProbes;
+    std::vector<unsigned int> mFreeQueries;
 
     struct Snapshot
     {

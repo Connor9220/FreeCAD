@@ -108,6 +108,19 @@ extern QOpenGLExtraFunctions gOpenGLFunctions;
 #define glLineWidth gOpenGLFunctions.glLineWidth
 #define glGetShaderiv gOpenGLFunctions.glGetShaderiv
 #define glGetShaderInfoLog gOpenGLFunctions.glGetShaderInfoLog
+#define glGenQueries gOpenGLFunctions.glGenQueries
+#define glDeleteQueries gOpenGLFunctions.glDeleteQueries
+#define glBeginQuery gOpenGLFunctions.glBeginQuery
+#define glEndQuery gOpenGLFunctions.glEndQuery
+#define glGetQueryObjectuiv gOpenGLFunctions.glGetQueryObjectuiv
+
+// occlusion queries' own, OpenGL 1.5: not in an OpenGL ES header
+#ifndef GL_SAMPLES_PASSED
+#define GL_SAMPLES_PASSED 0x8914
+#endif
+#ifndef GL_QUERY_RESULT
+#define GL_QUERY_RESULT 0x8866
+#endif
 
 #define GL(x) \
     { \
