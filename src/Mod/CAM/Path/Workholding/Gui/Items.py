@@ -876,8 +876,10 @@ class _StopsClamps:
         )
         self.remove.clicked.connect(self.removeChosen)
         self.viseSeat.currentIndexChanged.connect(lambda *args: self.viseJawsFor())
-        self.viseSeat.currentIndexChanged.connect(lambda *args: self.previewVise())
-        self.viseJaw.currentIndexChanged.connect(lambda *args: self.previewVise())
+        self.viseSeat.currentIndexChanged.connect(lambda *args: self.previewPicked())
+        self.viseJaw.currentIndexChanged.connect(lambda *args: self.previewPicked())
+        self.side.currentIndexChanged.connect(lambda *args: self.previewPicked())
+        self.count.valueChanged.connect(lambda *args: self.previewPicked())
         self.table.clicked.connect(self.addTable)
 
     def showRow(self, field, shown):
@@ -902,16 +904,91 @@ class _StopsClamps:
         layout.addRow(label, field)
         self.leverRows.append(field)
 
-    def previewVise(self):
-        """A vise picked in Add shown in the view, seated as the row says; anything else picked,
-        or nothing, the one shown taken out."""
+    def previewPicked(self):
+        """What Add has picked shown in the view: a vise seated as the row says, stops or clamps
+        on the side, as many as it says; nothing picked, what was shown taken out."""
         if getattr(self, "loading", False):
             return
         which = self.item.currentData()
         if _kindOf(which) in ("vise", "viseshare"):
+            self.dropPieces()
             self.panel.previewAdd(which, self.viseSeat.currentData(), self.viseJaw.currentData())
         else:
             self.panel.dropAdd()
+            self.previewPieces(which)
+
+    def _addKey(self, which):
+        """What Add would put in, as the row says: what, on which side, how many."""
+        side = self.side.currentData()
+        if isinstance(side, tuple):
+            side = side[1]
+        name = which if isinstance(which, (str, tuple)) else getattr(which, "Name", None)
+        return (name, side, self.count.value())
+
+    def previewPieces(self, which):
+        """The stops or clamps Add has picked put on the side, pending: Add keeps them, picking
+        another drops them. A clamp's file in a document not saved shows nothing: its parts are
+        linked."""
+        key = self._addKey(which)
+        doc = self.job.Document
+        if key == getattr(self, "previewKey", None) and all(
+            doc.getObject(name) is not None for name in self.previewing
+        ):
+            return
+        dropped = self.dropPieces(again=False)
+        if (
+            which is None
+            or key[1] is None
+            or (isinstance(which, str) and which not in Items.Classes and not doc.FileName)
+        ):
+            if dropped:
+                self.preview()
+            return
+        self.panel.begin()
+        try:
+            new = Items.addPieces(self.job, key[1], which, key[2])
+            self.error.setText("")
+        except ValueError as e:
+            self.error.setText(str(e))
+            new = []
+        self.previewing = [piece.Name for piece in new]
+        self.previewKey = key if new else None
+        self.fillList()
+        # one alone moved by its dragger before Add keeps it
+        self.dragChosen(new[0] if len(new) == 1 and not self.chosen() else None)
+
+    def previewPiece(self):
+        """The one stop or clamp Add shows, None if it shows none or several."""
+        if len(getattr(self, "previewing", [])) != 1:
+            return None
+        return self.job.Document.getObject(self.previewing[0])
+
+    def dropPieces(self, again=True):
+        """The stops or clamps Add showed taken out, the others on their side spread again: True
+        if there were any."""
+        names, self.previewing, self.previewKey = getattr(self, "previewing", []), [], None
+        if not names:
+            return False
+        if self.editing in names:
+            self.dragChosen(None)
+        for name in names:
+            piece = self.job.Document.getObject(name)
+            if piece is not None and piece.isAttachedToDocument():
+                Items.removePiece(piece)
+        if again:
+            self.preview()
+        return True
+
+    def keepPieces(self):
+        """The stops or clamps Add showed kept, if they are what the row says: the last of them,
+        None if there were none to keep."""
+        names = getattr(self, "previewing", [])
+        if not names or self._addKey(self.item.currentData()) != self.previewKey:
+            return None
+        self.previewing, self.previewKey = [], None
+        kept = [self.job.Document.getObject(name) for name in names]
+        kept = [piece for piece in kept if piece is not None]
+        return kept[-1] if kept else None
 
     def viseJawsFor(self, keep=None):
         """The sides that can be against a vise's fixed jaw, square to the one on its bottom:
@@ -1124,7 +1201,7 @@ class _StopsClamps:
         self.add.setEnabled(which is not None)
         self.addRow.setVisible(which is not None)
         self.showAdding(which)
-        self.previewVise()
+        self.previewPicked()
 
     def showAdding(self, which):
         """What Add puts in, while one is chosen: its picture, its name and what it is, also on
@@ -1275,12 +1352,16 @@ class _StopsClamps:
                 ),
             )
             return
-        self.panel.begin()
-        try:
-            new = Items.addPieces(self.job, side, which, self.count.value())
-        except ValueError as e:
-            self.error.setText(str(e))
-            return
+        last = self.keepPieces()
+        if last is not None:
+            new = [last]
+        else:
+            self.panel.begin()
+            try:
+                new = Items.addPieces(self.job, side, which, self.count.value())
+            except ValueError as e:
+                self.error.setText(str(e))
+                return
         self.error.setText("")
         if isinstance(which, str) and which not in Items.Classes:
             _rememberClamp(which)
@@ -1562,8 +1643,11 @@ class _StopsClamps:
         self.settings.setVisible(not vise)
         self.viseArea.showPicture(piece if vise else None)
         adding = self.panel.adding
-        if piece is not None and adding and piece is not adding.vise:
-            # a placed piece picked: the vise only picked in Add taken out
+        shown = getattr(self, "previewing", [])
+        if piece is not None and (
+            (adding and piece is not adding.vise) or (shown and piece.Name not in shown)
+        ):
+            # a placed piece picked: what Add only shows taken out
             self.item.setCurrentIndex(-1)
             self.updateRow()
         self.panel.focusVise(piece if vise else None)
@@ -1575,9 +1659,9 @@ class _StopsClamps:
         self.showRow(self.placeRow, piece is not None and not lever)
         self.showLever(piece if lever else None)
         self.showSize(piece)
-        # the vise being added keeps its dragger while nothing placed is picked
+        # what Add shows keeps its dragger while nothing placed is picked
         adding = self.panel.adding
-        self.dragChosen(self.chosen() or (adding.vise if adding else None))
+        self.dragChosen(self.chosen() or (adding.vise if adding else self.previewPiece()))
 
     def showPlace(self, piece, at=None, angle=None):
         """Where the piece picked is, where it meets the stock, the Job's X and Y, or where at
@@ -2045,8 +2129,8 @@ class _StopsClamps:
         self.editing = None
         FreeCADGui.getDocument(self.job.Document.Name).resetEdit()
         adding = self.panel.adding
-        if adding and piece is adding.vise:
-            # the vise being added stays Add's, not picked in Placed
+        if (adding and piece is adding.vise) or piece.Name in getattr(self, "previewing", []):
+            # what Add shows stays Add's, not picked in Placed
             self.fillList()
             self.dragChosen(piece)
             return
