@@ -39,6 +39,7 @@ from Path.Workholding.Constants import (
     ITEM_LIST_ICON,
     ITEM_PREVIEW,
     LEVER_EDIT_DELAY,
+    ADD_PREVIEW_DELAY,
     RECENT_CLAMPS,
     RECENT_CLAMPS_PREF,
     STOCK_DRAWING_COLOR,
@@ -897,8 +898,14 @@ class _StopsClamps:
         self.viseSeat.currentIndexChanged.connect(lambda *args: self.viseJawsFor())
         self.viseSeat.currentIndexChanged.connect(lambda *args: self.previewPicked())
         self.viseJaw.currentIndexChanged.connect(lambda *args: self.previewPicked())
-        self.side.currentIndexChanged.connect(lambda *args: self.previewPicked())
-        self.count.valueChanged.connect(lambda *args: self.previewPicked())
+        # the side and how many shown a moment after the last change: holding the count's arrow
+        # puts them in once, not at every step
+        self.addTimer = QtCore.QTimer()
+        self.addTimer.setSingleShot(True)
+        self.addTimer.setInterval(ADD_PREVIEW_DELAY)
+        self.addTimer.timeout.connect(self.previewPicked)
+        self.side.currentIndexChanged.connect(lambda *args: self.addTimer.start())
+        self.count.valueChanged.connect(lambda *args: self.addTimer.start())
         self.table.clicked.connect(self.addTable)
 
     def showRow(self, field, shown):
@@ -928,13 +935,27 @@ class _StopsClamps:
         on the side, as many as it says; nothing picked, what was shown taken out."""
         if getattr(self, "loading", False):
             return
-        which = self.item.currentData()
-        if _kindOf(which) in ("vise", "viseshare"):
-            self.dropPieces()
-            self.panel.previewAdd(which, self.viseSeat.currentData(), self.viseJaw.currentData())
-        else:
-            self.panel.dropAdd()
-            self.previewPieces(which)
+        self.addTimer.stop()
+        if getattr(self, "previewBusy", False):
+            # asked again while showing: shown again once done, as the row then says
+            self.previewAgain = True
+            return
+        self.previewBusy = True
+        try:
+            self.previewAgain = True
+            while self.previewAgain:
+                self.previewAgain = False
+                which = self.item.currentData()
+                if _kindOf(which) in ("vise", "viseshare"):
+                    self.dropPieces()
+                    self.panel.previewAdd(
+                        which, self.viseSeat.currentData(), self.viseJaw.currentData()
+                    )
+                else:
+                    self.panel.dropAdd()
+                    self.previewPieces(which)
+        finally:
+            self.previewBusy = False
 
     def _addKey(self, which):
         """What Add would put in, as the row says: what, on which side, how many."""
@@ -985,7 +1006,7 @@ class _StopsClamps:
     def dropPieces(self, again=True):
         """The stops or clamps Add showed taken out, the others on their side spread again: True
         if there were any."""
-        names, self.previewing, self.previewKey = getattr(self, "previewing", []), [], None
+        names, self.previewKey = list(getattr(self, "previewing", [])), None
         if not names:
             return False
         if self.editing in names:
@@ -994,6 +1015,8 @@ class _StopsClamps:
             piece = self.job.Document.getObject(name)
             if piece is not None and piece.isAttachedToDocument():
                 Items.removePiece(piece)
+            # forgotten only once it is gone
+            self.previewing = [n for n in self.previewing if n != name]
         if again:
             self.preview()
         return True
@@ -1348,6 +1371,9 @@ class _StopsClamps:
     def addClicked(self):
         """What the row says put on its side, spread along it; a clamp's file in a document not
         saved refused first: its parts are linked."""
+        if self.addTimer.isActive():
+            # the side or how many changed a moment ago: shown as the row says first
+            self.previewPicked()
         which = self.item.currentData()
         if _kindOf(which) in ("vise", "viseshare"):
             if self.panel.addVise(which, self.viseSeat.currentData(), self.viseJaw.currentData()):
@@ -2223,6 +2249,7 @@ class _StopsClamps:
         # nothing typed or dragged applied once the panel is gone
         for timer in (
             self.timer,
+            self.addTimer,
             self.dragTimer,
             self.placeTimer,
             self.sizeTimer,

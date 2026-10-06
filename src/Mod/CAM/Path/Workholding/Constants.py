@@ -112,6 +112,8 @@ TOUCH_NEAR = 0.01
 DRAG_TURN_STEP = 1.0
 # the part's sides on the vise's bottom and against its fixed jaw lit in color: off for now
 SHOW_LIT_SIDES = False
+# what Add shows put in again this many ms after the last change of its side or how many
+ADD_PREVIEW_DELAY = 300
 # the piece being dragged: where it is shown in the panel every this many ms
 DRAG_SHOW_EVERY = 60
 
