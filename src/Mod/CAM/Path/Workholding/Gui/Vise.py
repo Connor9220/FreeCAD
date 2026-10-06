@@ -49,7 +49,6 @@ from Path.Workholding.Constants import (
     NOT_CLEAR_TEXT_COLOR,
     SEAT_COLOR,
     SHOW_LIT_SIDES,
-    VISE_SNAP_DEGREES,
 )
 from Path.Workholding.Gui.Items import _StopsClamps
 from Path.Workholding.Gui.Source import _closeIfUnused
@@ -1695,8 +1694,9 @@ class TaskPanelVise:
         return self.turnAngle
 
     def snapped(self, station):
-        """The station placement turned square to the straight edge of the stock nearest square
-        to its jaws, seen from above, if within VISE_SNAP_DEGREES; else as it is."""
+        """The station placement turned so its jaws lie along the straight edge of the stock
+        they are nearest along, seen from above: a vise holds the stock square to its jaws. As it
+        is on stock with no straight edge, round stock."""
         import math
         import Part
 
@@ -1713,7 +1713,7 @@ class TaskPanelVise:
             off = (yaw - math.degrees(math.atan2(d.y, d.x)) + 90.0) % 180.0 - 90.0
             if best is None or abs(off) < abs(best):
                 best = off
-        if best is None or abs(best) > VISE_SNAP_DEGREES or abs(best) < 1e-9:
+        if best is None or abs(best) < 1e-9:
             return station
         return FreeCAD.Placement(
             station.Base,
@@ -1721,8 +1721,8 @@ class TaskPanelVise:
         )
 
     def snapPlacement(self, placement):
-        """The vise at placement turned square to the stock edge it is near, None if it is near
-        none or already square."""
+        """The vise at placement turned square to the stock edge its jaws are nearest along, None
+        if already square or the stock has no straight edge."""
         job, vise = self.current()
         frame = PathWorkholding.stationFrame(vise)
         station = placement.multiply(frame)

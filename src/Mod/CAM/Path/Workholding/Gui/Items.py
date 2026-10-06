@@ -34,6 +34,7 @@ import Path.Workholding.Gui.Widgets as Widgets
 
 from Path.Workholding.Constants import (
     DRAG_SHOW_EVERY,
+    DRAG_TOUCH_NEAR,
     ERROR_TEXT_COLOR,
     ITEM_ICON,
     ITEM_LIST_ICON,
@@ -505,6 +506,8 @@ class _StopsClamps:
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(self.side, 1)
         row.addWidget(self.count)
+        # Add and Cancel kept their own size at the right, a vise's row without side and count too
+        row.addStretch(0)
         row.addWidget(self.add)
         # what Add shows taken out, nothing put in
         self.cancelAdd = QtWidgets.QPushButton(translate("CAM_Workholding", "Cancel"))
@@ -2104,6 +2107,22 @@ class _StopsClamps:
         # the piece's own placement, the dragger standing where it meets the stock
         origin = getattr(piece.ViewObject, "TransformOrigin", None)
         own = at.multiply(origin.inverse()) if origin is not None else at
+        if getattr(piece, "Kind", None) == Items.Kind.Push and not self._sameTurn(own):
+            # against a flat side of the stock: the dragger, and the clamp with it, held square
+            # to it; at a corner or a round, turned as dragged
+            square = Items.squareAngle(self.job, piece, own, near=DRAG_TOUCH_NEAR)
+            if square is not None:
+                now = Items.angleFrom(self.job, piece, own.Rotation)
+                if abs(square - now) > 1e-6:
+                    held = FreeCAD.Placement(
+                        at.Base,
+                        FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), square - now).multiply(
+                            at.Rotation
+                        ),
+                    )
+                    ViewProviders.setDraggerRotation(dragger, held.Rotation)
+                    at = held
+                    own = at.multiply(origin.inverse()) if origin is not None else at
         angle = Items.angleFrom(self.job, piece, own.Rotation) if turned else None
         if lever:
             for box, value in ((self.pressX, at.Base.x), (self.pressY, at.Base.y)):
@@ -2120,6 +2139,12 @@ class _StopsClamps:
         words = [_length(at.Base.x), _length(at.Base.y)]
         words.append(_degrees(angle) if angle is not None else "")
         self.showRowAt(piece, words)
+
+    def _sameTurn(self, placement):
+        """Whether the piece being dragged, its own placement placement, is turned as it was when
+        the drag started."""
+        start = getattr(self, "dragFrom", None)
+        return start is None or placement.Rotation.isSame(start.Rotation, 1e-6)
 
     def _slid(self, at):
         """Whether the vise being dragged, at placement at, is only slid from where the drag

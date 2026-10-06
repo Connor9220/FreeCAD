@@ -693,6 +693,15 @@ def _placeAt(job, piece, frame, x):
         if hasattr(piece, "Drop") and abs(piece.Drop.Value - drop) > 1e-9:
             piece.Drop = drop
     placement = _toStock(job, piece, placement, frame)
+    if piece.Kind == Kind.Push:
+        # against a flat side of the stock: square to it, however it was turned; at a corner or
+        # a round, as it is turned
+        square = squareAngle(job, piece, placement)
+        angle = getattr(piece, "Angle", None)
+        if square is not None and abs(square - (angle.Value if angle is not None else 0.0)) > 1e-6:
+            _setAngle(piece, square)
+            placement = frame.multiply(_touching(piece, x, height, length))
+            placement = _toStock(job, piece, placement, frame)
     if not piece.Placement.isSame(placement, 1e-9):
         piece.Placement = placement
 
@@ -729,6 +738,65 @@ def _toStock(job, piece, placement, frame):
         if moved > deepest:
             break
     return placement
+
+
+def squareAngle(job, piece, placement, near=None):
+    """squareAngle(job, piece, placement, near=None) ... the Angle that turns a side clamp at
+    placement square to the flat side of the stock it touches, within near mm, TOUCH_NEAR when
+    not given; None where it touches a corner or a round, or nothing."""
+    shape = _shapeOf(piece)
+    stock = job.Stock.Shape
+    if shape.isNull() or stock.isNull():
+        return None
+    shape = shape.copy()
+    shape.Placement = placement
+    gap, _, info = shape.distToShape(stock)
+    if gap > (near if near is not None else 10 * TOUCH_NEAR) or not info:
+        return None
+    normals = []
+    for each in info:
+        normal = _flatSideNormal(stock, each[3], each[4], each[5])
+        if normal is None:
+            return None
+        normals.append(normal)
+    if any((n - normals[0]).Length > 1e-6 for n in normals):
+        return None
+    frame, _ = sideFrame(job, piece.StockSide)
+    inward = frame.Rotation.multVec(Vector(0, 1, 0))
+    push = normals[0] * -1
+    angle = math.degrees(math.atan2(push.y, push.x) - math.atan2(inward.y, inward.x))
+    angle = (angle + 180.0) % 360.0 - 180.0
+    return 0.0 if abs(angle) < 1e-9 else angle
+
+
+def _flatSideNormal(stock, kind, index, param):
+    """Which way the flat upright side of the stock out at what a distance found, seen from
+    above: a face of it, or an edge along its top or bottom; None for a corner, a round or
+    the top."""
+    if kind == "Face":
+        face = stock.Faces[index]
+        if not isinstance(face.Surface, Part.Plane):
+            return None
+        normal = face.normalAt(*param)
+        if abs(normal.z) > 1e-6:
+            return None
+        return Vector(normal.x, normal.y, 0).normalize()
+    if kind == "Edge":
+        edge = stock.Edges[index]
+        if not isinstance(edge.Curve, Part.Line) or abs(edge.Curve.Direction.z) > 1e-6:
+            return None
+        found = [
+            f
+            for f in stock.ancestorsOfType(edge, Part.Face)
+            if isinstance(f.Surface, Part.Plane) and abs(f.Surface.Axis.z) < 1e-6
+        ]
+        if len(found) != 1:
+            return None
+        face = found[0]
+        u, v = face.Surface.parameter(edge.CenterOfMass)
+        normal = face.normalAt(u, v)
+        return Vector(normal.x, normal.y, 0).normalize()
+    return None
 
 
 def _alongLimits(job, piece):

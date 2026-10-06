@@ -685,7 +685,8 @@ class TestPathWorkholdingAddPieces(_Stock):
         self.assertTrue(dogs[1].Placement.isSame(before, 1e-6))
 
     def test05_side_clamp_turned(self):
-        """A side clamp turned pushes at a slant, pulled back to just touch the stock."""
+        """A side clamp turned against a flat side of the stock is turned back square to it,
+        touching the stock."""
         clamp = Items.addPieces(self.job, "+X", "SideClamp", 1)[0]
         place = PathWorkholding.placementOf(clamp)
         clamp.Placement = FreeCAD.Placement(
@@ -693,7 +694,7 @@ class TestPathWorkholdingAddPieces(_Stock):
         )
         Items.fromTransform(clamp)
         self.assertEqual(clamp.StockSide, "+X")
-        self.assertRoughly(clamp.Angle.Value, 20, 1e-6)
+        self.assertRoughly(clamp.Angle.Value, 0, 1e-6)
         self.doc.recompute()
         self.assertTouches(clamp)
 
@@ -712,11 +713,11 @@ class TestPathWorkholdingAddPieces(_Stock):
             self.assertTrue(piece.Placement.isSame(before, 1e-6))
 
     def test07_side_clamp_dragged_where_it_meets_the_stock(self):
-        """A side clamp turned is dragged from where it meets the stock: moved along its side from
-        there, its angle kept; turned there by its Angle, only what is beside the stock pulled
-        back."""
+        """A side clamp is dragged from where it meets the stock: moved along its side from there,
+        square to a flat side however it was turned."""
         clamp = Items.addPieces(self.job, "+X", "SideClamp", 1)[0]
         Items.setAngle(clamp, 25)
+        self.assertRoughly(clamp.Angle.Value, 0, 1e-6)
         self.doc.recompute()
         self.assertTouches(clamp)
         contact = Items.contactFrame(self.job, clamp)
@@ -724,7 +725,7 @@ class TestPathWorkholdingAddPieces(_Stock):
         self.assertRoughly(contact.Base.x, bb.XMax)
         moved = FreeCAD.Placement(contact.Base + Vector(0, 7, 0), contact.Rotation)
         Items.fromTransform(clamp, moved)
-        self.assertRoughly(clamp.Angle.Value, 25, 1e-6)
+        self.assertRoughly(clamp.Angle.Value, 0, 1e-6)
         self.assertRoughly(Items.contactFrame(self.job, clamp).Base.y, contact.Base.y + 7)
         self.doc.recompute()
         self.assertTouches(clamp)
@@ -738,6 +739,8 @@ class TestPathWorkholdingAddPieces(_Stock):
         Items.setAngle(clamp, 40)
         self.doc.recompute()
         self.assertTouches(clamp)
+        # its nose on the corner: turned as it was
+        self.assertRoughly(clamp.Angle.Value, 40, 1e-6)
         Items.setAngle(clamp, -40)
         self.doc.recompute()
         self.assertTouches(clamp)
