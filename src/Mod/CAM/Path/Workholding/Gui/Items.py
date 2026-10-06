@@ -441,12 +441,14 @@ class _ViseDrag(_Drag):
 
 
 class _StockDrag(_Drag):
-    """The stock's, the part with it, its work planes and its WCS: none of them moved in the
-    Job's coordinates, so its toolpaths stand; what holds it moved the other way instead, the
-    vises of this Job, its stops and clamps and the table, and the view with them, so the stock
-    is seen where it was let go. Held in a vise, turned square to its jaws and the vise seated
-    again; the stops and clamps left where they were, free. Free: turned as let go, nothing
-    seated."""
+    """The stock's, the part with it and its work planes. Slid, none of them moved in the Job's
+    coordinates, the WCS going with the stock, so its toolpaths stand: what holds it moved the
+    other way instead, the vises of this Job, its stops and clamps and the table, and the view
+    with them, so the stock is seen where it was let go. Turned, a quarter at a time: the
+    machine's X and Y do not turn with it, so the part is turned in the Job, its stock with it,
+    and the WCS put back on the same corner of the stock; what holds it stays where it is but
+    for how far the stock slid. A vise seated again; the stops and clamps left where they
+    were, free. Free: nothing seated."""
 
     def begin(self, piece):
         # the part and what is placed on it drawn riding on the stock as its dragger moves it:
@@ -483,14 +485,13 @@ class _StockDrag(_Drag):
 
     def landing(self, start, at, free=None):
         """How the part is moved, the dragger at at, the drag started at start: as it is let
-        go, turned square to a vise's jaws a quarter at a time unless free."""
-        free = _shiftHeld() if free is None else free
+        go, turned a quarter at a time, the stock square to the machine's X and Y as it is to
+        the Job's."""
         delta = at.multiply(start.inverse())
         pivot = getattr(self.stops, "dragPivot", start.Base)
-        turn = delta.Rotation
-        to = self.squaredTo()
-        if not free and PathWorkholding.isVise(to):
-            turn = FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), self.squareTurn(turn.toEuler()[0], to))
+        turn = FreeCAD.Rotation(
+            FreeCAD.Vector(0, 0, 1), round(delta.Rotation.toEuler()[0] / 90.0) * 90.0
+        )
         # how far the pivot went, the turn about it
         shift = delta.Base - pivot + delta.Rotation.multVec(pivot)
         return FreeCAD.Placement(shift, FreeCAD.Rotation()).multiply(
@@ -525,7 +526,7 @@ class _StockDrag(_Drag):
             return
         self.carry(
             FreeCAD.Placement(
-                FreeCAD.Vector(), FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), turn), center
+                FreeCAD.Vector(), FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), -turn), center
             ),
             True,
         )
@@ -537,15 +538,61 @@ class _StockDrag(_Drag):
             return
         moved = self.landing(start, at, free)
         piece.Placement = start
-        if not moved.isIdentity():
-            self.carry(moved, not free)
+        if moved.isIdentity():
+            return
+        quarters = int(round(moved.Rotation.toEuler()[0] / 90.0)) % 4
+        if not quarters:
+            self.carry(moved.inverse(), not free)
+            return
+        pivot = self.stops.dragPivot
+        slid = moved.multVec(pivot) - pivot
+        before = Items.stockBox(self.job)
+        # left free first: placed by the part's own sides, they would turn with it
+        self.leaveFree()
+        self.turnPart(quarters, pivot)
+        # the WCS on the same corner of the stock, as far across it as it was: the part moved
+        # to it, what holds it by as much less how far the stock slid
+        after = Items.stockBox(self.job)
+        back = FreeCAD.Vector()
+        for axis, (low, length) in enumerate(
+            ((before.XMin, before.XLength), (before.YMin, before.YLength))
+        ):
+            across = -low / length if length > 1e-9 else 0.0
+            back[axis] = -(
+                (after.XMin, after.YMin)[axis] + across * (after.XLength, after.YLength)[axis]
+            )
+        PathWorkholding.moveModel(self.job, back)
+        self.carry(FreeCAD.Placement(back - slid, FreeCAD.Rotation()), not free)
 
-    def carry(self, moved, seat):
-        """The stock moved by moved, none of it in the Job's coordinates: what holds it moved
-        back instead, the view with it, its stops and clamps left free; a vise seated again where
-        the stock now is if seat."""
+    def leaveFree(self):
+        """The Job's own stops and clamps left where they are, not placed against the stock."""
+        for piece in Items.itemsOf(self.job):
+            if (
+                not PathWorkholding.isShared(piece)
+                and getattr(piece, "Kind", None) != Items.Kind.Table
+            ):
+                Items.setFree(piece, True)
+
+    def turnPart(self, quarters, pivot):
+        """The part turned in the Job quarters of a turn about pivot, its stock with it: one made
+        from the part's box keeps the stock beyond it on the sides it is on as they turn."""
+        import Path.Main.Stock as PathStock
+
+        stock = self.job.Stock
+        if isinstance(getattr(stock, "Proxy", None), PathStock.StockFromBase):
+            ring = ("ExtXpos", "ExtYpos", "ExtXneg", "ExtYneg")
+            was = [getattr(stock, name).Value for name in ring]
+            for i, value in enumerate(was):
+                setattr(stock, ring[(i + quarters) % 4], value)
+        PathWorkholding.turnModel(
+            self.job, FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), quarters * 90.0), pivot
+        )
+        PathWorkholding.recompute(self.job.Document)
+
+    def carry(self, back, seat):
+        """What holds the stock moved by back, the view with it, its stops and clamps left free;
+        a vise seated again where the stock now is if seat."""
         vises = [v for v in PathWorkholding.vises(self.job) if not PathWorkholding.isShared(v)]
-        back = moved.inverse()
         for vise in vises:
             # held to no seat while it is moved
             proxy = getattr(vise, "Proxy", None)
@@ -559,12 +606,10 @@ class _StockDrag(_Drag):
                     proxy.free = was
         # the stops and clamps stay where they are, as the vises do, for now: left there, free,
         # not placed against the stock where it now is
+        self.leaveFree()
         for piece in Items.itemsOf(self.job):
-            if PathWorkholding.isShared(piece):
-                continue
-            piece.Placement = back.multiply(piece.Placement)
-            if getattr(piece, "Kind", None) != Items.Kind.Table:
-                Items.setFree(piece, True)
+            if not PathWorkholding.isShared(piece):
+                piece.Placement = back.multiply(piece.Placement)
         PathWorkholding.recompute(self.job.Document)
         if vises and seat:
             # seated again where the stock now is in it, the vise moving, never the part
@@ -2823,6 +2868,17 @@ class _StopsClamps:
         self.fillList()
         return True
 
+    def dropDragger(self):
+        """The dragger taken off what it is on, anything hung from the stock's transform drawn
+        from its own again."""
+        self.dragTimer.stop()
+        _unhang(self)
+        if self.editing is not None:
+            self.editing = None
+            gui = FreeCADGui.getDocument(self.job.Document.Name)
+            if gui is not None:
+                gui.resetEdit()
+
     def finish(self, gone=False):
         """A clamp's file opened for the panel closed again if nothing links to it now; the
         stock picked no longer, as it was. With gone, the Job's document is being closed:
@@ -2848,13 +2904,7 @@ class _StopsClamps:
             self.pickable = None
             ViewProviders.setWholePicks(False)
             return
-        # anything hung from the stock's transform drawn from its own again
-        _unhang(self)
-        if self.editing is not None:
-            self.editing = None
-            gui = FreeCADGui.getDocument(self.job.Document.Name)
-            if gui is not None:
-                gui.resetEdit()
+        self.dropDragger()
         ViewProviders.setWholePicks(False)
         stock = getattr(self.job, "Stock", None)
         vobj = getattr(stock, "ViewObject", None)

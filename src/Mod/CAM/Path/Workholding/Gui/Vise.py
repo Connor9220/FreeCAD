@@ -2180,6 +2180,8 @@ class TaskPanelVise:
         self.previewTimer.stop()
         self.stops.timer.stop()
         self.seatFaces.hide()
+        # the dragger let go first: let go after, it puts what it is on back where it stands
+        self.stops.dropDragger()
         if self.pending:
             # what the preview seated, undone
             self.job.Document.abortTransaction()
