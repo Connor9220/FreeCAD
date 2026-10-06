@@ -1085,8 +1085,9 @@ class TaskPanelVise:
         # what it comes to, at the end of the seat: why it cannot be seated, a vise too small
         # for the stock; else the grip, how much stands above the jaws, and how far the model's
         # bottom is above them, the clearance the tools have to cut it whole
-        # not shown for now: too much under the parallels; why it cannot be seated still logged
-        self.fit = Widgets.Note(shown=False)
+        # why it cannot be seated shown, in red; the grip and clearance not for now: too much
+        # under the parallels
+        self.fit = Widgets.Note()
         self.fit.setStyleSheet("color: %s" % ERROR_TEXT_COLOR)
         layout.addRow("", self.fit)
         self.other = Widgets.Note(shown=False)
