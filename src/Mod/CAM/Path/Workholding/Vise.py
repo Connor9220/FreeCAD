@@ -486,6 +486,11 @@ def recompute(doc):
     the toolpaths (the document's RecomputesFrozen set), its Jobs' stops, clamps and vises, their
     stock and model and what these need, not the operations: moving the stock does not compute
     the toolpaths again until the panel's changes are kept."""
+    if getattr(doc, "Recomputing", False):
+        # asked while the document recomputes, as it says it is done: it refuses a recompute
+        # inside its own, so each one changed recomputed by itself, what it needs first
+        _recomputeTouched(doc)
+        return
     if not getattr(doc, "RecomputesFrozen", False):
         doc.recompute()
         return
@@ -506,6 +511,25 @@ def recompute(doc):
                 add(model)
     if found:
         doc.recompute(found, True)
+
+
+def _recomputeTouched(doc):
+    """The document's objects changed recomputed one by one, each after what it needs."""
+    touched = [o for o in doc.Objects if "Touched" in o.State]
+    wanted = set(o.Name for o in touched)
+    done = []
+
+    def visit(obj):
+        if obj.Name in done:
+            return
+        done.append(obj.Name)
+        for need in obj.OutList:
+            if need.Name in wanted:
+                visit(need)
+        obj.recompute()
+
+    for obj in touched:
+        visit(obj)
 
 
 def _instance(job, label, members, placement, proxy=None, name="Vise"):
