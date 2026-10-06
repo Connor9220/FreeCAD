@@ -33,6 +33,7 @@ import Path.Workholding.Gui.ViewProvider as ViewProviders
 import Path.Workholding.Gui.Widgets as Widgets
 
 from Path.Workholding.Constants import (
+    STOCK_SNAP_WIDTHS,
     DRAG_SHOW_EVERY,
     ERROR_TEXT_COLOR,
     ITEM_ICON,
@@ -531,7 +532,8 @@ class _StockDrag(_Drag):
 
     def againstStops(self, slid):
         """How much further the stock moves, slid by slid, to rest against the stops it comes
-        within half their own width of, in or out: the nearest each way, those square to one
+        within STOCK_SNAP_WIDTHS of their own widths of; one it is let go on top of, pushed off
+        the shortest way, however far that is. The nearest each way, those square to one
         another only."""
         import Part
 
@@ -554,22 +556,33 @@ class _StockDrag(_Drag):
             out.normalize()
             along = FreeCAD.Vector(-out.y, out.x, 0)
             low, high = PathWorkholding._extents(stock, FreeCAD.Vector(), along)
-            near, far = PathWorkholding._extents(shape, FreeCAD.Vector(), along)
+            first, last = PathWorkholding._extents(shape, FreeCAD.Vector(), along)
             # beside the stock's end, not across from it
-            if far <= low or near >= high:
+            if last <= low or first >= high:
                 continue
-            reach = PathWorkholding._extents(stock, FreeCAD.Vector(), out)[1]
+            back, reach = PathWorkholding._extents(stock, FreeCAD.Vector(), out)
             near, far = PathWorkholding._extents(shape, FreeCAD.Vector(), out)
-            gap = near - reach
-            if abs(gap) <= (far - near) / 2:
-                found.append((abs(gap), gap, out))
+            if near < reach and far > back:
+                # on top of it: off it the shortest way, before any other
+                moves = (
+                    out * (near - reach),
+                    out * (far - back),
+                    along * (first - high),
+                    along * (last - low),
+                )
+                found.append((-1.0, min(moves, key=lambda m: m.Length)))
+            elif 0.0 <= near - reach <= STOCK_SNAP_WIDTHS * (far - near):
+                found.append((near - reach, out * (near - reach)))
         more = FreeCAD.Vector()
         taken = []
-        for _, gap, out in sorted(found, key=lambda f: f[0]):
-            if any(abs(out.dot(way)) > 1e-3 for way in taken):
+        for _, move in sorted(found, key=lambda f: f[0]):
+            if move.Length < 1e-9:
                 continue
-            taken.append(out)
-            more += out * gap
+            way = FreeCAD.Vector(move).normalize()
+            if any(abs(way.dot(t)) > 1e-3 for t in taken):
+                continue
+            taken.append(way)
+            more += move
         return more
 
     def leaveFree(self):

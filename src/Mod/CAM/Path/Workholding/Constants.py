@@ -113,6 +113,9 @@ DRAG_TURN_STEP = 1.0
 # a lever clamp let go by its dragger within this many degrees of square to its side, or to
 # the sides beside it, is turned square; its Angle typed is kept as it is
 LEVER_SNAP_DEGREES = 10.0
+# the stock moved by its dragger rests against a stop it is let go within this many of the
+# stop's own widths of
+STOCK_SNAP_WIDTHS = 2.0
 # the part's sides on the vise's bottom and against its fixed jaw lit in color: off for now
 SHOW_LIT_SIDES = False
 # the least a vise's jaws are left gripping the stock when it is stood higher by dragging, mm
