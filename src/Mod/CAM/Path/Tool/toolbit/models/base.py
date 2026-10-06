@@ -1196,7 +1196,14 @@ class ToolBit(Asset, ABC):
         if asset_manager is None:
             from ...camassets import cam_assets as asset_manager
 
-        holder = asset_manager.get_or_none(f"toolholder://{holder_id}")
+        try:
+            holder = asset_manager.get_or_none(f"toolholder://{holder_id}")
+        except Exception as e:
+            # a holder file that cannot be read is as good as none, not the end of the caller
+            Path.Log.warning(
+                f"Tool holder '{holder_id}' of '{self.obj.Label}' could not be read: {e}"
+            )
+            return None
         if holder is None:
             Path.Log.warning(f"Tool holder '{holder_id}' of '{self.obj.Label}' was not found")
         return holder

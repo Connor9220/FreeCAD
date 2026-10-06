@@ -180,6 +180,16 @@ class TestPathToolBitHolder(PathTestWithAssets):
         self.assertIsNone(bit.get_holder(self.assets))
         self.assertEqual(bit.to_dict()["parameter"]["Holder"], "Shop_Shrink_Fit")
 
+    def test14_unreadable_holder_is_none(self):
+        """A holder whose file cannot be read is no holder, not an error for the caller."""
+
+        class Broken:
+            def get_or_none(self, uri, *args, **kwargs):
+                raise ValueError("not a holder file")
+
+        bit = self.bit(Holder="ER20_Standard")
+        self.assertIsNone(bit.get_holder(Broken()))
+
     def test13_change_holder(self):
         """A bit can be moved to another holder, and out of one."""
         bit = self.bit(Holder="ER20_Standard")
