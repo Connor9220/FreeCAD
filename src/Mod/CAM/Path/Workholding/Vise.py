@@ -1325,6 +1325,13 @@ def seating(job, vise):
     }
 
 
+def offsetAt(job, vise, placement):
+    """offsetAt(job, vise, placement) ... how far off the jaws' center the stock is across them,
+    as seating says it, with the vise standing at placement, mid-drag."""
+    _, (low, high), _ = _stockIn(job, placement.multiply(stationFrame(vise)))
+    return (low + high) / 2
+
+
 def seat(
     job,
     vise,

@@ -286,6 +286,14 @@ def _viseFile(vise):
     return found[0].FileName if found and found[0].FileName else None
 
 
+def _canDrag(piece):
+    """Whether the dragger moves the piece picked: a stop or clamp as its kind allows, a vise of
+    this Job's own along its jaws."""
+    if PathWorkholding.isVise(piece):
+        return not PathWorkholding.isShared(piece) and getattr(piece, "Seated", False)
+    return Items.canTransform(piece)
+
+
 class _ViseArea(QtWidgets.QWidget if FreeCAD.GuiUp else object):
     """A vise's settings in the Placed section, where a clamp's show: its sections, each under a
     heading of its own, its picture beside them."""
@@ -1567,7 +1575,7 @@ class _StopsClamps:
         self.showRow(self.placeRow, piece is not None and not lever)
         self.showLever(piece if lever else None)
         self.showSize(piece)
-        self.dragChosen(piece)
+        self.dragChosen(self.chosen())
 
     def showPlace(self, piece, at=None, angle=None):
         """Where the piece picked is, where it meets the stock, the Job's X and Y, or where at
@@ -1925,7 +1933,7 @@ class _StopsClamps:
         """FreeCAD's Transform dragger on the one piece picked, without its task panel, its
         arrows those its kind moves by; off another, or when several or none are picked."""
         want = None
-        if piece is not None and len(self.chosenAll()) <= 1 and Items.canTransform(piece):
+        if piece is not None and len(self.chosenAll()) <= 1 and _canDrag(piece):
             want = piece.Name
         if want == self.editing:
             return
@@ -1955,6 +1963,11 @@ class _StopsClamps:
         if shown == self.dragShown:
             return
         self.dragShown = shown
+        if PathWorkholding.isVise(piece):
+            # along the jaws only: where the stock is along them
+            self.panel.showOffset(PathWorkholding.offsetAt(self.job, piece, at))
+            self.showRowAt(piece, [_length(at.Base.x), _length(at.Base.y), ""])
+            return
         lever = Lever.isLever(piece)
         turned = lever or getattr(piece, "Kind", None) == Items.Kind.Push
         # the piece's own placement, the dragger standing where it meets the stock
@@ -1973,12 +1986,16 @@ class _StopsClamps:
             self.angle.blockSignals(False)
         else:
             self.showPlace(piece, at.Base, angle)
+        words = [_length(at.Base.x), _length(at.Base.y)]
+        words.append(_degrees(angle) if angle is not None else "")
+        self.showRowAt(piece, words)
+
+    def showRowAt(self, piece, words):
+        """The piece's row saying where it is, mid-drag: its X, Y and angle."""
         for row in range(self.list.rowCount()):
             cell = self.list.item(row, 0)
             if cell is None or cell.data(QtCore.Qt.UserRole) != piece.Name:
                 continue
-            words = [_length(at.Base.x), _length(at.Base.y)]
-            words.append(_degrees(angle) if angle is not None else "")
             for column, text in enumerate(words, 1):
                 item = self.list.item(row, column)
                 if item is not None:
@@ -2001,7 +2018,12 @@ class _StopsClamps:
         self.applying = True
         try:
             self.panel.begin()
-            Items.fromTransform(piece, ViewProviders.dragPlacement(piece.ViewObject))
+            if PathWorkholding.isVise(piece):
+                # where it was let go along the jaws, the stock seated there again
+                self.panel.showOffset(PathWorkholding.seating(self.job, piece)["offset"])
+                self.panel.preview()
+            else:
+                Items.fromTransform(piece, ViewProviders.dragPlacement(piece.ViewObject))
             self.error.setText("")
         except ValueError as e:
             self.error.setText(str(e))

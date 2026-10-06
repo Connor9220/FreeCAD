@@ -172,9 +172,9 @@ def _showVise(obj):
     return True
 
 
-def _seatedDragger():
+def _seatedDragger(along=False):
     """The Transform dragger of a seated vise without what would move it into the jaws or turn
-    it: along the jaws and up, and the plane of the two, are left."""
+    it: along the jaws and up, and the plane of the two, are left; along, along the jaws only."""
     from pivy import coin
 
     view = FreeCADGui.ActiveDocument.ActiveView if FreeCADGui.ActiveDocument else None
@@ -187,12 +187,17 @@ def _seatedDragger():
     if search.getPath() is None:
         return
     dragger = search.getPath().getTail()
-    for name in ("yTranslatorDragger", "xRotatorDragger", "yRotatorDragger", "zRotatorDragger"):
+    hidden = ["yTranslatorDragger", "xRotatorDragger", "yRotatorDragger", "zRotatorDragger"]
+    planes = ["xyPlanarTranslatorSwitch", "yzPlanarTranslatorSwitch"]
+    if along:
+        hidden.append("zTranslatorDragger")
+        planes.append("zxPlanarTranslatorSwitch")
+    for name in hidden:
         part = dragger.getPart(name, True)
         if part is not None:
             part.getField("visible").set("FALSE")
     # the planes, where the dragger draws them
-    for name in ("xyPlanarTranslatorSwitch", "yzPlanarTranslatorSwitch"):
+    for name in planes:
         dragger.set("%s { whichChild -1 }" % name)
 
 
@@ -385,6 +390,9 @@ class ViewProviderVise(_GroupViewProvider):
         # Transform: FreeCAD's dragger, once made, showing only how a seated vise may move
         if mode == 1 and getattr(vobj.Object, "Seated", False):
             QtCore.QTimer.singleShot(0, _seatedDragger)
+        elif mode == TRANSFORM_NO_DIALOG and getattr(vobj.Object, "Seated", False):
+            # in the workholding panel: along the jaws only
+            QtCore.QTimer.singleShot(0, lambda: _seatedDragger(along=True))
         return None
 
     def onDelete(self, vobj, subelements):

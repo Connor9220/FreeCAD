@@ -442,9 +442,21 @@ def _pair(first, label, second):
     layout = QtWidgets.QHBoxLayout(row)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.addWidget(first, 1)
-    layout.addWidget(QtWidgets.QLabel(label))
+    label = QtWidgets.QLabel(label)
+    # the second labels lined up in a column of their own by _alignPairs
+    label.setObjectName("pairLabel")
+    layout.addWidget(label)
     layout.addWidget(second, 1)
     return row
+
+
+def _alignPairs(forms):
+    """The labels between paired fields all as wide as the widest, so the fields of every pair
+    line up in two columns."""
+    labels = [label for form in forms for label in form.findChildren(QtWidgets.QLabel, "pairLabel")]
+    width = max((label.sizeHint().width() for label in labels), default=0)
+    for label in labels:
+        label.setMinimumWidth(width)
 
 
 def _imperial():
@@ -1006,23 +1018,19 @@ class TaskPanelVise:
         layout.addRow("", self.clearance)
         layout = sections[3][1]
 
-        # across the jaws: centered, or off the center by so much
-        self.across = QtWidgets.QComboBox()
-        self.center = _ComboChoice(self.across, translate("CAM_SeatInVise", "Centered"), "center")
-        self.offCenter = _ComboChoice(
-            self.across, translate("CAM_SeatInVise", "Offset from center"), "offset"
-        )
+        # where along the jaws, from their center; Center puts it back there
         self.offset = Widgets.mmBox(
             ui, translate("CAM_SeatInVise", "Along the jaws, from their center"), minimum=-10000.0
         )
-        self.offset.setEnabled(False)
-        layout.addRow(
-            translate("CAM_SeatInVise", "Across the jaws"),
-            _pair(self.across, translate("CAM_SeatInVise", "Offset"), self.offset),
+        self.centerButton = QtWidgets.QPushButton(translate("CAM_SeatInVise", "Center"))
+        self.centerButton.setToolTip(
+            translate("CAM_SeatInVise", "The stock centered along the jaws")
         )
-        self.across.currentIndexChanged.connect(
-            lambda *args: self.offset.setEnabled(self.offCenter.isChecked())
-        )
+        self.centerButton.clicked.connect(lambda: self.offset.setProperty("rawValue", 0.0))
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(self.offset, 1)
+        row.addWidget(self.centerButton)
+        layout.addRow(translate("CAM_SeatInVise", "Position"), row)
 
         self.close = QtWidgets.QCheckBox(translate("CAM_SeatInVise", "Close the jaw on the stock"))
         self.close.setChecked(True)
@@ -1048,6 +1056,7 @@ class TaskPanelVise:
         )
         self.form = self.stops.forms
         _alignLabels([layout for _, layout in sections] + self.stops.layouts)
+        _alignPairs([section for section, _ in sections])
 
         self.vise.currentIndexChanged.connect(self.viseChanged)
         self.browse.clicked.connect(self.browseVise)
@@ -1072,7 +1081,6 @@ class TaskPanelVise:
             self.standsOn.currentIndexChanged,
             self.step.currentIndexChanged,
             self.parallels.changed,
-            self.across.currentIndexChanged,
             self.offset.valueChanged,
             self.close.toggled,
             self.moves.currentIndexChanged,
@@ -1653,8 +1661,31 @@ class TaskPanelVise:
         if not self.loading:
             self.previewTimer.start()
 
+    def showOffset(self, offset):
+        """Where the stock is along the jaws shown, as it is now, not seated again for it."""
+        self.offset.blockSignals(True)
+        # a hair either side of the center shown as 0
+        self.offset.setProperty("rawValue", 0.0 if abs(offset) < 1e-6 else offset)
+        self.offset.blockSignals(False)
+
     def preview(self):
-        """Seated as the panel says, pending: True if it could be."""
+        """Seated as the panel says, pending: True if it could be. The vise being dragged moved by
+        it is not a drag; its dragger made again where it now is."""
+        stops = getattr(self, "stops", None)
+        if stops is None:
+            return self.seatNow()
+        was = stops.applying
+        stops.applying = True
+        try:
+            done = self.seatNow()
+        finally:
+            stops.applying = was
+        job, vise = self.current()
+        if vise is not None and stops.editing == vise.Name:
+            stops.redrag(vise)
+        return done
+
+    def seatNow(self):
         self.previewTimer.stop()
         job, vise = self.current()
         if vise is None:
@@ -1684,7 +1715,7 @@ class TaskPanelVise:
             self.done = PathWorkholding.seat(
                 job,
                 vise,
-                offset=self.offset.property("rawValue") if self.offCenter.isChecked() else 0.0,
+                offset=self.offset.property("rawValue"),
                 center=True,
                 close=self.close.isChecked(),
                 moveVise=self.moveVise.isChecked(),
@@ -1746,7 +1777,6 @@ class TaskPanelVise:
             # one just added starts as a vise does, not as the last one was seated: centered,
             # the jaw closed, the stock on the floor, or on parallels holding half of a stock
             # shorter than the jaws
-            self.center.setChecked(True)
             self.offset.setProperty("rawValue", 0.0)
             self.close.setChecked(True)
             tall = self.stockHeight()
@@ -1775,9 +1805,7 @@ class TaskPanelVise:
                 self.parallels.showPair(jaw - max(0.0, now["grip"]), thick, long, False, "")
             else:
                 self.byFloor.setChecked(True)
-            offCenter = abs(now["offset"]) > 1e-6
-            (self.offCenter if offCenter else self.center).setChecked(True)
-            self.offset.setProperty("rawValue", now["offset"] if offCenter else 0.0)
+            self.showOffset(now["offset"])
             self.close.setChecked(now["close"])
         if not self.byParallels.isEnabled() and self.byParallels.isChecked():
             self.byFloor.setChecked(True)
