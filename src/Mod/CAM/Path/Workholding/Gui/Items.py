@@ -34,6 +34,7 @@ import Path.Workholding.Gui.Widgets as Widgets
 
 from Path.Workholding.Constants import (
     DRAG_SHOW_EVERY,
+    STOCK_DRAG_EVERY,
     ERROR_TEXT_COLOR,
     ITEM_ICON,
     ITEM_LIST_ICON,
@@ -456,21 +457,14 @@ class _StockDrag(_Drag):
         carried = list(self.job.Model.Group) + list(PathJob.objectsInModelFrame(self.job))
         stops.dragCarried = [(obj.Name, FreeCAD.Placement(obj.Placement)) for obj in carried]
         stops.dragCarried.append((piece.Name, FreeCAD.Placement(piece.Placement)))
-        QtCore.QTimer.singleShot(0, lambda: self.hook(piece))
+        # read from the dragger often, by the panel, never called by it: a dragger calling into
+        # Python as it moves crashes FreeCAD
+        stops.dragTimer.setInterval(STOCK_DRAG_EVERY)
 
-    def hook(self, piece):
-        dragger = ViewProviders.findDragger()
-        stops = self.stops
-        if dragger is None or stops.editing != piece.Name:
-            return
-
-        def moved(data, node):
-            start = getattr(stops, "dragFrom", None)
-            if start is not None:
-                self.showAt(self.landing(start, ViewProviders.draggerPlacement(node)))
-
-        stops.dragHook = (dragger, moved)
-        dragger.addValueChangedCallback(moved)
+    def shows(self, piece, at):
+        start = getattr(self.stops, "dragFrom", None)
+        if start is not None:
+            self.showAt(self.landing(start, at))
 
     def landing(self, start, at, free=None):
         """How the part is moved, the dragger at at, the drag started at start: as it is let
@@ -514,7 +508,7 @@ class _StockDrag(_Drag):
             node.rotation.setValue(q[0], q[1], q[2], q[3])
 
     def letGo(self, piece, start, at, free):
-        self.stops.dragHook = None
+        self.stops.dragTimer.setInterval(DRAG_SHOW_EVERY)
         # drawn where they are again: what holds them moves instead
         self.showAt(FreeCAD.Placement())
         if start is None:
