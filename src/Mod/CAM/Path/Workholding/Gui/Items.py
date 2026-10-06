@@ -448,51 +448,80 @@ class _StockDrag(_Drag):
     clamps placed against it again. Free: turned as let go, nothing seated."""
 
     def begin(self, piece):
-        # the part and what is placed on it, where they start: they ride along with the stock
+        # the stock, the part and what is placed on it shown where they would land as the
+        # dragger moves: in the 3D view only, every move, nothing in the document touched
         import Path.Main.Job as PathJob
 
+        stops = self.stops
         carried = list(self.job.Model.Group) + list(PathJob.objectsInModelFrame(self.job))
-        self.stops.dragCarried = [(obj.Name, FreeCAD.Placement(obj.Placement)) for obj in carried]
+        stops.dragCarried = [(obj.Name, FreeCAD.Placement(obj.Placement)) for obj in carried]
+        stops.dragCarried.append((piece.Name, FreeCAD.Placement(piece.Placement)))
+        QtCore.QTimer.singleShot(0, lambda: self.hook(piece))
 
-    def carry(self, delta):
-        """The part and what is placed on it moved by delta from where they started."""
-        doc = self.job.Document
-        for name, placement in getattr(self.stops, "dragCarried", []):
-            obj = doc.getObject(name)
-            if obj is not None:
-                to = delta.multiply(placement)
-                if not obj.Placement.isSame(to, 1e-9):
-                    obj.Placement = to
+    def hook(self, piece):
+        dragger = ViewProviders.findDragger()
+        stops = self.stops
+        if dragger is None or stops.editing != piece.Name:
+            return
 
-    def shows(self, piece, at):
-        start = getattr(self.stops, "dragFrom", None)
-        if start is None:
-            return
-        delta = at.multiply(start.inverse())
-        # the dragger in single precision: not moved, the part left exactly where it is
-        if delta.Base.Length < 1e-4 and abs(delta.Rotation.Angle) < 1e-6:
-            return
-        self.carry(delta)
+        def moved(data, node):
+            start = getattr(stops, "dragFrom", None)
+            if start is not None:
+                self.showAt(self.landing(start, ViewProviders.draggerPlacement(node)))
 
-    def letGo(self, piece, start, at, free):
-        # the part back where it started: what holds it moves instead
-        self.carry(FreeCAD.Placement())
-        if start is None:
-            return
-        stock = piece
+        stops.dragHook = (dragger, moved)
+        dragger.addValueChangedCallback(moved)
+
+    def landing(self, start, at, free=None):
+        """How the part is moved, the dragger at at, the drag started at start: as it is let
+        go, turned square to a vise's jaws a quarter at a time unless free."""
+        free = _shiftHeld() if free is None else free
         delta = at.multiply(start.inverse())
         pivot = start.Base
         turn = delta.Rotation
-        vises = [v for v in PathWorkholding.vises(self.job) if not PathWorkholding.isShared(v)]
-        if vises and not free:
-            # in a vise: square to its jaws, a quarter at a time
+        if not free and any(
+            not PathWorkholding.isShared(v) for v in PathWorkholding.vises(self.job)
+        ):
             yaw = turn.toEuler()[0]
             turn = FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), round(yaw / 90.0) * 90.0)
         # how far the pivot went, the turn about it
         shift = delta.Base - pivot + delta.Rotation.multVec(pivot)
-        moved = FreeCAD.Placement(shift, FreeCAD.Rotation()).multiply(
+        return FreeCAD.Placement(shift, FreeCAD.Rotation()).multiply(
             FreeCAD.Placement(FreeCAD.Vector(), turn, pivot)
         )
+
+    def showAt(self, moved):
+        """The stock, the part and what is placed on it drawn moved so, where they are in the
+        document left as it is."""
+        from pivy import coin
+
+        doc = self.job.Document
+        for name, placement in getattr(self.stops, "dragCarried", []):
+            obj = doc.getObject(name)
+            vobj = getattr(obj, "ViewObject", None)
+            if vobj is None:
+                continue
+            root = vobj.RootNode
+            if root.getNumChildren() == 0:
+                continue
+            node = root.getChild(0)
+            if not node.isOfType(coin.SoTransform.getClassTypeId()):
+                continue
+            node = coin.cast(node, "SoTransform")
+            to = moved.multiply(placement)
+            node.translation.setValue(to.Base.x, to.Base.y, to.Base.z)
+            q = to.Rotation.Q
+            node.rotation.setValue(q[0], q[1], q[2], q[3])
+
+    def letGo(self, piece, start, at, free):
+        self.stops.dragHook = None
+        # drawn where they are again: what holds them moves instead
+        self.showAt(FreeCAD.Placement())
+        if start is None:
+            return
+        stock = piece
+        vises = [v for v in PathWorkholding.vises(self.job) if not PathWorkholding.isShared(v)]
+        moved = self.landing(start, at, free)
         back = moved.inverse()
         stock.Placement = start
         if moved.isIdentity():
