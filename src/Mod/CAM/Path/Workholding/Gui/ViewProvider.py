@@ -242,17 +242,6 @@ def draggerPlacement(dragger):
     return FreeCAD.Placement(FreeCAD.Vector(*at), FreeCAD.Rotation(*turn))
 
 
-def setDraggerRotation(dragger, rotation):
-    """setDraggerRotation(dragger, rotation) ... the Transform dragger turned to rotation mid-drag,
-    what it moves turned with it."""
-    from pivy import coin
-
-    q = rotation.Q
-    coin.cast(dragger.getField("rotation"), "SoSFRotation").setValue(
-        coin.SbRotation(q[0], q[1], q[2], q[3])
-    )
-
-
 def _limitedDragger(piece):
     """The Transform dragger on piece showing only what moves it as its kind allows: across the
     table, and a lever clamp or a side clamp turned too."""
