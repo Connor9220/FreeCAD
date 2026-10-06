@@ -925,7 +925,8 @@ def contactFrame(job, piece):
     inset = 0.0
     shape = Part.getShape(piece, "", transform=True)
     stock = job.Stock.Shape
-    if not shape.isNull() and not stock.isNull():
+    # one left free is not against the stock: where it stands is its own
+    if not isFree(piece) and not shape.isNull() and not stock.isNull():
         box = shape.BoundBox
         state = (
             tuple(
