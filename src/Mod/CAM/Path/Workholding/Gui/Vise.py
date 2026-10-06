@@ -448,6 +448,26 @@ def _imperial():
 _header = Widgets.header
 
 
+class _TabChoice:
+    """One tab of a tab bar, asked and set as a radio button is: checked when it is the one
+    picked."""
+
+    def __init__(self, bar, text, icon, data, tip=None):
+        self.bar = bar
+        self.data = data
+        self.row = bar.addTab(icon, text)
+        bar.setTabData(self.row, data)
+        if tip:
+            bar.setTabToolTip(self.row, tip)
+
+    def isChecked(self):
+        return self.bar.currentIndex() == self.row
+
+    def setChecked(self, checked):
+        if checked:
+            self.bar.setCurrentIndex(self.row)
+
+
 class _ComboChoice:
     """One choice of a drop-down, asked and set as a radio button is: checked when it is the
     one picked, grayed or left out of the list."""
@@ -1008,20 +1028,25 @@ class TaskPanelVise:
         holds.setWindowTitle(translate("CAM_Workholding", "Workholding"))
         holds.setWindowIcon(QtGui.QIcon(":/icons/CAM_Job.svg"))
         holdsLayout = QtWidgets.QFormLayout(holds)
-        self.holds = Widgets.combo()
-        self.byVise = _ComboChoice(
+        # a tab each: the sections below are what the tab picked shows
+        self.holds = QtWidgets.QTabBar()
+        self.holds.setExpanding(True)
+        self.holds.setDrawBase(False)
+        self.byVise = _TabChoice(
             self.holds,
-            translate("CAM_Workholding", "Vise"),
+            translate("CAM_Workholding", "Vises"),
+            QtGui.QIcon(),
             "vise",
             translate("CAM_Workholding", "The stock seated in a vise"),
         )
-        self.byStops = _ComboChoice(
+        self.byStops = _TabChoice(
             self.holds,
-            translate("CAM_Workholding", "Stops and clamps"),
+            translate("CAM_Workholding", "Clamps"),
+            QtGui.QIcon(),
             "stops",
             translate("CAM_Workholding", "The stock on the table, pushed onto stops and clamped"),
         )
-        holdsLayout.addRow(translate("CAM_Workholding", "Holds it"), self.holds)
+        holdsLayout.addRow(self.holds)
         self.stops = _StopsClamps(self, ui)
         # the table it stands on, with the stops and clamps
         sections[1][1].addRow(self.stops.table)
@@ -1065,7 +1090,7 @@ class TaskPanelVise:
         self.stops.readIn()
         if piece is not None:
             self.stops.fillList(PathWorkholding.memberOf(piece)[1])
-        self.holds.currentIndexChanged.connect(self.holdsChanged)
+        self.holds.currentChanged.connect(self.holdsChanged)
         self.holdsChanged()
         # the sections in their task boxes by then, hidden whole
         QtCore.QTimer.singleShot(0, self.holdsChanged)
