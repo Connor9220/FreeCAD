@@ -297,6 +297,172 @@ def _viseAngle(placement):
     return round(angle, 3) + 0.0
 
 
+class _Drag:
+    """How a kind of piece is dragged in the workholding panel: where it is when let go, what
+    the panel shows while it moves, what letting it go does, free or not, and what is picked
+    after. The panel drives every kind the same way."""
+
+    def __init__(self, stops):
+        self.stops = stops
+        self.panel = stops.panel
+        self.job = stops.job
+
+    def letGoAt(self, piece):
+        """Where the piece is as it is let go, read before its dragger goes."""
+        return PathWorkholding.placementOf(piece)
+
+    def shows(self, piece, at):
+        """Mid-drag, at the dragger's placement: shown in the panel."""
+
+    def letGo(self, piece, start, at, free):
+        """Let go at at, the drag started at start; free, with Shift held."""
+
+    def after(self, piece):
+        """The piece picked again, its dragger made again: Add's own staying Add's."""
+        stops = self.stops
+        if piece in stops.shown():
+            stops.fillList()
+            stops.dragChosen(piece)
+            return
+        stops.fillList(piece)
+        stops.picked()
+
+
+class _PieceDrag(_Drag):
+    """A stop's or clamp's: placed against the side nearest where it is let go, a lever clamp
+    pressing where it is; free, left there, out of the spreading."""
+
+    def letGoAt(self, piece):
+        # from where it meets the stock, as its dragger stands
+        return ViewProviders.dragPlacement(piece.ViewObject)
+
+    def shows(self, piece, at):
+        stops = self.stops
+        lever = Lever.isLever(piece)
+        turned = lever or getattr(piece, "Kind", None) == Items.Kind.Push
+        # the piece's own placement, the dragger standing where it meets the stock
+        origin = getattr(piece.ViewObject, "TransformOrigin", None)
+        own = at.multiply(origin.inverse()) if origin is not None else at
+        angle = Items.angleFrom(self.job, piece, own.Rotation) if turned else None
+        if piece is not stops.chosen():
+            # one Add only shows has no settings to show yet
+            pass
+        elif lever:
+            for box, value in ((stops.pressX, at.Base.x), (stops.pressY, at.Base.y)):
+                box.blockSignals(True)
+                box.setProperty("rawValue", value)
+                box.blockSignals(False)
+            stops.angle.blockSignals(True)
+            # the dragger turns in single precision: a hair either side of square shown as
+            # 0.00, not -0.00
+            stops.angle.setProperty("rawValue", round(angle, 3) + 0.0)
+            stops.angle.blockSignals(False)
+        else:
+            stops.showPlace(piece, at.Base, angle)
+        words = [_length(at.Base.x), _length(at.Base.y)]
+        words.append(_degrees(angle) if angle is not None else "")
+        stops.showRowAt(piece, words)
+
+    def letGo(self, piece, start, at, free):
+        if free:
+            Items.setFree(piece)
+            PathWorkholding.recompute(self.job.Document)
+            return
+        Items.fromTransform(piece, at)
+
+
+class _ViseDrag(_Drag):
+    """A vise's: slid along its jaws, where the stock is along them; across them, the part it
+    holds with it; turned, square to the stock, onto its side or over a quarter turn at a time.
+    Seated again where it is let go; free, left there unseated."""
+
+    def shows(self, piece, at):
+        stops, panel = self.stops, self.panel
+        if not getattr(piece, "Seated", False):
+            pass
+        elif stops._slid(at):
+            panel.showOffset(PathWorkholding.offsetAt(self.job, piece, at))
+        else:
+            # turned freely while dragged: the side it will be square to once let go shown
+            turn = panel.turnAt(at, snap=True)
+            if turn is not None:
+                panel.showTurn(turn)
+        stops.showRowAt(piece, [_length(at.Base.x), _length(at.Base.y), _degrees(_viseAngle(at))])
+
+    def letGo(self, piece, start, at, free):
+        panel = self.panel
+        if free:
+            # left where it is, held to no seat
+            if getattr(piece, "Seated", False):
+                piece.Seated = False
+            PathWorkholding.recompute(self.job.Document)
+            return
+        seated = getattr(self.stops, "dragSeated", True)
+        if seated and self.stops._slid(at):
+            # across the jaws: the part held in it moved with it; along them: where it is along
+            # the stock
+            if start is not None:
+                closing = PathWorkholding.stationPlacement(piece).Rotation.multVec(
+                    FreeCAD.Vector(0, 1, 0)
+                )
+                across = closing * (at.Base - start.Base).dot(closing)
+                across.z = 0.0
+                if across.Length > 1e-6:
+                    PathWorkholding.moveModel(self.job, across)
+                    PathWorkholding.recompute(self.job.Document)
+            panel.showOffset(PathWorkholding.seating(self.job, piece)["offset"])
+        else:
+            # turned, or let go free before: as it now is, square to the stock, onto its side
+            # or over a quarter turn at a time
+            turn = panel.turnAt(at, snap=True, tilt=True)
+            if turn is not None:
+                panel.showTurn(turn)
+        panel.preview()
+        adding = panel.adding
+        if adding and piece is adding.vise:
+            # the first of a row moved: the others spread from where it now is
+            panel.pinAdd()
+            panel.showMore(self.stops.count.value())
+
+
+class _StockDrag(_Drag):
+    """The stock's: the part moved and turned with it, the stock and what is placed on it; held
+    in a vise, turned square to its jaws and the vise seated again; the stops and clamps placed
+    against it again. Free: turned as let go."""
+
+    def letGo(self, piece, start, at, free):
+        if start is None:
+            return
+        stock = piece
+        delta = at.multiply(start.inverse())
+        pivot = start.Base
+        turn = delta.Rotation
+        vises = PathWorkholding.vises(self.job)
+        if vises and not free:
+            # in a vise: square to its jaws, a quarter at a time
+            yaw = turn.toEuler()[0]
+            turn = FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), round(yaw / 90.0) * 90.0)
+        # how far the pivot went, the turn about it
+        shift = delta.Base - pivot + delta.Rotation.multVec(pivot)
+        stock.Placement = start
+        if not turn.isSame(FreeCAD.Rotation(), 1e-9):
+            PathWorkholding.turnModel(self.job, turn, pivot)
+        if shift.Length > 1e-9:
+            PathWorkholding.moveModel(self.job, shift)
+        PathWorkholding.recompute(self.job.Document)
+        if vises:
+            vise = self.panel.existing if self.panel.existing in vises else vises[0]
+            self.panel.existing = vise
+            self.panel.updateGrip()
+            self.panel.preview()
+        Items.layout(self.job)
+
+    def after(self, piece):
+        self.stops.fillList()
+        self.stops.showChosen()
+        QtCore.QTimer.singleShot(0, ViewProviders.stockDragger)
+
+
 def _shiftHeld():
     """Whether Shift is held now: a piece let go so is left where it is, nothing placing it."""
     mods = QtWidgets.QApplication.queryKeyboardModifiers()
@@ -305,9 +471,9 @@ def _shiftHeld():
 
 def _canDrag(piece):
     """Whether the dragger moves the piece picked: a stop or clamp as its kind allows, a vise of
-    this Job's own along its jaws."""
+    this Job's own, seated or let go free."""
     if PathWorkholding.isVise(piece):
-        return not PathWorkholding.isShared(piece) and getattr(piece, "Seated", False)
+        return not PathWorkholding.isShared(piece)
     return Items.canTransform(piece)
 
 
@@ -2329,13 +2495,14 @@ class _StopsClamps:
             self.panel.begin()
         if want is not None and gui.setEdit(piece, TRANSFORM_NO_DIALOG):
             self.editing = want
-            # where the drag starts: a vise turned by it, or slid along its jaws
+            # where the drag starts: a vise turned by it, or slid along its jaws; seated then
             self.dragFrom = FreeCAD.Placement(PathWorkholding.placementOf(piece))
+            self.dragSeated = bool(getattr(piece, "Seated", True))
             self.dragTimer.start()
 
     def showDragging(self):
-        """Where the dragger has the piece being dragged, shown as it moves: its X, Y and angle
-        in the panel and its row. Kept as its settings only when let go."""
+        """Where the dragger has the piece being dragged, shown as it moves, as its kind's rules
+        say. Kept only when let go."""
         piece = self.job.Document.getObject(self.editing) if self.editing else None
         dragger = ViewProviders.findDragger() if piece is not None else None
         if dragger is None:
@@ -2345,46 +2512,15 @@ class _StopsClamps:
         if shown == self.dragShown:
             return
         self.dragShown = shown
+        self.dragRules(piece).shows(piece, at)
+
+    def dragRules(self, piece):
+        """The rules the piece is dragged by: the stock's, a vise's, a stop's or clamp's."""
         if piece is self.job.Stock:
-            return
+            return _StockDrag(self)
         if PathWorkholding.isVise(piece):
-            # along the jaws: where the stock is along them; turned: the side against the
-            # fixed jaw and how far off square to it
-            if self._slid(at):
-                self.panel.showOffset(PathWorkholding.offsetAt(self.job, piece, at))
-            else:
-                # turned freely while dragged: the side it will be square to once let go shown
-                turn = self.panel.turnAt(at, snap=True)
-                if turn is not None:
-                    self.panel.showTurn(turn)
-            self.showRowAt(
-                piece, [_length(at.Base.x), _length(at.Base.y), _degrees(_viseAngle(at))]
-            )
-            return
-        lever = Lever.isLever(piece)
-        turned = lever or getattr(piece, "Kind", None) == Items.Kind.Push
-        # the piece's own placement, the dragger standing where it meets the stock
-        origin = getattr(piece.ViewObject, "TransformOrigin", None)
-        own = at.multiply(origin.inverse()) if origin is not None else at
-        angle = Items.angleFrom(self.job, piece, own.Rotation) if turned else None
-        if piece is not self.chosen():
-            # one Add only shows has no settings to show yet
-            pass
-        elif lever:
-            for box, value in ((self.pressX, at.Base.x), (self.pressY, at.Base.y)):
-                box.blockSignals(True)
-                box.setProperty("rawValue", value)
-                box.blockSignals(False)
-            self.angle.blockSignals(True)
-            # the dragger turns in single precision: a hair either side of square shown as
-            # 0.00, not -0.00
-            self.angle.setProperty("rawValue", round(angle, 3) + 0.0)
-            self.angle.blockSignals(False)
-        else:
-            self.showPlace(piece, at.Base, angle)
-        words = [_length(at.Base.x), _length(at.Base.y)]
-        words.append(_degrees(angle) if angle is not None else "")
-        self.showRowAt(piece, words)
+            return _ViseDrag(self)
+        return _PieceDrag(self)
 
     def _slid(self, at):
         """Whether the vise being dragged, at placement at, is only slid from where the drag
@@ -2402,50 +2538,6 @@ class _StopsClamps:
         self.showChosen()
         if on:
             QtCore.QTimer.singleShot(0, ViewProviders.stockDragger)
-
-    def stockMoved(self):
-        """The stock let go by its dragger: put back, and the part moved with it as far and
-        turned as much, the stock and what is placed on the part with it; held in a vise, turned
-        square to its jaws, the vise seated again; the stops and clamps placed against it again."""
-        import math
-
-        stock = self.job.Stock
-        start = getattr(self, "dragFrom", None)
-        now = PathWorkholding.placementOf(stock)
-        self.editing = None
-        FreeCADGui.getDocument(self.job.Document.Name).resetEdit()
-        if start is None:
-            return
-        self.applying = True
-        try:
-            self.panel.begin()
-            delta = now.multiply(start.inverse())
-            pivot = start.Base
-            turn = delta.Rotation
-            vises = PathWorkholding.vises(self.job)
-            if vises and not _shiftHeld():
-                # in a vise: square to its jaws, a quarter at a time; with Shift held, as turned
-                yaw = turn.toEuler()[0]
-                turn = FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), round(yaw / 90.0) * 90.0)
-            # how far the pivot went, the turn about it
-            shift = delta.Base - pivot + delta.Rotation.multVec(pivot)
-            stock.Placement = start
-            if not turn.isSame(FreeCAD.Rotation(), 1e-9):
-                PathWorkholding.turnModel(self.job, turn, pivot)
-            if shift.Length > 1e-9:
-                PathWorkholding.moveModel(self.job, shift)
-            PathWorkholding.recompute(self.job.Document)
-            if vises:
-                vise = self.panel.existing if self.panel.existing in vises else vises[0]
-                self.panel.existing = vise
-                self.panel.updateGrip()
-                self.panel.preview()
-            Items.layout(self.job)
-        finally:
-            self.applying = False
-        self.fillList()
-        self.showChosen()
-        QtCore.QTimer.singleShot(0, ViewProviders.stockDragger)
 
     def showRowAt(self, piece, words):
         """The piece's row saying where it is, mid-drag: its X, Y and angle."""
@@ -2469,70 +2561,28 @@ class _StopsClamps:
         QtCore.QTimer.singleShot(0, self.applyDrag)
 
     def applyDrag(self):
+        """The piece let go by its dragger: kept as its kind's rules say, or with Shift held left
+        where it is, nothing placing it; its dragger made again where it now is."""
         piece = self.job.Document.getObject(self.editing) if self.editing else None
         if piece is None or self.applying:
             return
-        if piece is self.job.Stock:
-            self.stockMoved()
-            return
+        rules = self.dragRules(piece)
+        start = getattr(self, "dragFrom", None)
+        at = rules.letGoAt(piece)
+        free = _shiftHeld()
+        # the dragger let go first: it does not follow the piece placed
+        self.editing = None
+        FreeCADGui.getDocument(self.job.Document.Name).resetEdit()
         self.applying = True
         try:
             self.panel.begin()
-            if _shiftHeld():
-                # let go with Shift held: left where it is, nothing placing it
-                if PathWorkholding.isVise(piece):
-                    if getattr(piece, "Seated", False):
-                        piece.Seated = False
-                else:
-                    Items.setFree(piece)
-                PathWorkholding.recompute(self.job.Document)
-            elif PathWorkholding.isVise(piece):
-                # turned: the side against the fixed jaw it was turned to, seated there along
-                # the jaws as it was; else where it was let go along them
-                at = PathWorkholding.placementOf(piece)
-                if self._slid(at):
-                    # moved across the jaws: the part held in it moved with it, the stock and
-                    # what is placed on it; along them: where it is along the stock
-                    start = getattr(self, "dragFrom", None)
-                    if start is not None:
-                        closing = PathWorkholding.stationPlacement(piece).Rotation.multVec(
-                            FreeCAD.Vector(0, 1, 0)
-                        )
-                        across = closing * (at.Base - start.Base).dot(closing)
-                        across.z = 0.0
-                        if across.Length > 1e-6:
-                            PathWorkholding.moveModel(self.job, across)
-                            PathWorkholding.recompute(self.job.Document)
-                    self.panel.showOffset(PathWorkholding.seating(self.job, piece)["offset"])
-                else:
-                    # turned: where it is along the jaws kept, seated again turned so; onto its
-                    # side or over, a quarter turn at a time
-                    turn = self.panel.turnAt(at, snap=True, tilt=True)
-                    if turn is not None:
-                        self.panel.showTurn(turn)
-                self.panel.preview()
-                adding = self.panel.adding
-                if adding and piece is adding.vise:
-                    # the first of a row moved: the others spread from where it now is
-                    self.panel.pinAdd()
-                    self.panel.showMore(self.count.value())
-            else:
-                Items.fromTransform(piece, ViewProviders.dragPlacement(piece.ViewObject))
+            rules.letGo(piece, start, at, free)
             self.error.setText("")
         except ValueError as e:
             self.error.setText(str(e))
         finally:
             self.applying = False
-        # the dragger made again where the piece now is: it does not follow the piece placed
-        self.editing = None
-        FreeCADGui.getDocument(self.job.Document.Name).resetEdit()
-        if piece in self.shown():
-            # what Add shows stays Add's, not picked in Placed
-            self.fillList()
-            self.dragChosen(piece)
-            return
-        self.fillList(piece)
-        self.picked()
+        rules.after(piece)
 
     def removeChosen(self):
         """The pieces picked taken away, the rows as the Job now has them."""

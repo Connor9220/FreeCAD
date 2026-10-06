@@ -307,7 +307,9 @@ def setDragOrigin(vobj):
     if "TransformOrigin" not in vobj.PropertiesList:
         return
     job, piece = PathWorkholding.memberOf(vobj.Object)
-    contact = Items.contactFrame(job, piece) if piece is not None else None
+    # one let go free, away from its side: dragged from itself
+    free = piece is not None and Items.isFree(piece)
+    contact = Items.contactFrame(job, piece) if piece is not None and not free else None
     origin = FreeCAD.Placement()
     if contact is not None:
         origin = PathWorkholding.placementOf(piece).inverse().multiply(contact)
