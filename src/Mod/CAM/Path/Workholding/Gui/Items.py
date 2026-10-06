@@ -705,20 +705,116 @@ def _offStop(stock, shape, axes):
     return moves
 
 
+def _footprint(shape):
+    """What shape covers seen from above, for the round stock's snap: ("circle", center, radius)
+    for one round about a vertical axis, else ("box", XMin, YMin, XMax, YMax) round it; with its
+    bottom and top."""
+    box = shape.BoundBox
+    zs = (box.ZMin, box.ZMax)
+    for face in shape.Faces:
+        surface = face.Surface
+        if surface.TypeId == "Part::GeomCylinder" and abs(abs(surface.Axis.z) - 1) < 1e-6:
+            if (
+                abs(box.XLength - box.YLength) < 1e-3
+                and abs(box.XLength - 2 * surface.Radius) < 1e-3
+            ):
+                center = FreeCAD.Vector(box.Center.x, box.Center.y, 0)
+                return ("circle", center, surface.Radius) + zs
+    return ("box", box.XMin, box.YMin, box.XMax, box.YMax) + zs
+
+
+def _gapTo(center, radius, stop):
+    """How far a circle at center of radius is from stop's footprint seen from above, less than
+    nothing when it is over it, and the way from the circle toward it."""
+    if stop[0] == "circle":
+        to = stop[1] - center
+        length = to.Length
+        way = to * (1.0 / length) if length > 1e-9 else None
+        return length - radius - stop[2], way
+    _, x0, y0, x1, y1 = stop[:5]
+    near = FreeCAD.Vector(min(max(center.x, x0), x1), min(max(center.y, y0), y1), 0)
+    to = near - center
+    if to.Length > 1e-9:
+        return to.Length - radius, to * (1.0 / to.Length)
+    # its middle over the box: as far over as to the box's nearest side and its radius
+    out = min(center.x - x0, x1 - center.x, center.y - y0, y1 - center.y)
+    return -out - radius, None
+
+
 def _againstRound(job, stock):
     """How much further a round stock, as stock is now, moves: off the stops it is on top of,
-    all together, out from their middle; then against those it comes within
-    STOCK_SNAP_WIDTHS of their own widths of, each the way it is nearest, in turn until it
-    touches them all, as a round sits between two dogs. Never into one."""
+    all together, out from their middle, as little as clears them; then against those it comes
+    within STOCK_SNAP_WIDTHS of their own widths of, each the way it is nearest, in turn until
+    it touches them all, as a round sits between two dogs. Never into one. Worked out from above,
+    a stock round about a vertical axis a circle; any other round stock by its own shape."""
     import Part
 
-    stops = []
+    shapes = []
     for stop in Items.itemsOf(job):
         if not Items.isStop(stop):
             continue
         shape = Part.getShape(stop, "", transform=True)
         if not shape.isNull():
-            stops.append(shape)
+            shapes.append(shape)
+    own = _footprint(stock)
+    if own[0] != "circle":
+        return _againstRoundShape(stock, shapes)
+    _, center, radius, bottom, top = own
+    # only those standing as high as the stock's sides
+    stops = [
+        f for f in (_footprint(s) for s in shapes) if f[-1] > bottom + TOUCH_NEAR and f[-2] < top
+    ]
+    start = FreeCAD.Vector(center)
+
+    def width(stop):
+        return 2 * stop[2] if stop[0] == "circle" else min(stop[3] - stop[1], stop[4] - stop[2])
+
+    def middle(stop):
+        if stop[0] == "circle":
+            return stop[1]
+        return FreeCAD.Vector((stop[1] + stop[3]) / 2, (stop[2] + stop[4]) / 2, 0)
+
+    def over(at):
+        return [f for f in stops if _gapTo(at, radius, f)[0] < -TOUCH_NEAR]
+
+    for _ in range(4):
+        under = over(center)
+        if not under:
+            break
+        mid = FreeCAD.Vector()
+        for f in under:
+            mid += middle(f)
+        way = center - mid * (1.0 / len(under))
+        if way.Length < 1e-9:
+            break
+        way.normalize()
+        low, high = 0.0, 2 * radius + max(width(f) for f in under) + 1.0
+        for _ in range(40):
+            half = (low + high) / 2
+            if over(center + way * half):
+                low = half
+            else:
+                high = half
+        center = center + way * high
+    near = sorted(
+        (f for f in stops if _gapTo(center, radius, f)[0] <= STOCK_SNAP_WIDTHS * width(f)),
+        key=lambda f: _gapTo(center, radius, f)[0],
+    )
+    for _ in range(200):
+        moved = False
+        for f in near:
+            gap, way = _gapTo(center, radius, f)
+            if gap < TOUCH_NEAR or way is None:
+                continue
+            center = center + way * gap
+            moved = True
+        if not moved:
+            break
+    return center - start
+
+
+def _againstRoundShape(stock, stops):
+    """_againstRound for a round stock not round about a vertical axis: by its own shape."""
     more = FreeCAD.Vector()
 
     def flat(v):
