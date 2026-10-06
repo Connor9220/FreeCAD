@@ -693,12 +693,12 @@ def _placeAt(job, piece, frame, x):
         if hasattr(piece, "Drop") and abs(piece.Drop.Value - drop) > 1e-9:
             piece.Drop = drop
     placement = _toStock(job, piece, placement, frame)
-    if piece.Kind == Kind.Push:
-        # against a flat side of the stock: square to it, however it was turned; at a corner or
-        # a round, as it is turned
+    angle = getattr(piece, "Angle", None)
+    if piece.Kind == Kind.Push and angle is not None and abs(angle.Value) > 1e-9:
+        # turned, against a flat side of the stock: square to it; at a corner or a round, as it
+        # is turned. One square to its side is left as it is, as it was placed
         square = squareAngle(job, piece, placement)
-        angle = getattr(piece, "Angle", None)
-        if square is not None and abs(square - (angle.Value if angle is not None else 0.0)) > 1e-6:
+        if square is not None and abs(square - angle.Value) > 1e-6:
             _setAngle(piece, square)
             placement = frame.multiply(_touching(piece, x, height, length))
             placement = _toStock(job, piece, placement, frame)
@@ -998,16 +998,30 @@ def _remove(piece):
 def removePiece(piece):
     """removePiece(piece) ... a stop, clamp or table taken out of its Job, no longer shared: those
     left on its side spread along it again."""
-    job, piece = PathWorkholding.memberOf(piece)
-    if piece is None:
-        raise ValueError("Not a piece of a Job's workholding")
-    side, stop = getattr(piece, "StockSide", ""), isStop(piece)
-    _remove(piece)
-    if side:
-        for i, other in enumerate((stopsOn if stop else clampsOn)(job, side)):
-            other.SideIndex = i
+    removePieces([piece])
+
+
+def removePieces(pieces):
+    """removePieces(pieces) ... stops, clamps or tables taken out of their Job together, no longer
+    shared: those left on their sides spread along them again, once."""
+    jobs, docs = [], []
+    for each in pieces:
+        job, piece = PathWorkholding.memberOf(each)
+        if piece is None:
+            raise ValueError("Not a piece of a Job's workholding")
+        side, stop = getattr(piece, "StockSide", ""), isStop(piece)
+        _remove(piece)
+        if job.Document not in docs:
+            docs.append(job.Document)
+        if side:
+            for i, other in enumerate((stopsOn if stop else clampsOn)(job, side)):
+                other.SideIndex = i
+            if job not in jobs:
+                jobs.append(job)
+    for job in jobs:
         layout(job)
-    job.Document.recompute()
+    for doc in docs:
+        doc.recompute()
 
 
 def positionOf(piece):

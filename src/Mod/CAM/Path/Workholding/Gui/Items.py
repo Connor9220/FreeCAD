@@ -1011,12 +1011,11 @@ class _StopsClamps:
             return False
         if self.editing in names:
             self.dragChosen(None)
-        for name in names:
-            piece = self.job.Document.getObject(name)
-            if piece is not None and piece.isAttachedToDocument():
-                Items.removePiece(piece)
-            # forgotten only once it is gone
-            self.previewing = [n for n in self.previewing if n != name]
+        doc = self.job.Document
+        there = [doc.getObject(name) for name in names]
+        Items.removePieces([p for p in there if p is not None and p.isAttachedToDocument()])
+        # forgotten only once gone
+        self.previewing = [name for name in self.previewing if doc.getObject(name) is not None]
         if again:
             self.preview()
         return True
