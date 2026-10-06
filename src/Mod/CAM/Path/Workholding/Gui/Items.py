@@ -1419,11 +1419,11 @@ class _StopsClamps:
     # picking its row
 
     def makePickable(self):
-        """The stops and clamps, and their parts, picked in the 3D view while the panel is open;
-        how each was kept to put back."""
+        """The vises, stops and clamps, and their parts, picked in the 3D view while the panel is
+        open; how each was kept to put back."""
         if self.pickable is None:
             return
-        for piece in Items.itemsOf(self.job):
+        for piece in PathWorkholding.vises(self.job) + Items.itemsOf(self.job):
             for obj in [piece] + list(getattr(piece, "Group", []) or []):
                 vobj = getattr(obj, "ViewObject", None)
                 if vobj is None or "Selectable" not in vobj.PropertiesList:
@@ -1563,7 +1563,8 @@ class _StopsClamps:
         return found
 
     def pickedInView(self):
-        """The stops and clamps of this Job picked in the 3D view: a part of one is the piece."""
+        """The vises, stops and clamps of this Job picked in the 3D view: a part of one is the
+        piece."""
         found = []
         for sel in FreeCADGui.Selection.getSelectionEx(self.job.Document.Name):
             objects = [sel.Object]
