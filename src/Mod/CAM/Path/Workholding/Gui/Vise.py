@@ -1272,16 +1272,15 @@ class TaskPanelVise:
         # along the jaws, from the stock's middle: where each vise's jaws' middle goes
         at = -self.offset.property("rawValue")
         width = PathWorkholding._jawWidth(first) or 0.0
-        slots = Items.spread(high - low, len(vises))
-        if getattr(self, "addingPinned", False) and len(vises) > 1:
-            if abs(2 * at) >= (len(vises) - 1) * width:
-                slots = [at + (-2 * at) * i / (len(vises) - 1) for i in range(len(vises))]
-        elif len(vises) == 1 and getattr(self, "addingPinned", False):
-            slots = [at]
-        mine = min(range(len(slots)), key=lambda i: abs(slots[i] - at))
-        rest = [x for i, x in enumerate(slots) if i != mine]
-        if abs(slots[mine] - at) > 1e-6:
-            self.showOffset(-slots[mine])
+        pinned = [at] if getattr(self, "addingPinned", False) else []
+        places = Items.spanSlots(high - low, len(vises), pinned, width)
+        mine = next((x for x, k in places if k == 0), None)
+        if mine is None:
+            # not moved: the first takes the place nearest where it is
+            mine = min((x for x, _ in places), key=lambda x: abs(x - at))
+        rest = [x for x, k in places if k is None and x != mine]
+        if abs(mine - at) > 1e-6:
+            self.showOffset(-mine)
             self.preview()
         for vise, x in zip(vises[1:], rest):
             self.seatVise(vise, -x, moveVise=True)

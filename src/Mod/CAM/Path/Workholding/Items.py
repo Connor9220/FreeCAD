@@ -522,39 +522,52 @@ def sideFrame(job, side):
     return FreeCAD.Placement(middle + out * half, _turnOf(along, inward)), length
 
 
-def _slots(job, group, frame, length):
-    """Where each of a side's pieces is spread to, in its frame. None moved: the side's even
-    shares. One moved: from it to as far the other way from the side's middle, the next added
-    there and the others between, in the order they were added. Two or more moved: evenly from
-    the first moved to the last, the others between them. Each moved piece takes the place
-    nearest where it is, the others the rest in order. Too narrow a span for them side by side,
-    or fences, which share the side's length: the side's even shares."""
-    count = len(group)
-    pinned = [p for p in group if getattr(p, "Pinned", False)]
+def spanSlots(length, count, pinned, width):
+    """spanSlots(length, count, pinned, width) ... where count pieces go along a line length long,
+    from its middle, pinned the places of those moved there, width how wide each is: as a list of
+    (place, the index into pinned of the one that takes it or None). None moved: the even shares.
+    One moved: from it to as far the other way from the middle, the next added there and the
+    others between, in order. Two or more: evenly from the first moved to the last. Each moved one
+    takes the place nearest it, the others the rest in order. Too narrow a span for them side by
+    side: the even shares."""
     slots = spread(length, count)
-    fences = any(isinstance(getattr(p, "Proxy", None), ObjectFence) for p in group)
-    if pinned and count > 1 and not fences:
-        at = [_alongSide(job, p, frame, 0.0) for p in pinned]
+    if pinned and count > 1:
         if len(pinned) == 1:
-            # from it to its mirror about the side's middle
-            start, end = at[0], -at[0]
+            # from it to its mirror about the middle
+            start, end = pinned[0], -pinned[0]
         else:
-            start, end = min(at), max(at)
-        low, high = _widthAlong(job, group[0])
-        if abs(end - start) >= (count - 1) * (high - low):
+            start, end = min(pinned), max(pinned)
+        if abs(end - start) >= (count - 1) * width:
             slots = [start + (end - start) * i / (count - 1) for i in range(count)]
+    elif pinned and count == 1:
+        slots = [pinned[0]]
     taken = {}
-    # nearest first, so a piece pinned on a place keeps it
-    wants = sorted(
-        (abs(_alongSide(job, p, frame, 0.0) - x), i, p.Name)
-        for p in pinned
-        for i, x in enumerate(slots)
+    # nearest first, so one moved onto a place keeps it
+    wants = sorted((abs(at - x), i, k) for k, at in enumerate(pinned) for i, x in enumerate(slots))
+    for _, i, k in wants:
+        if k not in taken and i not in taken.values():
+            taken[k] = i
+    owner = {i: k for k, i in taken.items()}
+    return [(x, owner.get(i)) for i, x in enumerate(slots)]
+
+
+def _slots(job, group, frame, length):
+    """Where each of a side's pieces is spread to, in its frame, as spanSlots says; fences,
+    which share the side's length, to its even shares."""
+    pinned = [p for p in group if getattr(p, "Pinned", False)]
+    if any(isinstance(getattr(p, "Proxy", None), ObjectFence) for p in group):
+        pinned = []
+    low, high = _widthAlong(job, group[0]) if pinned else (0.0, 0.0)
+    places = spanSlots(
+        length, len(group), [_alongSide(job, p, frame, 0.0) for p in pinned], high - low
     )
-    for _, i, name in wants:
-        if name not in taken and i not in taken.values():
-            taken[name] = i
-    free = iter(i for i in range(len(slots)) if i not in taken.values())
-    return [slots[taken[p.Name]] if p.Name in taken else slots[next(free)] for p in group]
+    byPinned = {k: x for x, k in places if k is not None}
+    free = iter(x for x, k in places if k is None)
+    out = []
+    for p in group:
+        k = pinned.index(p) if p in pinned else None
+        out.append(byPinned[k] if k is not None else next(free))
+    return out
 
 
 def spread(length, count):
