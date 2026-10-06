@@ -931,46 +931,11 @@ class TaskPanelVise:
         layout = sections[0][1]
         ui = FreeCADGui.UiLoader()
 
-        # the Job's vises, then those to add: (kind, vise or path) for each entry
-        self.vise = QtWidgets.QComboBox()
-        self.entries = []
         vises = PathWorkholding.vises(job)
-        if not vises:
-            self.addEntry(translate("CAM_AddVise", "Choose a vise…"), ("none", None))
-        for each in vises:
-            self.addEntry(each.Label, ("vise", each))
-        # vises of other Jobs with a station free, shared: a vise of this Job's own placed with
-        # theirs
-        for owner in _shareable(job):
-            free = PathWorkholding.freeStations(owner)
-            self.addEntry(
-                translate("CAM_Workholding", "%s, in %s (station %s free)")
-                % (
-                    owner.Label,
-                    PathWorkholding.memberOf(owner)[0].Label,
-                    ", ".join(str(n) for n in free),
-                ),
-                ("share", owner),
-            )
-        self.lastVise = 0
         if vise in vises or (vise is None and vises):
             self.existing = vise or vises[0]
-            self.lastVise = vises.index(self.existing)
             # as its file now has it, the file open with the Job
             PathWorkholding.refreshSettings(self.existing)
-        self.vise.setCurrentIndex(self.lastVise)
-        self.browse = Widgets.browseButton(
-            translate("CAM_Workholding", "Choose a vise on this computer or from a library")
-        )
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(self.vise, 1)
-        row.addWidget(self.browse)
-        layout.addRow(translate("CAM_SeatInVise", "Vise"), row)
-        # vises are picked in Add and in Placed with the stops and clamps: this row is the
-        # panel's own, not shown
-        for widget in (layout.labelForField(row), self.vise, self.browse):
-            if widget is not None:
-                widget.setVisible(False)
         # the station of a vise of several the stock goes in: its own, or one free
         self.station = QtWidgets.QComboBox()
         self.station.setToolTip(
@@ -1177,8 +1142,6 @@ class TaskPanelVise:
         _alignLabels([layout for _, layout in sections] + self.stops.layouts)
         _alignPairs([section for section, _ in sections])
 
-        self.vise.currentIndexChanged.connect(self.viseChanged)
-        self.browse.clicked.connect(self.browseVise)
         self.standsOn.currentIndexChanged.connect(self.heightByChanged)
         self.parallels.changed.connect(self.updateOther)
         self.step.currentIndexChanged.connect(self.updateOther)
@@ -1264,13 +1227,9 @@ class TaskPanelVise:
         if not (self.adding and getattr(self, "addingFor", None) == want):
             if kind == "viseshare":
                 owner = self.job.Document.getObject(value)
-                index = next(
-                    (i for i, e in enumerate(self.entries) if e[0] == "share" and e[1] == owner),
-                    None,
-                )
-                if owner is None or index is None:
+                if owner is None or owner not in _shareable(self.job):
                     return False
-                self.shareChanged(index, owner)
+                self.shareChanged(owner)
             else:
                 self.addFile(value)
             self.addingFor = want if self.adding else None
@@ -1380,56 +1339,11 @@ class TaskPanelVise:
             self.pending = False
         return True
 
-    def fileEntry(self, path):
-        """Where the vise's file at path is in the list, None if it is not."""
-        for i, (kind, value) in enumerate(self.entries):
-            if kind == "file" and os.path.realpath(value) == os.path.realpath(path):
-                return i
-        return None
-
-    def addEntry(self, label, entry, index=None):
-        if index is None:
-            index = self.vise.count()
-        self.vise.insertItem(index, label)
-        self.entries.insert(index, entry)
-
     def current(self):
         """The Job and the vise to seat its stock in, None if none is chosen."""
         if self.adding:
             return self.job, self.adding.vise
         return self.job, self.existing
-
-    def viseChanged(self, index):
-        """A vise the Job has, the one being added dropped; another Job's shared; or the one
-        being added again."""
-        kind, value = self.entries[index]
-        if kind == "vise":
-            if self.adding:
-                self.adding.finish(keep=False)
-                self.adding = None
-            self.existing = value
-            PathWorkholding.refreshSettings(value)
-            self.lastVise = index
-            self.updateGrip()
-            return
-        if kind == "share":
-            self.shareChanged(index, value)
-            return
-        if kind == "file":
-            self.addFile(value)
-            return
-        self.vise.blockSignals(True)
-        self.vise.setCurrentIndex(self.lastVise)
-        self.vise.blockSignals(False)
-
-    def browseVise(self):
-        """A vise chosen in the browser, on this computer or from a library, added in the place
-        of the one being added."""
-        import Path.Workholding.Gui.Library as LibraryGui
-
-        path = LibraryGui.getVise()
-        if path:
-            self.addFile(path)
 
     def addFile(self, path):
         """The vise in the file at path added, in the place of the one being added: listed and
@@ -1462,28 +1376,12 @@ class TaskPanelVise:
                     FreeCADGui.getMainWindow(), translate("CAM_AddVise", "Add Vise"), str(e)
                 )
                 path = None
-        self.vise.blockSignals(True)
-        if path:
-            found = self.fileEntry(path)
-            if found is None:
-                # the one being added in place of another being added
-                for i in reversed(range(len(self.entries))):
-                    if self.entries[i][0] == "file":
-                        self.vise.removeItem(i)
-                        self.entries.pop(i)
-                self.addEntry(self.adding.vise.Label, ("file", path))
-                found = self.vise.count() - 1
-            self.vise.setCurrentIndex(found)
-            self.lastVise = found
-        else:
-            self.vise.setCurrentIndex(self.lastVise)
-        self.vise.blockSignals(False)
         if path:
             self.updateGrip()
             # seated on the stock as it comes in
             self.preview()
 
-    def shareChanged(self, index, owner):
+    def shareChanged(self, owner):
         """A vise of another Job shared, in the place of the one being added."""
         self.begin()
         adding = self.adding or _Adding(self.job)
@@ -1497,16 +1395,12 @@ class TaskPanelVise:
             QtWidgets.QMessageBox.warning(
                 FreeCADGui.getMainWindow(), translate("CAM_AddVise", "Add Vise"), str(e)
             )
-            self.vise.blockSignals(True)
-            self.vise.setCurrentIndex(self.lastVise)
-            self.vise.blockSignals(False)
             return
         self.adding = adding
         self.existing = None
         # placed where the owner is: turned as it is, the part moving to it
         self.chooseSide = False
         self.fresh = True
-        self.lastVise = index
         self.updateGrip()
         self.preview()
 
