@@ -958,6 +958,12 @@ class _StopsClamps:
             self.previewAgain = True
             return
         self.previewBusy = True
+        if self.item.currentData() is not None and self.list.selectionModel().hasSelection():
+            # what Add shows or a piece placed, one at a time: the placed one let go first
+            self.list.blockSignals(True)
+            self.list.clearSelection()
+            self.list.setCurrentCell(-1, -1)
+            self.list.blockSignals(False)
         try:
             self.previewAgain = True
             while self.previewAgain:
@@ -966,7 +972,10 @@ class _StopsClamps:
                 if _kindOf(which) in ("vise", "viseshare"):
                     self.dropPieces()
                     self.panel.previewAdd(
-                        which, self.viseSeat.currentData(), self.viseJaw.currentData()
+                        which,
+                        self.viseSeat.currentData(),
+                        self.viseJaw.currentData(),
+                        self.count.value() if _kindOf(which) == "vise" else 1,
                     )
                 else:
                     self.panel.dropAdd()
@@ -1583,8 +1592,8 @@ class _StopsClamps:
         # what Add only shows is not placed until Add keeps it
         shown = set(getattr(self, "previewing", []))
         adding = getattr(self.panel, "adding", None)
-        if adding is not None and adding.vise is not None:
-            shown.add(adding.vise.Name)
+        if adding is not None:
+            shown.update(vise.Name for vise in adding.all())
         pieces = [piece for piece in pieces if piece.Name not in shown]
 
         def order(piece):
@@ -2320,6 +2329,11 @@ class _StopsClamps:
                     if turn is not None:
                         self.panel.showTurn(turn)
                 self.panel.preview()
+                adding = self.panel.adding
+                if adding and piece is adding.vise:
+                    # the first of a row moved: the others spread from where it now is
+                    self.panel.pinAdd()
+                    self.panel.showMore(self.count.value())
             else:
                 Items.fromTransform(piece, ViewProviders.dragPlacement(piece.ViewObject))
             self.error.setText("")

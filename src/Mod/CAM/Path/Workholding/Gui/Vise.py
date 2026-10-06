@@ -60,17 +60,35 @@ if FreeCAD.GuiUp:
 translate = FreeCAD.Qt.translate
 
 
+def _partPlacements(job):
+    """Where the Job's part is: its models, what is placed on it, its stock; to put back."""
+    import Path.Main.Job as PathJob
+
+    objs = list(job.Model.Group) + list(PathJob.objectsInModelFrame(job))
+    if job.Stock is not None:
+        objs.append(job.Stock)
+    return [(obj.Name, FreeCAD.Placement(obj.Placement)) for obj in objs]
+
+
 class _Adding:
-    """A vise being added to a Job, its transaction open until it is kept or dropped: the vise
-    put in, swapped for another, the file of one no longer used closed again."""
+    """Vises being added to a Job, in the panel's step: the first put in from its file or
+    shared, more of it in a row along the stock; kept by Add, or dropped: taken out again, the
+    part put back where it was, the file of one no longer used closed again."""
 
     def __init__(self, job):
         self.job = job
         self.doc = job.Document
         self.vise = None
+        self.more = []
+        self.found = None
         self.source = None
         self.path = None
-        self.doc.openTransaction(translate("CAM_AddVise", "Add vise"))
+        # where the part was: seating may move it
+        self.before = _partPlacements(job)
+
+    def all(self):
+        """The vises shown, the first first."""
+        return [v for v in [self.vise] + self.more if v is not None]
 
     def put(self, path):
         """The vise of the file at path in the Job, in the place of the one there was."""
@@ -94,6 +112,7 @@ class _Adding:
             placement = FreeCAD.Placement(self.vise.Placement)
             self.drop()
         self.vise = PathWorkholding.addVise(self.job, found, placement)
+        self.found = found
         self.source = source
         self.path = path
         # the links to the previous file gone first, then the file: the other way round, a
@@ -103,12 +122,38 @@ class _Adding:
             FreeCADGui.setActiveDocument(self.doc.Name)
         return self.vise
 
+    def another(self):
+        """One more of the vise from its file, in a row with the first; None for one shared."""
+        if self.found is None or self.vise is None:
+            return None
+        vise = PathWorkholding.addVise(self.job, self.found, FreeCAD.Placement(self.vise.Placement))
+        self.more.append(vise)
+        return vise
+
+    def fewer(self, count):
+        """The last of the vises shown taken out, count of them left, the first kept."""
+        while len(self.more) > max(0, count - 1):
+            self._remove(self.more.pop())
+
+    def _remove(self, vise):
+        try:
+            if not vise.isAttachedToDocument():
+                return
+        except ReferenceError:
+            return
+        PathWorkholding.release(vise)
+        for obj in list(vise.Group) + [vise]:
+            try:
+                self.doc.removeObject(obj.Name)
+            except Exception:
+                pass
+
     def drop(self):
-        """The vise put in taken out again, no longer shared."""
-        PathWorkholding.release(self.vise)
-        for obj in list(self.vise.Group) + [self.vise]:
-            self.doc.removeObject(obj.Name)
+        """The vises put in taken out again, no longer shared."""
+        for vise in self.all():
+            self._remove(vise)
         self.vise = None
+        self.more = []
 
     def share(self, owner):
         """A vise of another Job, owner, shared with the Job in the place of the one there was:
@@ -117,6 +162,7 @@ class _Adding:
         if self.vise is not None:
             self.drop()
         self.vise = PathWorkholding.shareVise(owner, self.job)
+        self.found = None
         self.source = None
         self.path = None
         if previous is not None:
@@ -125,11 +171,14 @@ class _Adding:
         return self.vise
 
     def finish(self, keep):
-        """The vise kept, its add one undoable step, or dropped without a trace."""
-        if keep:
-            self.doc.commitTransaction()
-        else:
-            self.doc.abortTransaction()
+        """The vises kept, in the panel's step; or dropped: taken out, the part back where it
+        was."""
+        if not keep:
+            self.drop()
+            for name, placement in self.before:
+                obj = self.doc.getObject(name)
+                if obj is not None and not obj.Placement.isSame(placement, 1e-9):
+                    obj.Placement = placement
             PathWorkholding.recompute(self.doc)
         if self.source is not None:
             _closeIfUnused(self.source)
@@ -1204,10 +1253,12 @@ class TaskPanelVise:
         self.updateFit()
         self.showSeat()
 
-    def previewAdd(self, which, seat, jaw):
+    def previewAdd(self, which, seat, jaw, count=1):
         """The vise Add has picked put in the view, seated with the side of the stock on its
         bottom and the side against its fixed jaw asked for: from its file, or another Job's
-        shared. Pending: Add keeps it, picking another drops it. True if it is in."""
+        shared; count of one from its file in a row along the stock, spread along it as stops
+        and clamps are along a side. Pending: Add keeps them, picking another drops them. True
+        if the first is in."""
         kind, value = which
         want = (kind, value if kind == "viseshare" else os.path.realpath(value))
         if not (self.adding and getattr(self, "addingFor", None) == want):
@@ -1223,22 +1274,66 @@ class TaskPanelVise:
             else:
                 self.addFile(value)
             self.addingFor = want if self.adding else None
+            self.addingPinned = False
+            self.addingTurn = None
         if not self.adding or self.adding.vise is None:
             return False
         # another Job's vise stays turned as it is; one from its file as Add says
         if kind != "viseshare" and seat is not None:
-            self.seat.blockSignals(True)
-            self.seat.setCurrentIndex(max(0, self.seat.findData(seat)))
-            self.seat.blockSignals(False)
-            self.seatChanged(jaw=jaw)
-            self.preview()
+            turned = (seat, jaw) != getattr(self, "addingTurn", None)
+            self.addingTurn = (seat, jaw)
+            if turned:
+                self.seat.blockSignals(True)
+                self.seat.setCurrentIndex(max(0, self.seat.findData(seat)))
+                self.seat.blockSignals(False)
+                self.seatChanged(jaw=jaw)
+                self.preview()
+        self.showMore(count if kind == "vise" else 1)
+        if not self.adding or self.adding.vise is None:
+            return False
         self.focusChanged()
         # moved along the jaws and turned by its dragger before Add keeps it
         self.stops.dragChosen(self.adding.vise)
         return True
 
+    def showMore(self, count):
+        """As many of the vise shown as count, in a row along the stock, the first where it was
+        dragged to and the rest spread from it as stops and clamps are, or all spread evenly."""
+        adding = self.adding
+        if not adding or adding.vise is None:
+            return
+        adding.fewer(count)
+        while len(adding.all()) < count:
+            if adding.another() is None:
+                break
+        vises = adding.all()
+        job, first = self.job, adding.vise
+        station = PathWorkholding.stationPlacement(first)
+        low, high = PathWorkholding._stockIn(job, station)[1]
+        # along the jaws, from the stock's middle: where each vise's jaws' middle goes
+        at = -self.offset.property("rawValue")
+        width = PathWorkholding._jawWidth(first) or 0.0
+        slots = Items.spread(high - low, len(vises))
+        if getattr(self, "addingPinned", False) and len(vises) > 1:
+            if abs(2 * at) >= (len(vises) - 1) * width:
+                slots = [at + (-2 * at) * i / (len(vises) - 1) for i in range(len(vises))]
+        elif len(vises) == 1 and getattr(self, "addingPinned", False):
+            slots = [at]
+        mine = min(range(len(slots)), key=lambda i: abs(slots[i] - at))
+        rest = [x for i, x in enumerate(slots) if i != mine]
+        if abs(slots[mine] - at) > 1e-6:
+            self.showOffset(-slots[mine])
+            self.preview()
+        for vise, x in zip(vises[1:], rest):
+            self.seatVise(vise, -x, moveVise=True)
+        self.stops.fillList()
+
+    def pinAdd(self):
+        """The vise being added dragged along the jaws: where it is the others spread from."""
+        self.addingPinned = True
+
     def dropAdd(self):
-        """The vise Add had picked taken out of the view again, no trace left."""
+        """The vises Add had picked taken out of the view again, the part back where it was."""
         if not self.adding:
             return
         self.previewTimer.stop()
@@ -1246,61 +1341,32 @@ class TaskPanelVise:
         self.adding.finish(keep=False)
         self.adding = None
         self.addingFor = None
+        self.addingTurn = None
         self.existing = None
         self.focusChanged()
 
     def addVise(self, which, seat, jaw, count=1):
-        """Add's vise kept: put in as picked, seated, picked in Placed; with count, as many of it
-        in a row along a long stock, all holding it, spread along it as clamps are along a side,
-        each moved to it. True if the first was."""
-        offsets = [self.offset.property("rawValue")]
-        if count > 1 and which[0] == "vise":
-            offsets = self.alongStock(which, seat, jaw, count)
-        moves = self.moveVise.isChecked()
-        first = None
-        try:
-            for i, offset in enumerate(offsets):
-                self.showOffset(offset)
-                if i:
-                    # the others go to the stock, held where the first put it
-                    self.moveVise.setChecked(True)
-                    self.addingFor = None
-                if not self.previewAdd(which, seat, jaw):
-                    break
-                self.showOffset(offset)
-                if not self.apply():
-                    break
-                vise = self.adding.vise
-                self.adding.finish(keep=True)
-                self.adding = None
-                self.addingFor = None
-                first = first or vise
-        finally:
-            (self.moveVise if moves else self.movePart).setChecked(True)
-        if first is None:
+        """Add's vises kept in the panel's step: put in as picked and seated, as many as count
+        in a row along the stock, the first picked in Placed. True if it was."""
+        if not self.previewAdd(which, seat, jaw, count):
             return False
+        if not self.preview():
+            return False
+        first = self.adding.vise
+        self.adding.finish(keep=True)
+        self.adding = None
+        self.addingFor = None
+        self.addingTurn = None
         self.existing = first
         self.updateGrip()
         self.stops.readIn(first)
         return True
 
-    def alongStock(self, which, seat, jaw, count):
-        """Where count vises go along the stock, as offsets from their jaws' middle: its length
-        along their jaws shared evenly, as clamps spread along a side."""
-        if not self.previewAdd(which, seat, jaw):
-            return [0.0] * count
-        job, vise = self.current()
-        station = PathWorkholding.stationPlacement(vise)
-        low, high = PathWorkholding._stockIn(job, station)[1]
-        length = high - low
-        # the stock's middle where each vise's jaws' middle is
-        return [-x for x in Items.spread(length, count)]
-
     def begin(self):
         """The step the stops' and clamps' changes go into, opened if it is not: pending until
         OK or Apply keep it, Cancel undoes it."""
-        if not self.adding and not self.pending:
-            self.job.Document.openTransaction(translate("CAM_Workholding", "Stops and clamps"))
+        if not self.pending:
+            self.job.Document.openTransaction(translate("CAM_Workholding", "Workholding"))
             self.pending = True
 
     def applyStops(self):
@@ -1380,9 +1446,8 @@ class TaskPanelVise:
             )
             path = None
         if path:
-            if not self.adding:
-                # the add's transaction keeps what was seated before it
-                self.pending = False
+            # in the panel's step, with what was changed before it
+            self.begin()
             adding = self.adding or _Adding(self.job)
             try:
                 adding.put(path)
@@ -1420,9 +1485,7 @@ class TaskPanelVise:
 
     def shareChanged(self, index, owner):
         """A vise of another Job shared, in the place of the one being added."""
-        if not self.adding:
-            # the add's transaction keeps what was seated before it
-            self.pending = False
+        self.begin()
         adding = self.adding or _Adding(self.job)
         try:
             adding.share(owner)
@@ -1891,10 +1954,13 @@ class TaskPanelVise:
         job, vise = self.current()
         if vise is None:
             return False
-        doc = job.Document
-        if not self.adding and not self.pending:
-            doc.openTransaction(translate("CAM_SeatInVise", "Seat in vise"))
-            self.pending = True
+        self.begin()
+        return self.seatVise(vise)
+
+    def seatVise(self, vise, offset=None, moveVise=None):
+        """vise seated as the panel says: at offset along its jaws and moved itself when given,
+        else as the panel's own. True if it could be."""
+        job = self.job
         # on a step, the step only; on parallels, the pair; on the floor, parallels of no height;
         # a vise that does not say how tall its jaws are, as the stock stands
         on = {}
@@ -1916,20 +1982,25 @@ class TaskPanelVise:
             self.done = PathWorkholding.seat(
                 job,
                 vise,
-                offset=self.offset.property("rawValue"),
+                offset=self.offset.property("rawValue") if offset is None else offset,
                 center=True,
                 close=self.close.isChecked(),
-                moveVise=self.moveVise.isChecked(),
+                moveVise=self.moveVise.isChecked() if moveVise is None else moveVise,
                 rotation=self.turn(),
                 quiet=True,
                 **on,
             )
         except ValueError as e:
+            if vise is not self.current()[1]:
+                return False
             # why not, in place of what it would come to
             self.fit.setText(str(e))
             self.other.setText("")
             self.clearance.setText("")
             return False
+        if vise is not self.current()[1]:
+            # another of a row: the panel shows the first
+            return True
         self.updateFit()
         self.showSeat()
         # what it comes to, as seated: the jaws now as chosen
