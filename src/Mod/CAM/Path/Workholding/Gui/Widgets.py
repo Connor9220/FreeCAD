@@ -32,12 +32,26 @@ if FreeCAD.GuiUp:
 translate = FreeCAD.Qt.translate
 
 
+def quantityBox(ui):
+    """quantityBox(ui) ... a Gui::QuantitySpinBox made by ui, a FreeCADGui.UiLoader. A box made
+    where one the panel closed before was, Python not told it was deleted, comes back as that
+    one, dead: made again."""
+    for _ in range(8):
+        box = ui.createWidget("Gui::QuantitySpinBox")
+        try:
+            box.objectName()
+            return box
+        except RuntimeError:
+            continue
+    return ui.createWidget("Gui::QuantitySpinBox")
+
+
 def mmBox(ui, tip=None, value=None, step=None, minimum=0.0):
     """mmBox(ui, tip=None, value=None, step=None, minimum=0.0) ... a box for a length in mm, as
     the user's units show it, made by ui, a FreeCADGui.UiLoader: its tooltip, value, the step a
     click takes in the unit it shows, a tenth of it when not given, and its minimum: none below
     0 unless given, a coordinate's lower."""
-    box = ui.createWidget("Gui::QuantitySpinBox")
+    box = quantityBox(ui)
     box.setProperty("unit", "mm")
     # what is typed put in on Enter or leaving the box, as CAM's other panels do; the arrows and
     # the wheel at once

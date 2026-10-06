@@ -675,7 +675,7 @@ class _StopsClamps:
         layout.addRow(holder)
         self.placeRow = holder
         # a side clamp picked: how far it is turned, pushing at a slant
-        self.slant = self.ui.createWidget("Gui::QuantitySpinBox")
+        self.slant = Widgets.quantityBox(self.ui)
         self.slant.setKeyboardTracking(False)
         self.slant.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
         self.slant.setProperty("unit", "deg")
@@ -714,7 +714,7 @@ class _StopsClamps:
         row.addWidget(QtWidgets.QLabel("Y"))
         row.addWidget(self.pressY, 1)
         self._leverRow(layout, translate("CAM_Workholding", "Presses at"), row)
-        self.angle = self.ui.createWidget("Gui::QuantitySpinBox")
+        self.angle = Widgets.quantityBox(self.ui)
         self.angle.setKeyboardTracking(False)
         self.angle.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
         self.angle.setProperty("unit", "deg")
