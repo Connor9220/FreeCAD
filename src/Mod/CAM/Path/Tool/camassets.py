@@ -165,7 +165,7 @@ def ensure_toolholder_assets_initialized(asset_manager: AssetManager, store_name
     Ensures the folder for the user's own tool holders exists. The built-in holders are not
     copied there: they are read from where FreeCAD is installed.
     """
-    holder_path = Preferences.getAssetPath() / "Tools" / "Holder"
+    holder_path = Preferences.getAssetPath() / "Tools" / "ToolHolder"
     holder_path.mkdir(parents=True, exist_ok=True)
 
 
@@ -192,7 +192,7 @@ asset_mapping = {
     "toolbitshape": "Tools/Shape/{asset_id}.fcstd",
     "toolbitshapesvg": "Tools/Shape/{asset_id}",  # Asset ID has ".svg" included
     "toolbitshapepng": "Tools/Shape/{asset_id}",  # Asset ID has ".png" included
-    "toolholder": "Tools/Holder/{asset_id}.fcholder",
+    "toolholder": "Tools/ToolHolder/{asset_id}.fcholder",
     "machine": "Machine/{asset_id}.fcm",
 }
 
@@ -203,7 +203,7 @@ builtin_asset_mapping = {
     "toolbitshape": "Shape/{asset_id}.fcstd",
     "toolbitshapesvg": "Shape/{asset_id}",  # Asset ID has ".svg" included
     "toolbitshapepng": "Shape/{asset_id}",  # Asset ID has ".png" included
-    "toolholder": "Holder/{asset_id}.fcholder",
+    "toolholder": "ToolHolder/{asset_id}.fcholder",
     "machine": "Machine/{asset_id}.fcm",
 }
 

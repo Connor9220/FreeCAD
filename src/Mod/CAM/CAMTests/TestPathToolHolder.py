@@ -58,7 +58,7 @@ class TestPathToolHolder(unittest.TestCase):
         self.local_dir.cleanup()
 
     def write_local(self, id, data):
-        folder = pathlib.Path(self.local_dir.name) / "Tools" / "Holder"
+        folder = pathlib.Path(self.local_dir.name) / "Tools" / "ToolHolder"
         folder.mkdir(parents=True, exist_ok=True)
         text = data if isinstance(data, str) else json.dumps(data)
         (folder / f"{id}.fcholder").write_text(text)
@@ -158,27 +158,27 @@ class TestPathToolBitHolder(PathTestWithAssets):
         self.assertIsNone(bit.get_holder_id())
         self.assertIsNone(bit.get_holder(self.assets))
         self.assertEqual(bit.get_stickout().Value, 0)
-        self.assertNotIn("Holder", bit.to_dict()["parameter"])
+        self.assertNotIn("ToolHolder", bit.to_dict()["parameter"])
         self.assertNotIn("Stickout", bit.to_dict()["parameter"])
 
     def test11_bit_in_holder(self):
         """A bit's holder and stickout load, find the holder, and save again."""
-        bit = self.bit(Holder="ER20_Standard", Stickout="1.2500 in")
+        bit = self.bit(ToolHolder="ER20_Standard", Stickout="1.2500 in")
         self.assertEqual(bit.get_holder_id(), "ER20_Standard")
         self.assertAlmostEqual(bit.get_stickout().getValueAs("mm").Value, 31.75)
         self.assertAlmostEqual(bit.get_holder(self.assets).diameter, 35.0)
         params = bit.to_dict()["parameter"]
-        self.assertEqual(params["Holder"], "ER20_Standard")
+        self.assertEqual(params["ToolHolder"], "ER20_Standard")
         again = ToolBit.from_dict(bit.to_dict())
         self.assertEqual(again.get_holder_id(), "ER20_Standard")
         self.assertAlmostEqual(again.get_stickout().getValueAs("mm").Value, 31.75)
 
     def test12_unknown_holder_kept(self):
         """A holder that is not here is kept by its id, not lost on saving."""
-        bit = self.bit(Holder="Shop_Shrink_Fit")
+        bit = self.bit(ToolHolder="Shop_Shrink_Fit")
         self.assertEqual(bit.get_holder_id(), "Shop_Shrink_Fit")
         self.assertIsNone(bit.get_holder(self.assets))
-        self.assertEqual(bit.to_dict()["parameter"]["Holder"], "Shop_Shrink_Fit")
+        self.assertEqual(bit.to_dict()["parameter"]["ToolHolder"], "Shop_Shrink_Fit")
 
     def test14_unreadable_holder_is_none(self):
         """A holder whose file cannot be read is no holder, not an error for the caller."""
@@ -187,17 +187,17 @@ class TestPathToolBitHolder(PathTestWithAssets):
             def get_or_none(self, uri, *args, **kwargs):
                 raise ValueError("not a holder file")
 
-        bit = self.bit(Holder="ER20_Standard")
+        bit = self.bit(ToolHolder="ER20_Standard")
         self.assertIsNone(bit.get_holder(Broken()))
 
     def test13_change_holder(self):
         """A bit can be moved to another holder, and out of one."""
-        bit = self.bit(Holder="ER20_Standard")
+        bit = self.bit(ToolHolder="ER20_Standard")
         bit.set_holder_id("ER11_Mini")
         self.assertEqual(bit.get_holder_id(), "ER11_Mini")
         bit.set_holder_id(None)
         self.assertIsNone(bit.get_holder_id())
-        self.assertNotIn("Holder", bit.to_dict()["parameter"])
+        self.assertNotIn("ToolHolder", bit.to_dict()["parameter"])
 
     def test15_stickout_in_bit_units(self):
         """Stickout saves in the bit's units, also for a bit whose file does not name them."""
@@ -219,9 +219,9 @@ class TestPathToolBitHolder(PathTestWithAssets):
         """A bit put in a document keeps its holder and stickout."""
         doc = FreeCAD.newDocument("TestToolBitHolder")
         try:
-            bit = self.bit(Holder="ER32_Standard", Stickout="40 mm")
+            bit = self.bit(ToolHolder="ER32_Standard", Stickout="40 mm")
             obj = bit.attach_to_doc(doc)
-            self.assertEqual(obj.Holder, "ER32_Standard")
+            self.assertEqual(obj.ToolHolder, "ER32_Standard")
             self.assertAlmostEqual(obj.Stickout.Value, 40.0)
             self.assertEqual(obj.Proxy.get_holder_id(), "ER32_Standard")
         finally:

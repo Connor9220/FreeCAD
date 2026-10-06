@@ -40,7 +40,7 @@ from ...shape import ToolBitShape, ToolBitShapeCustom, ToolBitShapeIcon
 from ..util import to_json, format_value, units_from_json
 from ..migration import ParameterAccessor, migrate_parameters
 
-# The Holder of a bit that is not in one
+# The ToolHolder of a bit that is not in one
 NoHolder = "None"
 
 ToolBitView = LazyLoader("Path.Tool.toolbit.ui.view", globals(), "Path.Tool.toolbit.ui.view")
@@ -229,7 +229,7 @@ class ToolBit(Asset, ABC):
         # Update parameters.
         for param_name, param_value in params.items():
             tool_bit_shape.set_parameter(param_name, param_value)
-            if param_name == "Holder":
+            if param_name == "ToolHolder":
                 toolbit.set_holder_id(param_value)
             elif hasattr(toolbit.obj, param_name):
                 PathUtil.setProperty(toolbit.obj, param_name, param_value)
@@ -240,7 +240,7 @@ class ToolBit(Asset, ABC):
         # Discussion: https://github.com/FreeCAD/FreeCAD/issues/21722
         for attr_name, attr_value in attr.items():
             tool_bit_shape.set_parameter(attr_name, attr_value)
-            if attr_name == "Holder":
+            if attr_name == "ToolHolder":
                 toolbit.set_holder_id(attr_value)
             elif hasattr(toolbit.obj, attr_name):
                 PathUtil.setProperty(toolbit.obj, attr_name, attr_value)
@@ -395,15 +395,15 @@ class ToolBit(Asset, ABC):
             )
             self.obj.Material = ["HSS", "Carbide"]
             self.obj.Material = "HSS"  # Default value
-        if not hasattr(self.obj, "Holder"):
+        if not hasattr(self.obj, "ToolHolder"):
             self.obj.addProperty(
                 "App::PropertyEnumeration",
-                "Holder",
+                "ToolHolder",
                 "Attributes",
                 QT_TRANSLATE_NOOP("App::Property", "The holder or collet nut the tool is set in"),
             )
-            self.obj.Holder = [NoHolder]
-            self.obj.Holder = NoHolder
+            self.obj.ToolHolder = [NoHolder]
+            self.obj.ToolHolder = NoHolder
         if not hasattr(self.obj, "Stickout"):
             self.obj.addProperty(
                 "App::PropertyLength",
@@ -1066,8 +1066,8 @@ class ToolBit(Asset, ABC):
                 )
 
         # A bit in no holder, or with no stickout, saves as it did before there were holders.
-        if attrs["parameter"].get("Holder") == NoHolder:
-            del attrs["parameter"]["Holder"]
+        if attrs["parameter"].get("ToolHolder") == NoHolder:
+            del attrs["parameter"]["ToolHolder"]
         stickout = getattr(self.obj, "Stickout", None)
         if (
             isinstance(stickout, FreeCAD.Units.Quantity)
@@ -1167,36 +1167,36 @@ class ToolBit(Asset, ABC):
 
     def get_holder_id(self) -> Optional[str]:
         """The id of the holder the bit is set in, or None if it is in none."""
-        holder_id = getattr(self.obj, "Holder", NoHolder)
+        holder_id = getattr(self.obj, "ToolHolder", NoHolder)
         return None if not holder_id or holder_id == NoHolder else holder_id
 
     def set_holder_id(self, holder_id: Optional[str]):
         """Sets the bit in the holder of that id, or in none for None. A holder that is not
         there is kept by its id, so a bit set up elsewhere keeps its holder."""
         holder_id = holder_id or NoHolder
-        choices = self.obj.getEnumerationsOfProperty("Holder")
+        choices = self.obj.getEnumerationsOfProperty("ToolHolder")
         if holder_id not in choices:
-            self.obj.Holder = choices + [holder_id]
-        self.obj.Holder = holder_id
+            self.obj.ToolHolder = choices + [holder_id]
+        self.obj.ToolHolder = holder_id
 
     def refresh_holder_choices(self):
         """Offers every holder there is, keeping the one the bit is set in."""
         from ...holder import available_holders
 
-        current = self.obj.Holder
+        current = self.obj.ToolHolder
         choices = [NoHolder] + sorted(available_holders())
         if current not in choices:
             choices.append(current)
-        if self.obj.getEnumerationsOfProperty("Holder") == choices:
+        if self.obj.getEnumerationsOfProperty("ToolHolder") == choices:
             return
-        self.obj.Holder = choices
-        self.obj.Holder = current
+        self.obj.ToolHolder = choices
+        self.obj.ToolHolder = current
 
     def _offer_holders(self):
-        """The holders there are offered in its Holder, not only in the tool editor: a bit in a
+        """The holders there are offered in its ToolHolder, not only in the tool editor: a bit in a
         document, opened or just added, can be set in any of them. A holder that cannot be read
         leaves the choices as they are."""
-        if not hasattr(self.obj, "Holder"):
+        if not hasattr(self.obj, "ToolHolder"):
             return
         try:
             self.refresh_holder_choices()

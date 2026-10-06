@@ -562,22 +562,22 @@ SET(Tools_Bit_SRCS
     Tools/Bit/slittingsaw.fctb
 )
 
-SET(Tools_Holder_SRCS
-    Tools/Holder/ER11_Mini.fcholder
-    Tools/Holder/ER11_Standard.fcholder
-    Tools/Holder/ER16_Mini.fcholder
-    Tools/Holder/ER16_Standard.fcholder
-    Tools/Holder/ER20_Mini.fcholder
-    Tools/Holder/ER20_Standard.fcholder
-    Tools/Holder/ER25_Mini.fcholder
-    Tools/Holder/ER25_Standard.fcholder
-    Tools/Holder/ER32_Standard.fcholder
-    Tools/Holder/ER40_Standard.fcholder
-    Tools/Holder/ER50_Standard.fcholder
-    Tools/Holder/ER8_Mini.fcholder
-    Tools/Holder/Router_Nut_1_1_8in.fcholder
-    Tools/Holder/Router_Nut_22mm.fcholder
-    Tools/Holder/Router_Nut_24mm.fcholder
+SET(Tools_ToolHolder_SRCS
+    Tools/ToolHolder/ER11_Mini.fcholder
+    Tools/ToolHolder/ER11_Standard.fcholder
+    Tools/ToolHolder/ER16_Mini.fcholder
+    Tools/ToolHolder/ER16_Standard.fcholder
+    Tools/ToolHolder/ER20_Mini.fcholder
+    Tools/ToolHolder/ER20_Standard.fcholder
+    Tools/ToolHolder/ER25_Mini.fcholder
+    Tools/ToolHolder/ER25_Standard.fcholder
+    Tools/ToolHolder/ER32_Standard.fcholder
+    Tools/ToolHolder/ER40_Standard.fcholder
+    Tools/ToolHolder/ER50_Standard.fcholder
+    Tools/ToolHolder/ER8_Mini.fcholder
+    Tools/ToolHolder/Router_Nut_1_1_8in.fcholder
+    Tools/ToolHolder/Router_Nut_22mm.fcholder
+    Tools/ToolHolder/Router_Nut_24mm.fcholder
 )
 
 SET(Tools_Library_SRCS
@@ -869,7 +869,7 @@ SET(all_files
     ${PathPythonGui_SRCS}
     ${Tools_SRCS}
     ${Tools_Bit_SRCS}
-    ${Tools_Holder_SRCS}
+    ${Tools_ToolHolder_SRCS}
     ${Tools_Library_SRCS}
     ${Tools_Shape_SRCS}
     ${Path_Images}
@@ -1254,9 +1254,9 @@ INSTALL(
 
 INSTALL(
     FILES
-        ${Tools_Holder_SRCS}
+        ${Tools_ToolHolder_SRCS}
     DESTINATION
-        Mod/CAM/Tools/Holder
+        Mod/CAM/Tools/ToolHolder
 )
 
 INSTALL(

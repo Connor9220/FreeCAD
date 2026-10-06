@@ -29,8 +29,8 @@ the bit comes out of upward. A bit's stickout is measured from that face. The
 outline is all a simulation or a collision check needs, so no model is opened
 or recomputed to use one.
 
-Holders ship with FreeCAD as .fcholder files in Mod/CAM/Tools/Holder, and the
-CAM asset folder's Tools/Holder is read as well: a holder there replaces the
+Holders ship with FreeCAD as .fcholder files in Mod/CAM/Tools/ToolHolder, and the
+CAM asset folder's Tools/ToolHolder is read as well: a holder there replaces the
 built-in one of the same name.
 """
 

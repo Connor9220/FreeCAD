@@ -209,7 +209,7 @@ class TestUpdateToolFromLibrary(PathTestWithAssets):
         self.assertEqual(len(infos), 1)
         self.assertFalse(infos[0].presets_differ)
         self.assertEqual(infos[0].geometry_changes, [])
-        self.assertEqual([c.name for c in infos[0].setup_changes], ["Holder"])
+        self.assertEqual([c.name for c in infos[0].setup_changes], ["ToolHolder"])
         self.assertEqual(infos[0].setup_changes[0].new_value, "ER32_Standard")
 
     def test_stickout_difference_is_detected(self):

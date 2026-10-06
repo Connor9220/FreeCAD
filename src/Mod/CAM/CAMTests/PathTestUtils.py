@@ -246,7 +246,7 @@ class PathTestWithAssets(PathTestBase):
             self.assets.add_file("toolbit", path)
         for path in pathlib.Path(self.__tool_dir / "Shape").glob("*.fcstd"):
             self.assets.add_file("toolbitshape", path)
-        for path in pathlib.Path(self.__tool_dir / "Holder").glob("*.fcholder"):
+        for path in pathlib.Path(self.__tool_dir / "ToolHolder").glob("*.fcholder"):
             self.assets.add_file("toolholder", path)
 
     def tearDown(self):

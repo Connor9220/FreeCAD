@@ -154,14 +154,14 @@ def diff_tool_geometry(embedded_obj, library_obj) -> List[GeometryChange]:
 
 
 # How the tool is set up rather than what it is: the holder it is set in and how far it sticks out
-SetupProperties = ("Holder", "Stickout")
+SetupProperties = ("ToolHolder", "Stickout")
 
 
 def _setup_value(obj, name):
     """A setup property as the two sides can be compared: a tool from before holders has none, and
     may keep its stickout as text."""
     value = getattr(obj, name, None)
-    if name == "Holder":
+    if name == "ToolHolder":
         return value or NoHolder
     if isinstance(value, str):
         try:
