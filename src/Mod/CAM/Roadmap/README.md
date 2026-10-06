@@ -37,6 +37,14 @@ Any CAM application meeting the needs above must provide functionality in these 
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------- | ------ |
 | [ADR-002](<./ADR/ADR-002.md>) | Internal representation of tool path                                                                       | Legacy |
 | [ADR-007](<./ADR/ADR-007.md>) | Add semantic information to Path Command                                                                   | DRAFT  |
+| [ADR-010](<./ADR/ADR-010.md>) | Workholding components link to their library files                                                         | DRAFT  |
+| [ADR-011](<./ADR/ADR-011.md>) | Workholding library files carry their own provenance                                                       | DRAFT  |
+| [ADR-012](<./ADR/ADR-012.md>) | A vise's placement is the source of truth                                                                  | DRAFT  |
+| [ADR-013](<./ADR/ADR-013.md>) | Lever clamps are placed by a solver                                                                        | DRAFT  |
+| [ADR-014](<./ADR/ADR-014.md>) | A holder is data on the tool bit                                                                           | DRAFT  |
+| [ADR-015](<./ADR/ADR-015.md>) | Cutting edge height says which part of a tool bit cuts                                                     | DRAFT  |
+| [ADR-016](<./ADR/ADR-016.md>) | The simulator plays each operation in its work plane and turns the stock                                   | DRAFT  |
+| [ADR-017](<./ADR/ADR-017.md>) | Simulator stock is a dexel model, cut where it runs fastest                                                | DRAFT  |
 
 
 # ⚠️ Pain Points
