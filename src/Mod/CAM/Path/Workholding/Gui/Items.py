@@ -286,6 +286,16 @@ def _viseFile(vise):
     return found[0].FileName if found and found[0].FileName else None
 
 
+def _viseAngle(placement):
+    """How a vise at placement is turned on the table, degrees: its jaws along the Job's X at 0."""
+    import math
+
+    along = placement.Rotation.multVec(FreeCAD.Vector(1, 0, 0))
+    angle = math.degrees(math.atan2(along.y, along.x))
+    # a hair either side of square shown as it
+    return round(angle, 3) + 0.0
+
+
 def _canDrag(piece):
     """Whether the dragger moves the piece picked: a stop or clamp as its kind allows, a vise of
     this Job's own along its jaws."""
@@ -1500,6 +1510,8 @@ class _StopsClamps:
             where = contact.Base if contact is not None else PathWorkholding.placementOf(piece).Base
             turn = getattr(piece, "Angle", None)
             angle = _degrees(turn.Value) if turn is not None else ""
+            if PathWorkholding.isVise(piece):
+                angle = _degrees(_viseAngle(PathWorkholding.placementOf(piece)))
             for column, words in enumerate((text, _length(where.x), _length(where.y), angle)):
                 cell = QtWidgets.QTableWidgetItem(words)
                 if column:
@@ -2051,13 +2063,16 @@ class _StopsClamps:
         self.dragShown = shown
         if PathWorkholding.isVise(piece):
             # along the jaws: where the stock is along them; turned: the side against the
-            # fixed jaw
-            jaw = self.panel.jawAt(at)
-            if jaw is not None and jaw != self.panel.jaw.currentData():
-                self.panel.showJaw(jaw)
-            elif jaw is not None:
+            # fixed jaw and how far off square to it
+            turn = self.panel.turnAt(at, snap=True)
+            if turn is not None and self._turned(turn):
+                self.panel.showTurn(turn)
+            elif not self._turned(self.panel.turnAt(at)):
+                # slid, not turned: a turn snapped back leaves where it is along the jaws
                 self.panel.showOffset(PathWorkholding.offsetAt(self.job, piece, at))
-            self.showRowAt(piece, [_length(at.Base.x), _length(at.Base.y), ""])
+            self.showRowAt(
+                piece, [_length(at.Base.x), _length(at.Base.y), _degrees(_viseAngle(at))]
+            )
             return
         lever = Lever.isLever(piece)
         turned = lever or getattr(piece, "Kind", None) == Items.Kind.Push
@@ -2080,6 +2095,15 @@ class _StopsClamps:
         words = [_length(at.Base.x), _length(at.Base.y)]
         words.append(_degrees(angle) if angle is not None else "")
         self.showRowAt(piece, words)
+
+    def _turned(self, turn):
+        """Whether the vise is turned, (up, fixed, angle), other than the panel has it; not
+        upright, so too."""
+        if turn is None:
+            return True
+        return (
+            turn[1] != self.panel.jaw.currentData() or abs(turn[2] - self.panel.angleNow()) > 1e-6
+        )
 
     def showRowAt(self, piece, words):
         """The piece's row saying where it is, mid-drag: its X, Y and angle."""
@@ -2112,10 +2136,12 @@ class _StopsClamps:
             if PathWorkholding.isVise(piece):
                 # turned: the side against the fixed jaw it was turned to, seated there along
                 # the jaws as it was; else where it was let go along them
-                jaw = self.panel.jawAt(PathWorkholding.placementOf(piece))
-                if jaw is not None and jaw != self.panel.jaw.currentData():
-                    self.panel.showJaw(jaw)
-                else:
+                at = PathWorkholding.placementOf(piece)
+                turn = self.panel.turnAt(at, snap=True)
+                if turn is not None and self._turned(turn):
+                    self.panel.showTurn(turn)
+                elif not self._turned(self.panel.turnAt(at)):
+                    # slid, not turned: a turn snapped back leaves where it is along the jaws
                     self.panel.showOffset(PathWorkholding.seating(self.job, piece)["offset"])
                 self.panel.preview()
             else:

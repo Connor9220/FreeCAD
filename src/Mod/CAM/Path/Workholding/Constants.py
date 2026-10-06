@@ -108,8 +108,13 @@ ACROSS_AT_LEAST = 0.25
 # in at most this many moves, each as far as it is from the stock, until it is this near, mm
 TOUCH_MOVES = 16
 TOUCH_NEAR = 0.01
-# a turn of a lever clamp with that dragger goes by this many degrees
+# a turn of a lever clamp or a vise with that dragger goes by this many degrees
 DRAG_TURN_STEP = 1.0
+# a vise turned by its dragger to within this many degrees of square to a straight edge of the
+# stock, seen from above, is turned square to it
+VISE_SNAP_DEGREES = 3.0
+# the part's sides on the vise's bottom and against its fixed jaw lit in color: off for now
+SHOW_LIT_SIDES = False
 # the piece being dragged: where it is shown in the panel every this many ms
 DRAG_SHOW_EVERY = 60
 

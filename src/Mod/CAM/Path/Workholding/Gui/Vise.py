@@ -48,6 +48,8 @@ from Path.Workholding.Constants import (
     LIT_FACE_TRANSPARENCY,
     NOT_CLEAR_TEXT_COLOR,
     SEAT_COLOR,
+    SHOW_LIT_SIDES,
+    VISE_SNAP_DEGREES,
 )
 from Path.Workholding.Gui.Items import _StopsClamps
 from Path.Workholding.Gui.Source import _closeIfUnused
@@ -792,6 +794,9 @@ class TaskPanelVise:
         self.previewTimer.timeout.connect(self.preview)
         # a vise just put in: how the part sits in it is yet to be chosen, its height not read in
         self.chooseSide = False
+        # how far the vise is turned off square to the part's sides, degrees, and for which
+        self.turnAngle = 0.0
+        self.turnFor = None
         self.fresh = False
         # a selected vise shows in the highlight color, hiding its own
         FreeCADGui.Selection.clearSelection()
@@ -889,6 +894,8 @@ class TaskPanelVise:
             )
         )
         layout.addRow("", legend)
+        # the sides lit in color, and what the colors are, only while they are shown
+        legend.setVisible(SHOW_LIT_SIDES)
         layout = sections[1][1]
         # the jaw plates: the hard jaws, or soft jaws as thick and tall as asked, steps cut in
         # them to seat the stock on; a vise whose file does not name its plates keeps its own,
@@ -1622,19 +1629,6 @@ class TaskPanelVise:
         found = self.jaw.findData(keep)
         self.jaw.setCurrentIndex(found if found >= 0 else 0)
 
-    def jawAt(self, placement):
-        """The side of the part against the fixed jaw with the vise at placement, mid-drag: the
-        nearest, the dragger turning in single precision."""
-        job, vise = self.current()
-        turn = (
-            PathWorkholding.partTurn(job)
-            .inverted()
-            .multiply(placement.multiply(PathWorkholding.stationFrame(vise)).Rotation)
-        )
-        fixed = turn.multVec(FreeCAD.Vector(0, 1, 0))
-        name, d = max(PathWorkholding.Directions.items(), key=lambda each: each[1].dot(fixed))
-        return name if d.dot(fixed) > 0.99 else None
-
     def showJaw(self, jaw):
         """The side against the fixed jaw shown, the vise turned to it by its dragger: in Add's
         row while it is being added, else with its settings. Not seated again for it."""
@@ -1666,7 +1660,7 @@ class TaskPanelVise:
     def showSeat(self, *args):
         """The two sides lit as chosen, or as the vise holds the part now."""
         job, vise = self.current()
-        if vise is None:
+        if vise is None or not SHOW_LIT_SIDES:
             self.seatFaces.hide()
             return
         seat, jaw = self.seat.currentData(), self.jaw.currentData()
@@ -1682,11 +1676,83 @@ class TaskPanelVise:
         self.seatFaces.show(job, seat, jaw, vise)
 
     def turn(self):
-        """The turn chosen, None to leave it as it is."""
+        """The turn chosen, None to leave it as it is: the sides the boxes say, and turned off
+        square to them about the vertical as the dragger left it."""
         seat, jaw = self.seat.currentData(), self.jaw.currentData()
         if not (seat and jaw):
             return None
-        return PathWorkholding.orientation(_opposite(seat), jaw)
+        square = PathWorkholding.orientation(_opposite(seat), jaw)
+        angle = self.angleNow()
+        if not angle:
+            return square
+        return FreeCAD.Rotation(PathWorkholding.Directions[_opposite(seat)], angle).multiply(square)
+
+    def angleNow(self):
+        """How far the vise is turned off square to the sides the boxes say, degrees: 0 once
+        others are chosen."""
+        if self.turnFor != (self.seat.currentData(), self.jaw.currentData()):
+            return 0.0
+        return self.turnAngle
+
+    def snapped(self, station):
+        """The station placement turned square to the straight edge of the stock nearest square
+        to its jaws, seen from above, if within VISE_SNAP_DEGREES; else as it is."""
+        import math
+        import Part
+
+        along = station.Rotation.multVec(FreeCAD.Vector(1, 0, 0))
+        yaw = math.degrees(math.atan2(along.y, along.x))
+        best = None
+        for edge in self.job.Stock.Shape.Edges:
+            if not isinstance(edge.Curve, Part.Line):
+                continue
+            d = edge.Curve.Direction
+            if abs(d.z) > 1e-6 * d.Length:
+                continue
+            # the jaws along the edge, the fixed one on either side of it
+            off = (yaw - math.degrees(math.atan2(d.y, d.x)) + 90.0) % 180.0 - 90.0
+            if best is None or abs(off) < abs(best):
+                best = off
+        if best is None or abs(best) > VISE_SNAP_DEGREES or abs(best) < 1e-9:
+            return station
+        return FreeCAD.Placement(
+            station.Base,
+            FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), -best).multiply(station.Rotation),
+        )
+
+    def turnAt(self, placement, snap=False):
+        """How the vise at placement holds the part: (up, fixed, angle), the sides square to it
+        nearest and how far it is turned off them about the vertical, degrees; with snap, turned
+        square to a straight edge of the stock it is near. None if it is not upright."""
+        import math
+
+        job, vise = self.current()
+        station = placement.multiply(PathWorkholding.stationFrame(vise))
+        if snap:
+            station = self.snapped(station)
+        turn = PathWorkholding.partTurn(job).inverted().multiply(station.Rotation)
+        upward = turn.multVec(FreeCAD.Vector(0, 0, 1))
+        fixed = turn.multVec(FreeCAD.Vector(0, 1, 0))
+        up, u = max(PathWorkholding.Directions.items(), key=lambda each: each[1].dot(upward))
+        if u.dot(upward) < 0.99:
+            return None
+        jaw, j = max(
+            (each for each in PathWorkholding.Directions.items() if abs(each[1].dot(u)) < 1e-9),
+            key=lambda each: each[1].dot(fixed),
+        )
+        angle = math.degrees(math.atan2(u.dot(j.cross(fixed)), j.dot(fixed)))
+        # the dragger turns in single precision, a degree at a time
+        angle = round(angle, 3) + 0.0
+        return up, jaw, angle
+
+    def showTurn(self, turn):
+        """The vise turned as the dragger left it, (up, fixed, angle), shown: the side against
+        the fixed jaw, and how far off square to it it is kept. Not seated again for it."""
+        up, jaw, angle = turn
+        if self.jaw.currentData() != jaw:
+            self.showJaw(jaw)
+        self.turnAngle = angle
+        self.turnFor = (self.seat.currentData(), self.jaw.currentData())
 
     def changed(self, *args):
         """Something the panel says changed: seated so a moment after, not as it is read in."""
@@ -1802,7 +1868,11 @@ class TaskPanelVise:
         takes = PathWorkholding.takesParallels(vise)
         self.byParallels.setVisible(takes)
         self.byParallels.setEnabled(takes and jaw is not None)
-        self.showOrientation(now["orientation"], choose=self.chooseSide)
+        # square to the part's sides, or turned off them about the vertical by the dragger
+        turned = None if self.chooseSide else self.turnAt(PathWorkholding.placementOf(vise))
+        self.showOrientation(turned[:2] if turned else now["orientation"], choose=self.chooseSide)
+        self.turnAngle = turned[2] if turned else 0.0
+        self.turnFor = (self.seat.currentData(), self.jaw.currentData()) if turned else None
         self.showSeat()
         step = now.get("step", 0)
         if self.adding and self.fresh:
