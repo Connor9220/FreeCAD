@@ -126,6 +126,8 @@ def _words(kind):
             "Other file….",
         ),
         "other": translate("CAM_AddVise", "Open a Vise"),
+        # the panel's Add puts it in; the library only picks it
+        "get": translate("CAM_AddVise", "Select"),
         "update": translate("CAM_AddVise", "Update Vise"),
     }
 
