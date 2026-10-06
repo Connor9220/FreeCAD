@@ -48,7 +48,7 @@ import Path.Workholding.Source as PathSource
 
 from FreeCAD import Vector
 from Path.Workholding.Common import userLength
-from Path.Workholding.Constants import ACROSS_AT_LEAST, PROPERTY_ADDED, Sides
+from Path.Workholding.Constants import PROPERTY_ADDED, Sides
 from PySide.QtCore import QT_TRANSLATE_NOOP
 
 translate = FreeCAD.Qt.translate
@@ -1470,13 +1470,6 @@ def seat(
             % (vise.Label, userLength(grip), userLength(top - floor))
         )
 
-    # along the jaws no further than keeps them on the stock: a share of the shorter of the two
-    # between them
-    width = _jawWidth(vise)
-    if width and center:
-        length = highA - lowA
-        most = (length + width) / 2 - ACROSS_AT_LEAST * min(width, length)
-        offset = max(-most, min(most, offset))
     # the moving jaw's face, or its step's wall, against the stock's far side: what of the stock
     # the jaws reach across, where it will be along them
     shiftA = (-(lowA + highA) / 2 if center else 0.0) + offset

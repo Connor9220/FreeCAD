@@ -1950,10 +1950,6 @@ class TaskPanelVise:
         if vise is not self.current()[1]:
             # another of a row: the panel shows the first
             return True
-        # along the jaws as far as it could go: kept on the stock
-        held = PathWorkholding.seating(job, vise)["offset"]
-        if abs(held - self.offset.property("rawValue")) > 1e-6:
-            self.showOffset(held)
         self.updateFit()
         self.showSeat()
         # what it comes to, as seated: the jaws now as chosen
