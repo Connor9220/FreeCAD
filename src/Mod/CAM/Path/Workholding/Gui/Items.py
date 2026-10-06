@@ -441,14 +441,11 @@ class _ViseDrag(_Drag):
 
 
 class _StockDrag(_Drag):
-    """The stock's, the part with it and its work planes. Slid, none of them moved in the Job's
-    coordinates, the WCS going with the stock, so its toolpaths stand: what holds it moved the
-    other way instead, the vises of this Job, its stops and clamps and the table, and the view
-    with them, so the stock is seen where it was let go. Turned, a quarter at a time: the
-    machine's X and Y do not turn with it, so the part is turned in the Job about the stock's
-    middle, its stock with it, the WCS left where it is, as the Job's own Rotate leaves it; what
-    holds it stays where it is but for how far the stock slid. A vise seated again; the stops and clamps left where they
-    were, free. Free: nothing seated."""
+    """The stock's, the part with it and its work planes: moved in the Job, slid and turned, as
+    the Job's own Move and Rotate move them, the WCS left where it is; the vises, stops and
+    clamps where they are, the stops and clamps left free. Turned a quarter at a time about the
+    stock's middle unless free; unless free, it rests against a stop it comes near and a vise
+    is seated again."""
 
     def begin(self, piece):
         # the part and what is placed on it drawn riding on the stock as its dragger moves it:
@@ -498,41 +495,19 @@ class _StockDrag(_Drag):
             FreeCAD.Placement(FreeCAD.Vector(), turn, pivot)
         )
 
-    def squaredTo(self):
-        """What the stock is squared to: the vise of this Job's picked, or its first; with none,
-        the table; None with neither."""
-        vises = [v for v in PathWorkholding.vises(self.job) if not PathWorkholding.isShared(v)]
-        if vises:
-            return self.panel.existing if self.panel.existing in vises else vises[0]
-        for table in Items.itemsOf(self.job):
-            if getattr(table, "Kind", None) == Items.Kind.Table:
-                return table
-        return None
-
-    def squareTurn(self, turn, to):
-        """turn, degrees the stock is turned about the vertical, made the nearest leaving it square
-        to to, which turns the other way as it does."""
-        off = to.Placement.Rotation.toEuler()[0] - self.job.Stock.Placement.Rotation.toEuler()[0]
-        return off - round((off - turn) / 90.0) * 90.0
-
     def square(self):
-        """The stock turned back square to what holds it, about its middle, the least it takes."""
-        to = self.squaredTo()
-        if to is None:
-            return
-        center = self.job.Stock.Shape.BoundBox.Center
-        turn = self.squareTurn(0.0, to)
+        """The stock turned back square to the machine's X and Y, about its middle, the least it
+        takes."""
+        stock = self.job.Stock
+        yaw = stock.Placement.Rotation.toEuler()[0]
+        turn = round(yaw / 90.0) * 90.0 - yaw
         if abs(turn) < 1e-9:
             return
-        self.carry(
-            FreeCAD.Placement(
-                FreeCAD.Vector(), FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), -turn), center
-            ),
-            True,
-        )
+        self.leaveFree()
+        self.turnPart(turn, stock.Shape.BoundBox.Center)
+        self.settle(True)
 
     def letGo(self, piece, start, at, free):
-        # drawn where they are again: what holds them moves instead
         _unhang(self.stops)
         if start is None:
             return
@@ -543,35 +518,34 @@ class _StockDrag(_Drag):
         angle = moved.Rotation.toEuler()[0]
         pivot = self.stops.dragPivot
         slid = moved.multVec(pivot) - pivot
+        # left free first: placed against the stock, they would go with it
+        self.leaveFree()
         if abs(angle) > 1e-6:
-            # left free first: placed by the part's own sides, they would turn with it
-            self.leaveFree()
-            # turned as the Job's own Rotate turns the part, the WCS left where it is
             self.turnPart(angle, pivot)
-        # what holds it moved back by as far as the stock slid; unless free, on to rest against
-        # a stop that comes near it
-        back = -slid
+        # unless free, on to rest against a stop it comes near
         if not free:
-            back += self.againstStops(back)
-        self.carry(FreeCAD.Placement(back, FreeCAD.Rotation()), not free)
+            slid += self.againstStops(slid)
+        if slid.Length > 1e-9:
+            PathWorkholding.moveModel(self.job, slid)
+        self.settle(not free)
 
-    def againstStops(self, back):
-        """How much further what holds the stock moves, moved by back, for the stock to rest
-        against the stops that come within half their own width of it, in or out: the nearest
-        each way, those square to one another only."""
+    def againstStops(self, slid):
+        """How much further the stock moves, slid by slid, to rest against the stops it comes
+        within half their own width of, in or out: the nearest each way, those square to one
+        another only."""
         import Part
 
         stock = self.job.Stock.Shape
         if stock.isNull():
             return FreeCAD.Vector()
+        stock = stock.translated(slid)
         found = []
         for stop in Items.itemsOf(self.job):
-            if not Items.isStop(stop) or PathWorkholding.isShared(stop):
+            if not Items.isStop(stop):
                 continue
             shape = Part.getShape(stop, "", transform=True)
             if shape.isNull():
                 continue
-            shape = shape.translated(back)
             # the way it faces, out from the stock
             out = stop.Placement.Rotation.multVec(FreeCAD.Vector(0, -1, 0))
             out.z = 0
@@ -595,7 +569,7 @@ class _StockDrag(_Drag):
             if any(abs(out.dot(way)) > 1e-3 for way in taken):
                 continue
             taken.append(out)
-            more -= out * gap
+            more += out * gap
         return more
 
     def leaveFree(self):
@@ -628,40 +602,22 @@ class _StockDrag(_Drag):
         )
         PathWorkholding.recompute(self.job.Document)
 
-    def carry(self, back, seat):
-        """What holds the stock moved by back, the view with it, its stops and clamps left free;
-        a vise seated again where the stock now is if seat."""
-        vises = [v for v in PathWorkholding.vises(self.job) if not PathWorkholding.isShared(v)]
-        for vise in vises:
-            # held to no seat while it is moved
-            proxy = getattr(vise, "Proxy", None)
-            was = getattr(proxy, "free", False)
-            if proxy is not None:
-                proxy.free = True
-            try:
-                vise.Placement = back.multiply(vise.Placement)
-            finally:
-                if proxy is not None:
-                    proxy.free = was
-        # the stops and clamps stay where they are, as the vises do, for now: left there, free,
-        # not placed against the stock where it now is
-        self.leaveFree()
-        for piece in Items.itemsOf(self.job):
-            if not PathWorkholding.isShared(piece):
-                piece.Placement = back.multiply(piece.Placement)
+    def settle(self, seat):
+        """The stock recomputed where it now is; a vise seated again where the stock now is in it
+        if seat, the vise moving, never the part."""
         PathWorkholding.recompute(self.job.Document)
-        if vises and seat:
-            # seated again where the stock now is in it, the vise moving, never the part
-            panel = self.panel
-            first = panel.existing if panel.existing in vises else vises[0]
-            for vise in [first] + [v for v in vises if v is not first]:
-                panel.existing = vise
-                panel.updateGrip()
-                offset = PathWorkholding.seating(self.job, vise)["offset"]
-                panel.seatVise(vise, offset, moveVise=True)
-            panel.existing = first
+        vises = [v for v in PathWorkholding.vises(self.job) if not PathWorkholding.isShared(v)]
+        if not vises or not seat:
+            return
+        panel = self.panel
+        first = panel.existing if panel.existing in vises else vises[0]
+        for vise in [first] + [v for v in vises if v is not first]:
+            panel.existing = vise
             panel.updateGrip()
-        _carryView(self.job, back)
+            offset = PathWorkholding.seating(self.job, vise)["offset"]
+            panel.seatVise(vise, offset, moveVise=True)
+        panel.existing = first
+        panel.updateGrip()
 
     def after(self, piece):
         self.stops.fillList()
@@ -693,24 +649,6 @@ def _unhang(stops):
         index = root.findChild(ride)
         if index >= 0:
             root.replaceChild(index, own)
-
-
-def _carryView(job, placement):
-    """The 3D view of the Job's document moved as placement moves what holds the part: what is
-    on screen stays where it was seen."""
-    gui = FreeCADGui.getDocument(job.Document.Name)
-    view = getattr(gui, "ActiveView", None) if gui is not None else None
-    if view is None or not hasattr(view, "getCameraNode"):
-        return
-    from pivy import coin
-
-    camera = view.getCameraNode()
-    position = FreeCAD.Vector(*camera.position.getValue().getValue())
-    position = placement.multVec(position)
-    camera.position.setValue(position.x, position.y, position.z)
-    q = placement.Rotation.Q
-    turn = coin.SbRotation(q[0], q[1], q[2], q[3])
-    camera.orientation.setValue(camera.orientation.getValue() * turn)
 
 
 def _shiftHeld():
@@ -1066,7 +1004,7 @@ class _StopsClamps:
         self.resetStock.setToolTip(
             translate(
                 "CAM_Workholding",
-                "Turn the stock back square to the vise's jaws, or to the table with no vise",
+                "Turn the stock back square to the machine's X and Y",
             )
         )
         self.resetStock.setVisible(False)
