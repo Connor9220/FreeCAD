@@ -34,7 +34,6 @@ import Path.Workholding.Gui.Widgets as Widgets
 
 from Path.Workholding.Constants import (
     DRAG_SHOW_EVERY,
-    STOCK_DRAG_EVERY,
     ERROR_TEXT_COLOR,
     ITEM_ICON,
     ITEM_LIST_ICON,
@@ -449,22 +448,35 @@ class _StockDrag(_Drag):
     clamps placed against it again. Free: turned as let go, nothing seated."""
 
     def begin(self, piece):
-        # the stock, the part and what is placed on it shown where they would land as the
-        # dragger moves: in the 3D view only, every move, nothing in the document touched
+        # the part and what is placed on it drawn riding on the stock as its dragger moves it:
+        # each hung from the stock's own transform in the 3D view, Coin moving them with it,
+        # nothing in the document touched and nothing called as it moves
         import Path.Main.Job as PathJob
+        from pivy import coin
 
         stops = self.stops
+        _unhang(stops)
+        start = getattr(stops, "dragFrom", None)
+        held = _transformOf(piece)
+        if start is None or held is None:
+            return
         carried = list(self.job.Model.Group) + list(PathJob.objectsInModelFrame(self.job))
-        stops.dragCarried = [(obj.Name, FreeCAD.Placement(obj.Placement)) for obj in carried]
-        stops.dragCarried.append((piece.Name, FreeCAD.Placement(piece.Placement)))
-        # read from the dragger often, by the panel, never called by it: a dragger calling into
-        # Python as it moves crashes FreeCAD
-        stops.dragTimer.setInterval(STOCK_DRAG_EVERY)
-
-    def shows(self, piece, at):
-        start = getattr(self.stops, "dragFrom", None)
-        if start is not None:
-            self.showAt(self.landing(start, at))
+        hung = []
+        for obj in carried:
+            own = _transformOf(obj)
+            if own is None:
+                continue
+            fixed = coin.SoTransform()
+            where = start.inverse().multiply(obj.Placement)
+            fixed.translation.setValue(where.Base.x, where.Base.y, where.Base.z)
+            q = where.Rotation.Q
+            fixed.rotation.setValue(q[0], q[1], q[2], q[3])
+            ride = coin.SoGroup()
+            ride.addChild(held)
+            ride.addChild(fixed)
+            obj.ViewObject.RootNode.replaceChild(0, ride)
+            hung.append((obj.Name, own, ride))
+        stops.dragHung = hung
 
     def landing(self, start, at, free=None):
         """How the part is moved, the dragger at at, the drag started at start: as it is let
@@ -484,33 +496,10 @@ class _StockDrag(_Drag):
             FreeCAD.Placement(FreeCAD.Vector(), turn, pivot)
         )
 
-    def showAt(self, moved):
-        """The stock, the part and what is placed on it drawn moved so, where they are in the
-        document left as it is."""
-        from pivy import coin
-
-        doc = self.job.Document
-        for name, placement in getattr(self.stops, "dragCarried", []):
-            obj = doc.getObject(name)
-            vobj = getattr(obj, "ViewObject", None)
-            if vobj is None:
-                continue
-            root = vobj.RootNode
-            if root.getNumChildren() == 0:
-                continue
-            node = root.getChild(0)
-            if not node.isOfType(coin.SoTransform.getClassTypeId()):
-                continue
-            node = coin.cast(node, "SoTransform")
-            to = moved.multiply(placement)
-            node.translation.setValue(to.Base.x, to.Base.y, to.Base.z)
-            q = to.Rotation.Q
-            node.rotation.setValue(q[0], q[1], q[2], q[3])
-
     def letGo(self, piece, start, at, free):
-        self.stops.dragTimer.setInterval(DRAG_SHOW_EVERY)
         # drawn where they are again: what holds them moves instead
-        self.showAt(FreeCAD.Placement())
+        _unhang(self.stops)
+        _shiftWatch.watch(False)
         if start is None:
             return
         stock = piece
@@ -552,7 +541,68 @@ class _StockDrag(_Drag):
     def after(self, piece):
         self.stops.fillList()
         self.stops.showChosen()
-        QtCore.QTimer.singleShot(0, ViewProviders.stockDragger)
+
+
+class _ShiftWatch(QtCore.QObject if FreeCAD.GuiUp else object):
+    """Shift pressed or let go while the stock is dragged in a vise: its dragger turning a degree
+    at a time, free, or a quarter at a time, square to the jaws. Told by Qt, as the keys go."""
+
+    def __init__(self):
+        super().__init__()
+        self.on = False
+        self.stops = None
+
+    def watch(self, on, stops=None):
+        self.stops = stops if on else None
+        app = QtWidgets.QApplication.instance()
+        if on and not self.on:
+            app.installEventFilter(self)
+        elif self.on and not on:
+            app.removeEventFilter(self)
+        self.on = on
+
+    def eventFilter(self, obj, event):
+        if event.type() in (QtCore.QEvent.KeyPress, QtCore.QEvent.KeyRelease):
+            stops = self.stops
+            stock = getattr(getattr(stops, "job", None), "Stock", None)
+            if (
+                event.key() == QtCore.Qt.Key_Shift
+                and not event.isAutoRepeat()
+                and stock is not None
+                and stops.editing == stock.Name
+            ):
+                ViewProviders.stockDragger(quarter=event.type() == QtCore.QEvent.KeyRelease)
+        return False
+
+
+_shiftWatch = _ShiftWatch() if FreeCAD.GuiUp else None
+
+
+def _transformOf(obj):
+    """The transform an object is drawn at in the 3D view, the first of its root; None if it has
+    none there."""
+    from pivy import coin
+
+    vobj = getattr(obj, "ViewObject", None)
+    root = getattr(vobj, "RootNode", None)
+    if root is None or root.getNumChildren() == 0:
+        return None
+    node = root.getChild(0)
+    return node if node.isOfType(coin.SoTransform.getClassTypeId()) else None
+
+
+def _unhang(stops):
+    """What Move stock hung from the stock's transform drawn from its own again."""
+    hung, stops.dragHung = getattr(stops, "dragHung", []), []
+    doc = stops.job.Document
+    for name, own, ride in hung:
+        obj = doc.getObject(name)
+        root = getattr(getattr(obj, "ViewObject", None), "RootNode", None)
+        if root is None:
+            continue
+        index = root.findChild(ride)
+        if index >= 0:
+            root.replaceChild(index, own)
 
 
 def _carryView(job, placement):
@@ -2608,6 +2658,14 @@ class _StopsClamps:
             # where the drag starts: a vise turned by it, or slid along its jaws; seated then
             self.dragFrom = FreeCAD.Placement(PathWorkholding.placementOf(piece))
             self.dragSeated = bool(getattr(piece, "Seated", True))
+            if piece is self.job.Stock:
+                # held in a vise: turned a quarter at a time, square to its jaws as dragged,
+                # a degree at a time while Shift is held
+                quarter = any(
+                    not PathWorkholding.isShared(v) for v in PathWorkholding.vises(self.job)
+                )
+                ViewProviders.stockDragger(quarter=quarter and not _shiftHeld())
+                _shiftWatch.watch(quarter, self)
             self.dragRules(piece).begin(piece)
             self.dragTimer.start()
 
@@ -2647,8 +2705,6 @@ class _StopsClamps:
             self.list.setCurrentCell(-1, -1)
             FreeCADGui.Selection.clearSelection()
         self.showChosen()
-        if on:
-            QtCore.QTimer.singleShot(0, ViewProviders.stockDragger)
 
     def showRowAt(self, piece, words):
         """The piece's row saying where it is, mid-drag: its X, Y and angle."""
@@ -2749,10 +2805,14 @@ class _StopsClamps:
         FreeCADGui.Selection.removeObserver(self)
         FreeCAD.removeDocumentObserver(self)
         if gone:
+            self.dragHung = []
             self.editing = None
             self.pickable = None
             ViewProviders.setWholePicks(False)
             return
+        # anything hung from the stock's transform drawn from its own again
+        _unhang(self)
+        _shiftWatch.watch(False)
         if self.editing is not None:
             self.editing = None
             gui = FreeCADGui.getDocument(self.job.Document.Name)

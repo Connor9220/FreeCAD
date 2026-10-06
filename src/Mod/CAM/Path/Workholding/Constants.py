@@ -119,8 +119,6 @@ SHOW_LIT_SIDES = False
 VISE_LEAST_GRIP = 3.0
 # what Add shows put in again this many ms after the last change of its side or how many
 ADD_PREVIEW_DELAY = 300
-# the stock being dragged, the part with it: drawn where it lands every this many ms
-STOCK_DRAG_EVERY = 16
 # the piece being dragged: where it is shown in the panel every this many ms
 DRAG_SHOW_EVERY = 60
 
