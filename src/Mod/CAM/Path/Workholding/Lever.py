@@ -68,6 +68,7 @@ from Path.Workholding.Constants import (
     LEVER_TILT_NOTED,
     LEVER_RISER_LENGTH,
     LEVER_RISER_MARGIN,
+    LEVER_SNAP_DEGREES,
     LEVER_RISER_STEP,
     LEVER_SEAT_TOLERANCE,
     LEVER_RISER_THICKNESS,
@@ -2149,9 +2150,14 @@ def fromPlacement(job, obj):
 
     base = obj.Placement.Base
     box = job.Stock.Shape.BoundBox
+    angle = angleFrom(job, obj, obj.Placement.Rotation)
+    # let go near square to an edge of the stock: square to it
+    square = round(angle / 90.0) * 90.0
+    if abs(angle - square) <= LEVER_SNAP_DEGREES:
+        angle = (square + 180.0) % 360.0 - 180.0 + 0.0
     obj.Proxy.placing = True
     try:
-        obj.Angle = angleFrom(job, obj, obj.Placement.Rotation)
+        obj.Angle = angle
         obj.Pinned = True
         obj.PressX = base.x - box.XMin
         obj.PressY = base.y - box.YMin

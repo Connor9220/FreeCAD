@@ -110,6 +110,9 @@ TOUCH_MOVES = 16
 TOUCH_NEAR = 0.01
 # a turn of a lever clamp or a vise with that dragger goes by this many degrees
 DRAG_TURN_STEP = 1.0
+# a lever clamp let go by its dragger within this many degrees of square to its side, or to
+# the sides beside it, is turned square; its Angle typed is kept as it is
+LEVER_SNAP_DEGREES = 10.0
 # the part's sides on the vise's bottom and against its fixed jaw lit in color: off for now
 SHOW_LIT_SIDES = False
 # what Add shows put in again this many ms after the last change of its side or how many
