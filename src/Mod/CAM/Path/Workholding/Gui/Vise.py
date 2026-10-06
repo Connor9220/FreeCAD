@@ -1772,9 +1772,12 @@ class TaskPanelVise:
         if self.applyAll():
             self.seatFaces.hide()
             FreeCADGui.Control.closeDialog()
-            if self.adding:
-                self.adding.finish(keep=True)
-            self.stops.finish()
+            try:
+                if self.adding:
+                    self.adding.finish(keep=True)
+            finally:
+                # let go of the selection and the document whatever went wrong before
+                self.stops.finish()
             return True
         return False
 
@@ -1808,9 +1811,11 @@ class TaskPanelVise:
         self.previewTimer.stop()
         self.seatFaces.hide()
         self.pending = False
-        if self.adding:
-            self.adding.finish(keep=False)
-        self.stops.finish()
+        try:
+            if self.adding:
+                self.adding.finish(keep=False)
+        finally:
+            self.stops.finish()
 
     def autoClosedOnDeletedDocument(self):
         """The Job's document closed while open: the panel let go of it."""
@@ -1828,8 +1833,10 @@ class TaskPanelVise:
             self.job.Document.recompute()
             self.pending = False
         FreeCADGui.Control.closeDialog()
-        if self.adding:
-            # the vise, and any seating of it, undone with no trace in the undo list
-            self.adding.finish(keep=False)
-        self.stops.finish()
+        try:
+            if self.adding:
+                # the vise, and any seating of it, undone with no trace in the undo list
+                self.adding.finish(keep=False)
+        finally:
+            self.stops.finish()
         return True

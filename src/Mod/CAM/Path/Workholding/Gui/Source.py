@@ -41,7 +41,11 @@ translate = FreeCAD.Qt.translate
 def _closeIfUnused(doc):
     """The file of a vise closed if it is open only for vises' links that are gone: in no window,
     and no other document linking to it."""
-    if doc.Name not in FreeCAD.listDocuments():
+    try:
+        if doc is None or doc.Name not in FreeCAD.listDocuments():
+            return
+    except ReferenceError:
+        # closed already
         return
     if any(
         doc in other.getDependentDocuments(False)

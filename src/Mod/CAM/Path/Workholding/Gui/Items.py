@@ -1268,21 +1268,30 @@ class _StopsClamps:
                     self.pickable[obj.Name] = vobj.Selectable
                 vobj.Selectable = True
 
-    def addSelection(self, doc, obj, sub, pos):
-        self.fillSides()
+    def selectionChanged(self):
+        """The selection changed: the sides offered and the rows picked as it is now; nothing
+        once the panel is closed, its observer left behind if closing failed."""
+        if self.pickable is None:
+            return
+        try:
+            self.fillSides()
+        except RuntimeError:
+            # the panel's widgets gone with it
+            FreeCADGui.Selection.removeObserver(self)
+            return
         self.selectFromView()
+
+    def addSelection(self, doc, obj, sub, pos):
+        self.selectionChanged()
 
     def removeSelection(self, doc, obj, sub):
-        self.fillSides()
-        self.selectFromView()
+        self.selectionChanged()
 
     def setSelection(self, doc):
-        self.fillSides()
-        self.selectFromView()
+        self.selectionChanged()
 
     def clearSelection(self, doc):
-        self.fillSides()
-        self.selectFromView()
+        self.selectionChanged()
 
     def setPreselection(self, doc, obj, sub):
         """The cursor over a part of a stop or clamp: all of it lit, a moment after, as clicking
