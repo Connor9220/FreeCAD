@@ -2150,6 +2150,16 @@ def fromPlacement(job, obj):
 
     base = obj.Placement.Base
     box = job.Stock.Shape.BoundBox
+    if not (box.XMin <= base.x <= box.XMax and box.YMin <= base.y <= box.YMax):
+        # let go off the stock: pressing on it, its overlap in from the nearest edge
+        overlap = getattr(getattr(obj, "Overlap", None), "Value", 0.0)
+        inX = min(overlap, box.XLength / 2)
+        inY = min(overlap, box.YLength / 2)
+        base = FreeCAD.Vector(
+            min(max(base.x, box.XMin + inX), box.XMax - inX),
+            min(max(base.y, box.YMin + inY), box.YMax - inY),
+            base.z,
+        )
     angle = angleFrom(job, obj, obj.Placement.Rotation)
     # let go near square to an edge of the stock: square to it
     square = round(angle / 90.0) * 90.0
