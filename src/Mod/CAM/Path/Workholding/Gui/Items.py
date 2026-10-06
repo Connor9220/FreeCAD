@@ -1398,6 +1398,10 @@ class _StopsClamps:
 
     def cancelClicked(self):
         """Nothing put in: what Add shows taken out, the row back to Select… and one."""
+        self.resetRow()
+
+    def resetRow(self):
+        """The row adding them back to Select… and one, once what it showed is kept or dropped."""
         self.addTimer.stop()
         self.count.blockSignals(True)
         self.count.setValue(1)
@@ -1415,7 +1419,7 @@ class _StopsClamps:
             if self.panel.addVise(which, self.viseSeat.currentData(), self.viseJaw.currentData()):
                 if which[0] == "vise":
                     _rememberClamp(which[1])
-                self.item.setCurrentIndex(-1)
+                self.resetRow()
                 self.updateRow()
             return
         side = self.side.currentData()
@@ -1447,7 +1451,7 @@ class _StopsClamps:
         if isinstance(which, str) and which not in Items.Classes:
             _rememberClamp(which)
         # added: Select… again
-        self.item.setCurrentIndex(-1)
+        self.resetRow()
         self.readIn(new[-1] if new else None)
 
     # read in from the Job

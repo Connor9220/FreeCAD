@@ -1375,8 +1375,14 @@ def addPieces(job, side, which, count=1):
     _checkSide(job, side, stop, not stop and pushes(which))
     current = (stopsOn if stop else clampsOn)(job, side)
     new = []
+    hidden = []
     for i in range(count):
         piece = create(job, which) if which in Classes else addClamp(job, which)
+        # out of sight until placed: drawn where it goes, not first at the Job's origin
+        for obj in [piece] + list(getattr(piece, "Group", []) or []):
+            if hasattr(obj, "Visibility"):
+                hidden.append((obj, obj.Visibility))
+                obj.Visibility = False
         _setRole(piece, side, len(current) + i, which)
         new.append(piece)
     if which == "Fence":
@@ -1385,7 +1391,11 @@ def addPieces(job, side, which, count=1):
         for piece in new:
             piece.Length = length / (len(current) + count)
     # only their side placed again: the others stand as they were
-    layout(job, [side])
+    try:
+        layout(job, [side])
+    finally:
+        for obj, shown in hidden:
+            obj.Visibility = shown
     return new
 
 
