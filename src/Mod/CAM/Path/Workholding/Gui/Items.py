@@ -2069,6 +2069,16 @@ class _StopsClamps:
             if self._slid(at):
                 self.panel.showOffset(PathWorkholding.offsetAt(self.job, piece, at))
             else:
+                # near square to a stock edge: the dragger, and the vise with it, held square
+                held = self.panel.snapPlacement(at)
+                if held is not None:
+                    ViewProviders.setDraggerRotation(dragger, held.Rotation)
+                    at = held
+                    self.dragShown = (
+                        round(at.Base.x, 6),
+                        round(at.Base.y, 6),
+                        round(at.Rotation.Angle, 9),
+                    )
                 turn = self.panel.turnAt(at, snap=True)
                 if turn is not None:
                     self.panel.showTurn(turn)

@@ -1720,6 +1720,17 @@ class TaskPanelVise:
             FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), -best).multiply(station.Rotation),
         )
 
+    def snapPlacement(self, placement):
+        """The vise at placement turned square to the stock edge it is near, None if it is near
+        none or already square."""
+        job, vise = self.current()
+        frame = PathWorkholding.stationFrame(vise)
+        station = placement.multiply(frame)
+        snapped = self.snapped(station)
+        if snapped is station:
+            return None
+        return snapped.multiply(frame.inverse())
+
     def turnAt(self, placement, snap=False):
         """How the vise at placement holds the part: (up, fixed, angle), the sides square to it
         nearest and how far it is turned off them about the vertical, degrees; with snap, turned
