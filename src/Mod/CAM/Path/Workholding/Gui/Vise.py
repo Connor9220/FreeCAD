@@ -1251,6 +1251,7 @@ class TaskPanelVise:
             return False
         # another Job's vise stays turned as it is; one from its file as Add says
         if kind != "viseshare" and seat is not None:
+            first = getattr(self, "addingTurn", None) is None
             turned = (seat, jaw) != getattr(self, "addingTurn", None)
             self.addingTurn = (seat, jaw)
             if turned:
@@ -1259,6 +1260,8 @@ class TaskPanelVise:
                 self.seat.blockSignals(False)
                 self.seatChanged(jaw=jaw)
                 self.preview()
+            if first:
+                self.fitFirst(seat, jaw)
         self.showMore(count if kind == "vise" else 1)
         if not self.adding or self.adding.vise is None:
             return False
@@ -1266,6 +1269,29 @@ class TaskPanelVise:
         # moved along the jaws and turned by its dragger before Add keeps it
         self.stops.dragChosen(self.adding.vise)
         return True
+
+    def fitFirst(self, seat, jaw):
+        """A vise just put in turned a quarter round about its bottom side when it opens too
+        little for the stock as Add says and would that way: its jaws across the stock's narrow
+        way, the row saying so."""
+        job, vise = self.current()
+        needed, most, turned = PathWorkholding.opening(job, vise)
+        if most is None or needed <= most + 1e-6 or turned > most + 1e-6:
+            return
+        up = PathWorkholding.Directions[_opposite(seat)]
+        across = up.cross(PathWorkholding.Directions[jaw])
+        other = next(
+            (n for n, d in PathWorkholding.Directions.items() if (d - across).Length < 1e-6), None
+        )
+        if other is None:
+            return
+        rows = self.stops
+        rows.viseJaw.blockSignals(True)
+        rows.viseJaw.setCurrentIndex(max(0, rows.viseJaw.findData(other)))
+        rows.viseJaw.blockSignals(False)
+        self.addingTurn = (seat, other)
+        self.seatChanged(jaw=other)
+        self.preview()
 
     def showMore(self, count):
         """As many of the vise shown as count, in a row along the stock, the first where it was
