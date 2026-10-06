@@ -436,6 +436,17 @@ def _alignLabels(layouts):
         label.setMinimumWidth(width)
 
 
+def _pair(first, label, second):
+    """Two fields on one row of a form, the second's label between them."""
+    row = QtWidgets.QWidget()
+    layout = QtWidgets.QHBoxLayout(row)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.addWidget(first, 1)
+    layout.addWidget(QtWidgets.QLabel(label))
+    layout.addWidget(second, 1)
+    return row
+
+
 def _imperial():
     """Whether lengths show in inches, as the user's units have them."""
     try:
@@ -550,10 +561,16 @@ class _ParallelPicker(QtCore.QObject if FreeCAD.GuiUp else object):
         # the rows they take in the panel, those of custom ones only for them
         self.rows = [
             (QtWidgets.QLabel(translate("CAM_SeatInVise", "Parallels")), self.pair, False),
-            (QtWidgets.QLabel(translate("CAM_Workholding", "Height")), self.height, True),
-            (QtWidgets.QLabel(translate("CAM_Workholding", "Thickness")), self.thickness, True),
-            (QtWidgets.QLabel(translate("CAM_Workholding", "Length")), self.length, False),
-            (QtWidgets.QLabel(translate("CAM_Workholding", "Material")), self.soft, False),
+            (
+                QtWidgets.QLabel(translate("CAM_Workholding", "Height")),
+                _pair(self.height, translate("CAM_Workholding", "Thickness"), self.thickness),
+                True,
+            ),
+            (
+                QtWidgets.QLabel(translate("CAM_Workholding", "Length")),
+                _pair(self.length, translate("CAM_Workholding", "Material"), self.soft),
+                False,
+            ),
         ]
         self.set.currentIndexChanged.connect(self.setChanged)
         self.heights.currentIndexChanged.connect(lambda *args: self.changed.emit())
@@ -766,11 +783,12 @@ class TaskPanelVise:
         self.fresh = False
         # a selected vise shows in the highlight color, hiding its own
         FreeCADGui.Selection.clearSelection()
-        # three sections, each a box of its own that rolls up: the vise, its jaws and how the
-        # part sits in it; what the stock stands on; where along the jaws and what moves
+        # four sections: how the part sits in the vise; its jaws; what the stock stands on;
+        # where along the jaws and what moves
         sections = []
         for title, icon in (
             (translate("CAM_Workholding", "Vise"), QtGui.QIcon(":/icons/CAM_Vise.svg")),
+            (translate("CAM_Workholding", "Jaws"), QtGui.QIcon(":/icons/CAM_Vise.svg")),
             (translate("CAM_Workholding", "Stock"), Widgets.themedIcon(":/icons/stock.svg")),
             (translate("CAM_Workholding", "Position"), QtGui.QIcon(":/icons/Std_Placement.svg")),
         ):
@@ -780,7 +798,7 @@ class TaskPanelVise:
             section.setWindowIcon(icon)
             sections.append((section, QtWidgets.QFormLayout(section)))
         self.form = [section for section, _ in sections]
-        self.viseForm, self.seatForm, self.positionForm = self.form
+        self.jawsSection = sections[1][0]
         layout = sections[0][1]
         ui = FreeCADGui.UiLoader()
 
@@ -859,6 +877,7 @@ class TaskPanelVise:
             )
         )
         layout.addRow("", legend)
+        layout = sections[1][1]
         # the jaw plates: the hard jaws, or soft jaws as thick and tall as asked, steps cut in
         # them to seat the stock on; a vise whose file does not name its plates keeps its own,
         # the choice not shown
@@ -886,15 +905,13 @@ class TaskPanelVise:
                 self.softHeight.property("rawValue"),
             ),
         )
-        self.softRows = []
-        for label, field in (
-            (translate("CAM_Workholding", "Thickness"), self.softThickness),
-            (translate("CAM_Workholding", "Height"), self.softHeight),
-            (translate("CAM_Workholding", "Steps"), self.steps),
-        ):
-            label = QtWidgets.QLabel(label)
-            layout.addRow(label, field)
-            self.softRows += [label, field]
+        # thickness beside height, then the steps
+        thickness = QtWidgets.QLabel(translate("CAM_Workholding", "Thickness"))
+        size = _pair(self.softThickness, translate("CAM_Workholding", "Height"), self.softHeight)
+        layout.addRow(thickness, size)
+        steps = QtWidgets.QLabel(translate("CAM_Workholding", "Steps"))
+        layout.addRow(steps, self.steps)
+        self.softRows = [thickness, size, steps, self.steps]
         # grip jaws: their grips, how far they stand above the jaws' tops, their teeth behind
         # the jaws' face, how far they bite into the stock, how many on each jaw
         defaults = PathJaws.GripJaw
@@ -920,17 +937,26 @@ class TaskPanelVise:
         self.gripCount.setValue(defaults["grips"])
         self.gripCount.setToolTip(translate("CAM_Workholding", "How many grips on each jaw"))
         self.gripRows = []
-        for label, field in (
-            (translate("CAM_Workholding", "Grip height"), self.gripHeight),
-            (translate("CAM_Workholding", "Tooth setback"), self.gripSetback),
-            (translate("CAM_Workholding", "Bite"), self.gripBite),
-            (translate("CAM_Workholding", "Grips"), self.gripCount),
+        for label, first, other, second in (
+            (
+                translate("CAM_Workholding", "Grip height"),
+                self.gripHeight,
+                translate("CAM_Workholding", "Tooth setback"),
+                self.gripSetback,
+            ),
+            (
+                translate("CAM_Workholding", "Bite"),
+                self.gripBite,
+                translate("CAM_Workholding", "Grips"),
+                self.gripCount,
+            ),
         ):
             label = QtWidgets.QLabel(label)
-            layout.addRow(label, field)
-            self.gripRows += [label, field]
+            row = _pair(first, other, second)
+            layout.addRow(label, row)
+            self.gripRows += [label, row]
         self.lastJaws = None
-        layout = sections[1][1]
+        layout = sections[2][1]
 
         # what the stock stands on: the vise's floor, a pair of parallels, or a step of the jaws
         self.standsOn = QtWidgets.QComboBox()
@@ -978,7 +1004,7 @@ class TaskPanelVise:
             )
         )
         layout.addRow("", self.clearance)
-        layout = sections[2][1]
+        layout = sections[3][1]
 
         # across the jaws: centered, or off the center by so much
         self.across = QtWidgets.QComboBox()
@@ -986,12 +1012,14 @@ class TaskPanelVise:
         self.offCenter = _ComboChoice(
             self.across, translate("CAM_SeatInVise", "Offset from center"), "offset"
         )
-        layout.addRow(translate("CAM_SeatInVise", "Across the jaws"), self.across)
         self.offset = Widgets.mmBox(
             ui, translate("CAM_SeatInVise", "Along the jaws, from their center"), minimum=-10000.0
         )
         self.offset.setEnabled(False)
-        layout.addRow(translate("CAM_SeatInVise", "Offset"), self.offset)
+        layout.addRow(
+            translate("CAM_SeatInVise", "Across the jaws"),
+            _pair(self.across, translate("CAM_SeatInVise", "Offset"), self.offset),
+        )
         self.across.currentIndexChanged.connect(
             lambda *args: self.offset.setEnabled(self.offCenter.isChecked())
         )
@@ -1011,7 +1039,7 @@ class TaskPanelVise:
 
         self.stops = _StopsClamps(self, ui)
         # the table under it waits; the button is kept, not shown
-        sections[1][1].addRow(self.stops.table)
+        sections[2][1].addRow(self.stops.table)
         self.stops.table.setVisible(False)
         # the vise's sections inside Placed, where a clamp's settings show, each under a
         # heading of its own
@@ -1401,7 +1429,7 @@ class TaskPanelVise:
         kind = self.jaws.currentData()
         for i, widget in enumerate(self.softRows):
             # thickness and height, then the steps, soft jaws' own
-            widget.setVisible(kind == "Soft" or (kind == "Grip" and i < 4))
+            widget.setVisible(kind == "Soft" or (kind == "Grip" and i < 2))
         for widget in self.gripRows:
             widget.setVisible(kind == "Grip")
         anew = kind == "Grip" and self.lastJaws not in (None, "Grip")
@@ -1513,6 +1541,7 @@ class TaskPanelVise:
         # the jaws' row only for a vise that can change them
         self.jaws.setVisible(can)
         self.jawsLabel.setVisible(can)
+        self.stops.viseArea.showSection(self.jawsSection, can)
         self.jaws.setCurrentIndex(max(0, self.jaws.findData(kind)))
         if thickness is not None:
             self.softThickness.setProperty("rawValue", thickness)

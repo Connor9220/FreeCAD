@@ -292,7 +292,7 @@ class _ViseArea(QtWidgets.QWidget if FreeCAD.GuiUp else object):
 
     def __init__(self):
         super().__init__()
-        grid = QtWidgets.QGridLayout(self)
+        self.grid = grid = QtWidgets.QGridLayout(self)
         grid.setContentsMargins(0, 0, 0, 0)
         self.picture = QtWidgets.QLabel()
         self.picture.setAlignment(QtCore.Qt.AlignCenter)
@@ -312,15 +312,37 @@ class _ViseArea(QtWidgets.QWidget if FreeCAD.GuiUp else object):
         self.picture.setVisible(pixmap is not None)
 
     def addSections(self, sections):
-        for title, widget in sections:
-            heading = QtWidgets.QLabel(title)
-            font = heading.font()
-            font.setBold(True)
-            heading.setFont(font)
-            self.column.addWidget(heading)
+        """The first section beside the picture, untitled; the others under it the whole width,
+        each under its title and a line across."""
+        self.headings = {}
+        for i, (title, widget) in enumerate(sections):
             if widget.layout() is not None:
                 widget.layout().setContentsMargins(0, 0, 0, 0)
-            self.column.addWidget(widget)
+            if i == 0:
+                self.column.addWidget(widget)
+                self.column.addStretch(1)
+                continue
+            heading = QtWidgets.QWidget()
+            line = QtWidgets.QHBoxLayout(heading)
+            line.setContentsMargins(0, 6, 0, 0)
+            label = QtWidgets.QLabel(title)
+            font = label.font()
+            font.setBold(True)
+            label.setFont(font)
+            line.addWidget(label)
+            rule = QtWidgets.QFrame()
+            rule.setFrameShape(QtWidgets.QFrame.HLine)
+            rule.setFrameShadow(QtWidgets.QFrame.Sunken)
+            line.addWidget(rule, 1)
+            self.grid.addWidget(heading, self.grid.rowCount(), 0, 1, 2)
+            self.grid.addWidget(widget, self.grid.rowCount(), 0, 1, 2)
+            self.headings[widget] = heading
+
+    def showSection(self, widget, visible):
+        """A section shown or hidden, its title with it."""
+        widget.setVisible(visible)
+        if widget in self.headings:
+            self.headings[widget].setVisible(visible)
 
 
 class _Sizes:
