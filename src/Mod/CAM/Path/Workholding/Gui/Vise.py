@@ -1156,6 +1156,8 @@ class TaskPanelVise:
             self.seatChanged(jaw=jaw)
             self.preview()
         self.focusChanged()
+        # moved along the jaws and turned by its dragger before Add keeps it
+        self.stops.dragChosen(self.adding.vise)
         return True
 
     def dropAdd(self):
@@ -1163,6 +1165,7 @@ class TaskPanelVise:
         if not self.adding:
             return
         self.previewTimer.stop()
+        self.stops.dragChosen(None)
         self.adding.finish(keep=False)
         self.adding = None
         self.addingFor = None
@@ -1618,6 +1621,35 @@ class TaskPanelVise:
                 self.jaw.addItem(label, direction)
         found = self.jaw.findData(keep)
         self.jaw.setCurrentIndex(found if found >= 0 else 0)
+
+    def jawAt(self, placement):
+        """The side of the part against the fixed jaw with the vise at placement, mid-drag: the
+        nearest, the dragger turning in single precision."""
+        job, vise = self.current()
+        turn = (
+            PathWorkholding.partTurn(job)
+            .inverted()
+            .multiply(placement.multiply(PathWorkholding.stationFrame(vise)).Rotation)
+        )
+        fixed = turn.multVec(FreeCAD.Vector(0, 1, 0))
+        name, d = max(PathWorkholding.Directions.items(), key=lambda each: each[1].dot(fixed))
+        return name if d.dot(fixed) > 0.99 else None
+
+    def showJaw(self, jaw):
+        """The side against the fixed jaw shown, the vise turned to it by its dragger: in Add's
+        row while it is being added, else with its settings. Not seated again for it."""
+        combo = self.stops.viseJaw if self.adding else self.jaw
+        found = combo.findData(jaw)
+        if found < 0:
+            return
+        combo.blockSignals(True)
+        combo.setCurrentIndex(found)
+        combo.blockSignals(False)
+        if combo is not self.jaw:
+            self.jaw.blockSignals(True)
+            self.jaw.setCurrentIndex(max(0, self.jaw.findData(jaw)))
+            self.jaw.blockSignals(False)
+        self.showSeat()
 
     def jawNow(self):
         """The side of the part against the fixed jaw as the vise is turned now."""

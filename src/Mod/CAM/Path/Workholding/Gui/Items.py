@@ -1575,7 +1575,9 @@ class _StopsClamps:
         self.showRow(self.placeRow, piece is not None and not lever)
         self.showLever(piece if lever else None)
         self.showSize(piece)
-        self.dragChosen(self.chosen())
+        # the vise being added keeps its dragger while nothing placed is picked
+        adding = self.panel.adding
+        self.dragChosen(self.chosen() or (adding.vise if adding else None))
 
     def showPlace(self, piece, at=None, angle=None):
         """Where the piece picked is, where it meets the stock, the Job's X and Y, or where at
@@ -1964,8 +1966,13 @@ class _StopsClamps:
             return
         self.dragShown = shown
         if PathWorkholding.isVise(piece):
-            # along the jaws only: where the stock is along them
-            self.panel.showOffset(PathWorkholding.offsetAt(self.job, piece, at))
+            # along the jaws: where the stock is along them; turned: the side against the
+            # fixed jaw
+            jaw = self.panel.jawAt(at)
+            if jaw is not None and jaw != self.panel.jaw.currentData():
+                self.panel.showJaw(jaw)
+            elif jaw is not None:
+                self.panel.showOffset(PathWorkholding.offsetAt(self.job, piece, at))
             self.showRowAt(piece, [_length(at.Base.x), _length(at.Base.y), ""])
             return
         lever = Lever.isLever(piece)
@@ -2019,8 +2026,13 @@ class _StopsClamps:
         try:
             self.panel.begin()
             if PathWorkholding.isVise(piece):
-                # where it was let go along the jaws, the stock seated there again
-                self.panel.showOffset(PathWorkholding.seating(self.job, piece)["offset"])
+                # turned: the side against the fixed jaw it was turned to, seated there along
+                # the jaws as it was; else where it was let go along them
+                jaw = self.panel.jawAt(PathWorkholding.placementOf(piece))
+                if jaw is not None and jaw != self.panel.jaw.currentData():
+                    self.panel.showJaw(jaw)
+                else:
+                    self.panel.showOffset(PathWorkholding.seating(self.job, piece)["offset"])
                 self.panel.preview()
             else:
                 Items.fromTransform(piece, ViewProviders.dragPlacement(piece.ViewObject))
@@ -2032,6 +2044,12 @@ class _StopsClamps:
         # the dragger made again where the piece now is: it does not follow the piece placed
         self.editing = None
         FreeCADGui.getDocument(self.job.Document.Name).resetEdit()
+        adding = self.panel.adding
+        if adding and piece is adding.vise:
+            # the vise being added stays Add's, not picked in Placed
+            self.fillList()
+            self.dragChosen(piece)
+            return
         self.fillList(piece)
         self.picked()
 

@@ -174,7 +174,8 @@ def _showVise(obj):
 
 def _seatedDragger(along=False):
     """The Transform dragger of a seated vise without what would move it into the jaws or turn
-    it: along the jaws and up, and the plane of the two, are left; along, along the jaws only."""
+    it: along the jaws and up, and the plane of the two, are left; along, along the jaws only and
+    turned a quarter at a time."""
     from pivy import coin
 
     view = FreeCADGui.ActiveDocument.ActiveView if FreeCADGui.ActiveDocument else None
@@ -187,11 +188,17 @@ def _seatedDragger(along=False):
     if search.getPath() is None:
         return
     dragger = search.getPath().getTail()
-    hidden = ["yTranslatorDragger", "xRotatorDragger", "yRotatorDragger", "zRotatorDragger"]
+    hidden = ["yTranslatorDragger", "xRotatorDragger", "yRotatorDragger"]
     planes = ["xyPlanarTranslatorSwitch", "yzPlanarTranslatorSwitch"]
     if along:
+        # along the jaws, and turned a quarter at a time: another side against the fixed jaw
+        import math
+
         hidden.append("zTranslatorDragger")
         planes.append("zxPlanarTranslatorSwitch")
+        dragger.getField("rotationIncrement").set(repr(math.radians(90.0)))
+    else:
+        hidden.append("zRotatorDragger")
     for name in hidden:
         part = dragger.getPart(name, True)
         if part is not None:
@@ -391,9 +398,16 @@ class ViewProviderVise(_GroupViewProvider):
         if mode == 1 and getattr(vobj.Object, "Seated", False):
             QtCore.QTimer.singleShot(0, _seatedDragger)
         elif mode == TRANSFORM_NO_DIALOG and getattr(vobj.Object, "Seated", False):
-            # in the workholding panel: along the jaws only
+            # in the workholding panel: along the jaws, and turned a quarter at a time, not held
+            # to its seat while dragged; the panel seats it again where it is let go
+            vobj.Object.Proxy.free = True
             QtCore.QTimer.singleShot(0, lambda: _seatedDragger(along=True))
         return None
+
+    def unsetEdit(self, vobj, mode):
+        if mode == TRANSFORM_NO_DIALOG and getattr(vobj.Object, "Proxy", None) is not None:
+            vobj.Object.Proxy.free = False
+        return super().unsetEdit(vobj, mode)
 
     def onDelete(self, vobj, subelements):
         # no longer shared with other Jobs
