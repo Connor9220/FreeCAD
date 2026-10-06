@@ -2762,6 +2762,8 @@ class _StopsClamps:
             timer.stop()
         FreeCADGui.Selection.removeObserver(self)
         FreeCAD.removeDocumentObserver(self)
+        # its quantity boxes let go of: none left for another panel to come back as, dead
+        QtCore.QTimer.singleShot(0, Widgets.letGo)
         if gone:
             self.dragHung = []
             self.editing = None

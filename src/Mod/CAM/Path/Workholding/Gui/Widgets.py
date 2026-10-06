@@ -32,18 +32,41 @@ if FreeCAD.GuiUp:
 translate = FreeCAD.Qt.translate
 
 
+# the quantity boxes made for a panel, let go of by Python when it closes
+_made = []
+
+
 def quantityBox(ui):
-    """quantityBox(ui) ... a Gui::QuantitySpinBox made by ui, a FreeCADGui.UiLoader. A box made
-    where one the panel closed before was, Python not told it was deleted, comes back as that
+    """quantityBox(ui) ... a Gui::QuantitySpinBox made by ui, a FreeCADGui.UiLoader, kept until
+    letGo. A box made where one before was, Python not told it was deleted, comes back as that
     one, dead: made again."""
     for _ in range(8):
         box = ui.createWidget("Gui::QuantitySpinBox")
         try:
             box.objectName()
-            return box
+            break
         except RuntimeError:
             continue
-    return ui.createWidget("Gui::QuantitySpinBox")
+    else:
+        box = ui.createWidget("Gui::QuantitySpinBox")
+    _made.append(box)
+    return box
+
+
+def letGo():
+    """letGo() ... the quantity boxes made for a panel let go of by Python as it closes. Made in
+    C++, Qt deletes them with the panel without telling Python: kept, a widget made later where
+    one was, in any panel, the Job's too, would come back as that one, dead."""
+    import shiboken6
+
+    for box in _made:
+        try:
+            if shiboken6.isValid(box):
+                box.blockSignals(True)
+                shiboken6.invalidate(box)
+        except Exception:
+            pass
+    _made.clear()
 
 
 def mmBox(ui, tip=None, value=None, step=None, minimum=0.0):
