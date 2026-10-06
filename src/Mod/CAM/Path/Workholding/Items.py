@@ -1046,10 +1046,39 @@ def _layout(job, sides=None):
             except ValueError as e:
                 Path.Log.warning(str(e))
                 continue
+            # one let go free stays where it was let go, out of the spreading
+            group = [p for p in group if not isFree(p)]
+            if not group:
+                continue
             for piece, x in zip(group, _slots(job, group, frame, length)):
                 if piece not in shared:
                     _placeAt(job, piece, frame, _alongSide(job, piece, frame, x))
     PathWorkholding.recompute(job.Document)
+
+
+def isFree(piece):
+    """isFree(piece) ... whether the piece stays where it was let go, not placed against the
+    stock or spread along its side with the others: dragged with Shift held."""
+    return bool(getattr(piece, "Free", False))
+
+
+def setFree(piece, free=True):
+    """setFree(piece, free=True) ... the piece left where it is, not placed against the stock or
+    spread along its side, until it is moved or set again; free False, placed as before."""
+    if not hasattr(piece, "Free"):
+        if not free:
+            return
+        piece.addProperty(
+            "App::PropertyBool",
+            "Free",
+            "Placed",
+            QT_TRANSLATE_NOOP(
+                "App::Property",
+                "Left where it was let go, not placed against the stock or spread along its side",
+            ),
+        )
+    if piece.Free != free:
+        piece.Free = free
 
 
 def _remove(piece):
@@ -1110,6 +1139,7 @@ def setPosition(piece, position):
     job, piece = PathWorkholding.memberOf(piece)
     if piece is None or not isPlaced(piece):
         raise ValueError("Not a stop or clamp placed by side")
+    setFree(piece, False)
     if PathWorkholding.isShared(piece):
         raise ValueError(
             translate("CAM", "%s is shared with another Job: it stays where it is") % piece.Label
@@ -1144,6 +1174,7 @@ def fromTransform(piece, at=None):
     job, piece = PathWorkholding.memberOf(piece)
     if piece is None or not canTransform(piece):
         return
+    setFree(piece, False)
     if PathLever.isLever(piece):
         PathLever.fromPlacement(job, piece)
         return
@@ -1197,6 +1228,7 @@ def setAngle(piece, angle):
     job, piece = PathWorkholding.memberOf(piece)
     if piece is None or piece.Kind != Kind.Push:
         return
+    setFree(piece, False)
     _setAngle(piece, angle)
     layout(job)
 

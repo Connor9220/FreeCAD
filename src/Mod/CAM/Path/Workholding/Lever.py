@@ -428,6 +428,8 @@ class ObjectLever(PathWorkholding.LinkedGroup):
             return
         import Path.Workholding.Items as PathItems
 
+        # a setting of it changed: placed as it says again, not left where it was let go
+        PathItems.setFree(obj, False)
         if doc.Recomputing:
             PathItems.layoutLater(job)
         else:
@@ -958,6 +960,8 @@ def _placeAgain(obj, later=False):
     if job is not None and piece == obj:
         import Path.Workholding.Items as PathItems
 
+        # a setting of it changed: placed as it says again, not left where it was let go
+        PathItems.setFree(obj, False)
         if later:
             PathItems.layoutLater(job)
         else:
@@ -2103,6 +2107,9 @@ def pressOf(job, obj):
 def setPress(job, obj, x, y):
     """setPress(job, obj, x, y) ... the lever clamp pressing at the Job's x and y, kept there from
     the stock's front left corner as the stock moves; placed again."""
+    import Path.Workholding.Items as PathItems
+
+    PathItems.setFree(obj, False)
     box = job.Stock.Shape.BoundBox
     proxy = obj.Proxy
     proxy.placing = True

@@ -297,6 +297,12 @@ def _viseAngle(placement):
     return round(angle, 3) + 0.0
 
 
+def _shiftHeld():
+    """Whether Shift is held now: a piece let go so is left where it is, nothing placing it."""
+    mods = QtWidgets.QApplication.queryKeyboardModifiers()
+    return bool(mods & QtCore.Qt.ShiftModifier)
+
+
 def _canDrag(piece):
     """Whether the dragger moves the piece picked: a stop or clamp as its kind allows, a vise of
     this Job's own along its jaws."""
@@ -2417,8 +2423,8 @@ class _StopsClamps:
             pivot = start.Base
             turn = delta.Rotation
             vises = PathWorkholding.vises(self.job)
-            if vises:
-                # in a vise: square to its jaws, a quarter at a time
+            if vises and not _shiftHeld():
+                # in a vise: square to its jaws, a quarter at a time; with Shift held, as turned
                 yaw = turn.toEuler()[0]
                 turn = FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), round(yaw / 90.0) * 90.0)
             # how far the pivot went, the turn about it
@@ -2472,7 +2478,15 @@ class _StopsClamps:
         self.applying = True
         try:
             self.panel.begin()
-            if PathWorkholding.isVise(piece):
+            if _shiftHeld():
+                # let go with Shift held: left where it is, nothing placing it
+                if PathWorkholding.isVise(piece):
+                    if getattr(piece, "Seated", False):
+                        piece.Seated = False
+                else:
+                    Items.setFree(piece)
+                PathWorkholding.recompute(self.job.Document)
+            elif PathWorkholding.isVise(piece):
                 # turned: the side against the fixed jaw it was turned to, seated there along
                 # the jaws as it was; else where it was let go along them
                 at = PathWorkholding.placementOf(piece)
