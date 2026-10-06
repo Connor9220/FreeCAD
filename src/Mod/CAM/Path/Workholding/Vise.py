@@ -486,14 +486,21 @@ def recompute(doc):
     the toolpaths (the document's RecomputesFrozen set), its Jobs' stops, clamps and vises, their
     stock and model and what these need, not the operations: moving the stock does not compute
     the toolpaths again until the panel's changes are kept."""
+    held = _heldBack(doc) if getattr(doc, "RecomputesFrozen", False) else None
     if getattr(doc, "Recomputing", False):
         # asked while the document recomputes, as it says it is done: it refuses a recompute
         # inside its own, so each one changed recomputed by itself, what it needs first
-        _recomputeTouched(doc)
+        _recomputeTouched(doc, held)
         return
-    if not getattr(doc, "RecomputesFrozen", False):
+    if held is None:
         doc.recompute()
-        return
+    elif held:
+        doc.recompute(held, True)
+
+
+def _heldBack(doc):
+    """What is recomputed while the toolpaths are held back: the Jobs' workholding, stock and
+    model, with what is in them."""
     found = []
 
     def add(obj):
@@ -509,13 +516,13 @@ def recompute(doc):
             add(job.Stock)
             for model in getattr(getattr(job, "Model", None), "Group", []) or []:
                 add(model)
-    if found:
-        doc.recompute(found, True)
+    return found
 
 
-def _recomputeTouched(doc):
-    """The document's objects changed recomputed one by one, each after what it needs."""
-    touched = [o for o in doc.Objects if "Touched" in o.State]
+def _recomputeTouched(doc, among=None):
+    """The document's objects changed, of among when given, recomputed one by one, each after
+    what it needs."""
+    touched = [o for o in (doc.Objects if among is None else among) if "Touched" in o.State]
     wanted = set(o.Name for o in touched)
     done = []
 
@@ -880,10 +887,11 @@ def partTurn(job):
     return FreeCAD.Rotation(models[0].Placement.Rotation) if models else FreeCAD.Rotation()
 
 
-def turnModel(job, rotation, center):
-    """turnModel(job, rotation, center) ... the Job's part turned by rotation about center, as
-    moveModel moves it: its models, what is placed on it without being attached to it, and its
-    stock; a stock made from the models' box made about them again where they now are."""
+def turnModel(job, rotation, center, stockTurn=None):
+    """turnModel(job, rotation, center, stockTurn=None) ... the Job's part turned by rotation
+    about center, as moveModel moves it: its models, what is placed on it without being attached
+    to it, and its stock; a stock made from the models' box made about them again where they now
+    are, turned by stockTurn as well when given, its box square to it."""
     import Path.Main.Job as PathJob
     import Path.Main.Stock as PathStock
 
@@ -892,16 +900,20 @@ def turnModel(job, rotation, center):
     stock = job.Stock
     fromBase = isinstance(getattr(stock, "Proxy", None), PathStock.StockFromBase)
     if fromBase:
-        before = PathStock.shapeBoundBox(job.Model.Group)
-        corner = stock.Placement.Base - Vector(before.XMin, before.YMin, before.ZMin)
+        was = FreeCAD.Placement(stock.Placement)
+        before = PathStock.shapeBoundBoxIn(job.Model.Group, was.Rotation)
+        corner = was.Rotation.inverted().multVec(was.Base) - Vector(
+            before.XMin, before.YMin, before.ZMin
+        )
     for model in job.Model.Group:
         model.Placement = turn.multiply(model.Placement)
     for obj in carried:
         obj.Placement = turn.multiply(obj.Placement)
     if fromBase:
-        after = PathStock.shapeBoundBox(job.Model.Group)
+        turned = stockTurn.multiply(was.Rotation) if stockTurn is not None else was.Rotation
+        after = PathStock.shapeBoundBoxIn(job.Model.Group, turned)
         stock.Placement = FreeCAD.Placement(
-            Vector(after.XMin, after.YMin, after.ZMin) + corner, stock.Placement.Rotation
+            turned.multVec(Vector(after.XMin, after.YMin, after.ZMin) + corner), turned
         )
         stock.recompute()
     elif stock is not None:

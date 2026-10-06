@@ -91,6 +91,27 @@ def shapeBoundBox(obj):
     return None
 
 
+def shapeBoundBoxIn(obj, rotation):
+    """shapeBoundBoxIn(obj, rotation) ... the box round obj's shapes square to rotation's axes,
+    in rotation's frame: shapeBoundBox's when rotation turns nothing."""
+    if rotation.isIdentity():
+        return shapeBoundBox(obj)
+    if isinstance(obj, list):
+        bb = FreeCAD.BoundBox()
+        for o in obj:
+            bb.add(shapeBoundBoxIn(o, rotation))
+        return bb
+    if hasattr(obj, "Shape"):
+        shape = obj.Shape.copy()
+        shape.Placement = FreeCAD.Placement(FreeCAD.Vector(), rotation.inverted()).multiply(
+            shape.Placement
+        )
+        return shape.BoundBox
+    if obj and "App::Part" == obj.TypeId:
+        return shapeBoundBoxIn(list(obj.Group), rotation)
+    return shapeBoundBox(obj)
+
+
 class Stock(object):
     def onDocumentRestored(self, obj):
         if hasattr(obj, "StockType"):
@@ -205,7 +226,12 @@ class StockFromBase(Stock):
         return None
 
     def execute(self, obj):
-        bb = shapeBoundBox(obj.Base.Group) if obj.Base and hasattr(obj.Base, "Group") else None
+        # the box square to the stock's own turn, which turns it with the part
+        bb = (
+            shapeBoundBoxIn(obj.Base.Group, obj.Placement.Rotation)
+            if obj.Base and hasattr(obj.Base, "Group")
+            else None
+        )
         Path.Log.track(obj.Label, bb)
 
         # Sometimes, when the Base changes it's temporarily not assigned when

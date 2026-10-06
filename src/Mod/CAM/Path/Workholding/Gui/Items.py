@@ -486,12 +486,12 @@ class _StockDrag(_Drag):
     def landing(self, start, at, free=None):
         """How the part is moved, the dragger at at, the drag started at start: as it is let
         go, turned a quarter at a time, the stock square to the machine's X and Y as it is to
-        the Job's."""
+        the Job's; free, turned as it is."""
+        free = _shiftHeld() if free is None else free
         delta = at.multiply(start.inverse())
         pivot = getattr(self.stops, "dragPivot", start.Base)
-        turn = FreeCAD.Rotation(
-            FreeCAD.Vector(0, 0, 1), round(delta.Rotation.toEuler()[0] / 90.0) * 90.0
-        )
+        yaw = delta.Rotation.toEuler()[0]
+        turn = FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), yaw if free else round(yaw / 90.0) * 90.0)
         # how far the pivot went, the turn about it
         shift = delta.Base - pivot + delta.Rotation.multVec(pivot)
         return FreeCAD.Placement(shift, FreeCAD.Rotation()).multiply(
@@ -540,18 +540,63 @@ class _StockDrag(_Drag):
         piece.Placement = start
         if moved.isIdentity():
             return
-        quarters = int(round(moved.Rotation.toEuler()[0] / 90.0)) % 4
-        if not quarters:
-            self.carry(moved.inverse(), not free)
-            return
+        angle = moved.Rotation.toEuler()[0]
         pivot = self.stops.dragPivot
         slid = moved.multVec(pivot) - pivot
-        # left free first: placed by the part's own sides, they would turn with it
-        self.leaveFree()
-        # turned as the Job's own Rotate turns the part, the WCS left where it is; what holds it
-        # moved back by as far as the stock slid
-        self.turnPart(quarters, pivot)
-        self.carry(FreeCAD.Placement(-slid, FreeCAD.Rotation()), not free)
+        if abs(angle) > 1e-6:
+            # left free first: placed by the part's own sides, they would turn with it
+            self.leaveFree()
+            # turned as the Job's own Rotate turns the part, the WCS left where it is
+            self.turnPart(angle, pivot)
+        # what holds it moved back by as far as the stock slid; unless free, on to rest against
+        # a stop that comes near it
+        back = -slid
+        if not free:
+            back += self.againstStops(back)
+        self.carry(FreeCAD.Placement(back, FreeCAD.Rotation()), not free)
+
+    def againstStops(self, back):
+        """How much further what holds the stock moves, moved by back, for the stock to rest
+        against the stops that come within half their own width of it, in or out: the nearest
+        each way, those square to one another only."""
+        import Part
+
+        stock = self.job.Stock.Shape
+        if stock.isNull():
+            return FreeCAD.Vector()
+        found = []
+        for stop in Items.itemsOf(self.job):
+            if not Items.isStop(stop) or PathWorkholding.isShared(stop):
+                continue
+            shape = Part.getShape(stop, "", transform=True)
+            if shape.isNull():
+                continue
+            shape = shape.translated(back)
+            # the way it faces, out from the stock
+            out = stop.Placement.Rotation.multVec(FreeCAD.Vector(0, -1, 0))
+            out.z = 0
+            if out.Length < 1e-9:
+                continue
+            out.normalize()
+            along = FreeCAD.Vector(-out.y, out.x, 0)
+            low, high = PathWorkholding._extents(stock, FreeCAD.Vector(), along)
+            near, far = PathWorkholding._extents(shape, FreeCAD.Vector(), along)
+            # beside the stock's end, not across from it
+            if far <= low or near >= high:
+                continue
+            reach = PathWorkholding._extents(stock, FreeCAD.Vector(), out)[1]
+            near, far = PathWorkholding._extents(shape, FreeCAD.Vector(), out)
+            gap = near - reach
+            if abs(gap) <= (far - near) / 2:
+                found.append((abs(gap), gap, out))
+        more = FreeCAD.Vector()
+        taken = []
+        for _, gap, out in sorted(found, key=lambda f: f[0]):
+            if any(abs(out.dot(way)) > 1e-3 for way in taken):
+                continue
+            taken.append(out)
+            more -= out * gap
+        return more
 
     def leaveFree(self):
         """The Job's own stops and clamps left where they are, not placed against the stock."""
@@ -562,19 +607,24 @@ class _StockDrag(_Drag):
             ):
                 Items.setFree(piece, True)
 
-    def turnPart(self, quarters, pivot):
-        """The part turned in the Job quarters of a turn about pivot, its stock with it: one made
-        from the part's box keeps the stock beyond it on the sides it is on as they turn."""
+    def turnPart(self, angle, pivot):
+        """The part turned in the Job angle degrees about pivot, its stock with it: one made from
+        the part's box keeps the stock beyond it on the sides it is on as they turn a quarter at
+        a time, and is turned itself by what is left, its box taken square to it."""
         import Path.Main.Stock as PathStock
 
         stock = self.job.Stock
+        quarters = int(round(angle / 90.0))
         if isinstance(getattr(stock, "Proxy", None), PathStock.StockFromBase):
             ring = ("ExtXpos", "ExtYpos", "ExtXneg", "ExtYneg")
             was = [getattr(stock, name).Value for name in ring]
             for i, value in enumerate(was):
                 setattr(stock, ring[(i + quarters) % 4], value)
         PathWorkholding.turnModel(
-            self.job, FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), quarters * 90.0), pivot
+            self.job,
+            FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), angle),
+            pivot,
+            FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), angle - quarters * 90.0),
         )
         PathWorkholding.recompute(self.job.Document)
 
