@@ -1005,12 +1005,15 @@ def layout(job, sides=None):
 
 
 class _StockWatch:
-    """A Job's stock changed, its model taller or moved, its extents set: its stops and clamps
-    placed again round it once the recompute is done, not only when one of them is moved. Not
-    for what placing them changes itself, nor while a document loads or undoes."""
+    """A Job's stock changed, its model taller or moved, its extents set, another made: its stops
+    and clamps kept where they stand on the table once the recompute is done, only as high as
+    the stock now needs; those whose settings an expression changed as the document recomputed
+    placed again. Not for what placing them changes itself, nor while a document loads or
+    undoes."""
 
     def __init__(self):
         self.pending = set()
+        self.changed = set()
 
     def slotChangedObject(self, obj, prop):
         if prop not in ("Shape", "Placement") or layingOut():
@@ -1020,9 +1023,15 @@ class _StockWatch:
             return
         for job in doc.Objects:
             if getattr(job, "Stock", None) is obj and itemsOf(job):
-                self.pending.add((doc.Name, job.Name))
+                self.changed.add((doc.Name, job.Name))
 
     def slotRecomputedDocument(self, doc):
+        changed = [name for docName, name in self.changed if docName == doc.Name]
+        self.changed = {key for key in self.changed if key[0] != doc.Name}
+        for name in changed:
+            job = doc.getObject(name)
+            if job is not None and getattr(job, "Stock", None) is not None:
+                keepOnTable(job)
         jobs = [name for docName, name in self.pending if docName == doc.Name]
         self.pending = {key for key in self.pending if key[0] != doc.Name}
         for name in jobs:
@@ -1042,6 +1051,34 @@ def _watchStock():
 
 
 _watchStock()
+
+
+def keepOnTable(job):
+    """keepOnTable(job) ... the Job's stops and clamps kept where they stand on the table as its
+    stock changes: placed round it again for how high they stand and what they reach over, then
+    put back where they were across the table and turned as they were, and left free there."""
+    pieces = [
+        p
+        for p in itemsOf(job)
+        if not PathWorkholding.isShared(p) and getattr(p, "Kind", None) != Kind.Table
+    ]
+    if not pieces:
+        return
+    before = {p.Name: FreeCAD.Placement(p.Placement) for p in pieces}
+    for piece in pieces:
+        setFree(piece, False)
+    layout(job)
+    _layingOut[0] += 1
+    try:
+        for piece in pieces:
+            was = before[piece.Name]
+            piece.Placement = FreeCAD.Placement(
+                Vector(was.Base.x, was.Base.y, piece.Placement.Base.z), was.Rotation
+            )
+            setFree(piece, True)
+    finally:
+        _layingOut[0] -= 1
+    PathWorkholding.recompute(job.Document)
 
 
 def layoutLater(job):

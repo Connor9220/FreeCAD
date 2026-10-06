@@ -182,8 +182,8 @@ class TestPathWorkholdingLeverFile(_Lever):
         self.assertFalse(any(getattr(o, "LeverRole", "") == "Riser" for o in clamp.Group))
 
     def test03_put_where_it_presses_and_turned(self):
-        """Put at an X and Y, it presses there and stays as the stock moves; its angle turns it
-        about there."""
+        """Put at an X and Y, it presses there and stays there on the table as the stock moves;
+        its angle turns it about there."""
         clamp = Items.setClamps(self.job, [{"side": "-Y", "which": self.path}])[0]
         Lever.setPress(self.job, clamp, 40, 8)
         self.assertCoincide(clamp.Placement.Base, Vector(40, 8, HEIGHT))
@@ -194,7 +194,8 @@ class TestPathWorkholdingLeverFile(_Lever):
         PathWorkholding.moveModel(self.job, Vector(10, 0, 0))
         self.doc.recompute()
         Items.layout(self.job)
-        self.assertCoincide(clamp.Placement.Base, Vector(50, 8, HEIGHT))
+        self.assertCoincide(clamp.Placement.Base, Vector(40, 8, HEIGHT))
+        self.assertTrue(Items.isFree(clamp))
 
     def test04_rests_on_the_edge(self):
         """On stock thicker than it is laid out for, its arm meets the stock's edge: it rests

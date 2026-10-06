@@ -349,15 +349,21 @@ class TestPathWorkholdingStops(_Stock):
         Items.removePiece(dogs[0])
         self.assertRoughly(Items.positionOf(dogs[1]), x + 30)
 
-    def test09_placed_again_when_the_stock_moves(self):
-        """The part moved, its stops and clamps put against its stock again."""
+    def test09_kept_on_the_table_when_the_stock_moves(self):
+        """The part moved: its stops and clamps stay where they stand on the table, left free,
+        not put against its stock again; as high as it now needs."""
         Items.setStops(self.job, [{"side": "-Y", "count": 2}])
         Items.setClamps(self.job, [{"side": "+Y", "which": "EdgeClamp"}])
+        pieces = Items.stopsOn(self.job) + Items.clampsOn(self.job)
+        before = {p.Name: FreeCAD.Vector(p.Placement.Base) for p in pieces}
         PathWorkholding.moveModel(self.job, Vector(12, 7, 3))
         self.doc.recompute()
         Items.layout(self.job)
-        for piece in Items.stopsOn(self.job) + Items.clampsOn(self.job):
-            self.assertTouches(piece)
+        for piece in pieces:
+            self.assertTrue(Items.isFree(piece))
+            self.assertRoughly(piece.Placement.Base.x, before[piece.Name].x)
+            self.assertRoughly(piece.Placement.Base.y, before[piece.Name].y)
+            self.assertRoughly(piece.Placement.Base.z, before[piece.Name].z + 3)
 
     def test10_sides_are_the_part_own(self):
         """The part turned a quarter round, its front faces +X: stops on its front go there."""
