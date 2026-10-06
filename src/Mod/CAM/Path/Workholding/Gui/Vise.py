@@ -1249,20 +1249,52 @@ class TaskPanelVise:
         self.existing = None
         self.focusChanged()
 
-    def addVise(self, which, seat, jaw):
-        """Add's vise kept: put in as picked, seated, picked in Placed. True if it was."""
-        if not self.previewAdd(which, seat, jaw):
+    def addVise(self, which, seat, jaw, count=1):
+        """Add's vise kept: put in as picked, seated, picked in Placed; with count, as many of it
+        in a row along a long stock, all holding it, spread along it as clamps are along a side,
+        each moved to it. True if the first was."""
+        offsets = [self.offset.property("rawValue")]
+        if count > 1 and which[0] == "vise":
+            offsets = self.alongStock(which, seat, jaw, count)
+        moves = self.moveVise.isChecked()
+        first = None
+        try:
+            for i, offset in enumerate(offsets):
+                self.showOffset(offset)
+                if i:
+                    # the others go to the stock, held where the first put it
+                    self.moveVise.setChecked(True)
+                    self.addingFor = None
+                if not self.previewAdd(which, seat, jaw):
+                    break
+                self.showOffset(offset)
+                if not self.apply():
+                    break
+                vise = self.adding.vise
+                self.adding.finish(keep=True)
+                self.adding = None
+                self.addingFor = None
+                first = first or vise
+        finally:
+            (self.moveVise if moves else self.movePart).setChecked(True)
+        if first is None:
             return False
-        if not self.apply():
-            return False
-        vise = self.adding.vise
-        self.adding.finish(keep=True)
-        self.adding = None
-        self.addingFor = None
-        self.existing = vise
+        self.existing = first
         self.updateGrip()
-        self.stops.readIn(vise)
+        self.stops.readIn(first)
         return True
+
+    def alongStock(self, which, seat, jaw, count):
+        """Where count vises go along the stock, as offsets from their jaws' middle: its length
+        along their jaws shared evenly, as clamps spread along a side."""
+        if not self.previewAdd(which, seat, jaw):
+            return [0.0] * count
+        job, vise = self.current()
+        station = PathWorkholding.stationPlacement(vise)
+        low, high = PathWorkholding._stockIn(job, station)[1]
+        length = high - low
+        # the stock's middle where each vise's jaws' middle is
+        return [-x for x in Items.spread(length, count)]
 
     def begin(self):
         """The step the stops' and clamps' changes go into, opened if it is not: pending until

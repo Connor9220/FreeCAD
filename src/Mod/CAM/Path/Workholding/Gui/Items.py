@@ -1279,7 +1279,8 @@ class _StopsClamps:
         vise = kind in ("vise", "viseshare")
         # a vise goes where the stock is, not on a side: how the stock sits in it instead
         self.side.setVisible(not vise)
-        self.count.setVisible(not vise)
+        # vises from a file several at once, in a row along a long stock
+        self.count.setVisible(not vise or kind == "vise")
         self.count.setEnabled(kind != "share")
         self.viseRows.setVisible(kind == "vise")
         self.add.setEnabled(which is not None)
@@ -1430,7 +1431,12 @@ class _StopsClamps:
             self.previewPicked()
         which = self.item.currentData()
         if _kindOf(which) in ("vise", "viseshare"):
-            if self.panel.addVise(which, self.viseSeat.currentData(), self.viseJaw.currentData()):
+            if self.panel.addVise(
+                which,
+                self.viseSeat.currentData(),
+                self.viseJaw.currentData(),
+                self.count.value() if which[0] == "vise" else 1,
+            ):
                 if which[0] == "vise":
                     _rememberClamp(which[1])
                 self.resetRow()
