@@ -1079,7 +1079,8 @@ class TaskPanelVise:
         stock stands on as it has it, its floor, its parallels or a step."""
         job, vise = self.current()
         shown = vise is not None
-        self.stops.viseArea.setVisible(shown)
+        # a vise being added shows in the view; its settings once Add has put it in
+        self.stops.viseArea.setVisible(shown and not self.adding)
         for note in (self.fit, self.other, self.clearance):
             note.setVisible(shown and bool(note.text()))
         if not shown:
@@ -1089,31 +1090,58 @@ class TaskPanelVise:
         self.updateFit()
         self.showSeat()
 
-    def addVise(self, which, seat, jaw):
-        """Add's vise put in: from its file, or another Job's shared; seated with the side of
-        the stock on its bottom and the side against its fixed jaw asked for, kept, and picked in
-        Placed. True if it was."""
+    def previewAdd(self, which, seat, jaw):
+        """The vise Add has picked put in the view, seated with the side of the stock on its
+        bottom and the side against its fixed jaw asked for: from its file, or another Job's
+        shared. Pending: Add keeps it, picking another drops it. True if it is in."""
         kind, value = which
-        if kind == "viseshare":
-            owner = self.job.Document.getObject(value)
-            index = next(
-                (i for i, e in enumerate(self.entries) if e[0] == "share" and e[1] == owner), None
-            )
-            if owner is None or index is None:
-                return False
-            self.shareChanged(index, owner)
-        else:
-            self.addFile(value)
+        want = (kind, value if kind == "viseshare" else os.path.realpath(value))
+        if not (self.adding and getattr(self, "addingFor", None) == want):
+            if kind == "viseshare":
+                owner = self.job.Document.getObject(value)
+                index = next(
+                    (i for i, e in enumerate(self.entries) if e[0] == "share" and e[1] == owner),
+                    None,
+                )
+                if owner is None or index is None:
+                    return False
+                self.shareChanged(index, owner)
+            else:
+                self.addFile(value)
+            self.addingFor = want if self.adding else None
         if not self.adding or self.adding.vise is None:
             return False
+        # another Job's vise stays turned as it is; one from its file as Add says
         if kind != "viseshare" and seat is not None:
+            self.seat.blockSignals(True)
             self.seat.setCurrentIndex(max(0, self.seat.findData(seat)))
+            self.seat.blockSignals(False)
             self.seatChanged(jaw=jaw)
+            self.preview()
+        self.focusChanged()
+        return True
+
+    def dropAdd(self):
+        """The vise Add had picked taken out of the view again, no trace left."""
+        if not self.adding:
+            return
+        self.previewTimer.stop()
+        self.adding.finish(keep=False)
+        self.adding = None
+        self.addingFor = None
+        self.existing = None
+        self.focusChanged()
+
+    def addVise(self, which, seat, jaw):
+        """Add's vise kept: put in as picked, seated, picked in Placed. True if it was."""
+        if not self.previewAdd(which, seat, jaw):
+            return False
         if not self.apply():
             return False
         vise = self.adding.vise
         self.adding.finish(keep=True)
         self.adding = None
+        self.addingFor = None
         self.existing = vise
         self.updateGrip()
         self.stops.readIn(vise)
@@ -1759,7 +1787,9 @@ class TaskPanelVise:
                 self.stops.readIn(self.existing)
 
     def applyAll(self):
-        """The stops and clamps kept, and the vise picked seated as its settings say."""
+        """The stops and clamps kept, and the vise picked seated as its settings say; one only
+        picked in Add, not added, taken out."""
+        self.dropAdd()
         if not self.applyStops():
             return False
         job, vise = self.current()

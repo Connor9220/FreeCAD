@@ -827,6 +827,8 @@ class _StopsClamps:
         )
         self.remove.clicked.connect(self.removeChosen)
         self.viseSeat.currentIndexChanged.connect(lambda *args: self.viseJawsFor())
+        self.viseSeat.currentIndexChanged.connect(lambda *args: self.previewVise())
+        self.viseJaw.currentIndexChanged.connect(lambda *args: self.previewVise())
         self.table.clicked.connect(self.addTable)
 
     def showRow(self, field, shown):
@@ -850,6 +852,17 @@ class _StopsClamps:
             field = holder
         layout.addRow(label, field)
         self.leverRows.append(field)
+
+    def previewVise(self):
+        """A vise picked in Add shown in the view, seated as the row says; anything else picked,
+        or nothing, the one shown taken out."""
+        if getattr(self, "loading", False):
+            return
+        which = self.item.currentData()
+        if _kindOf(which) in ("vise", "viseshare"):
+            self.panel.previewAdd(which, self.viseSeat.currentData(), self.viseJaw.currentData())
+        else:
+            self.panel.dropAdd()
 
     def viseJawsFor(self, keep=None):
         """The sides that can be against a vise's fixed jaw, square to the one on its bottom:
@@ -1061,6 +1074,7 @@ class _StopsClamps:
         self.viseRows.setVisible(kind == "vise")
         self.add.setEnabled(which is not None)
         self.showAdding(which)
+        self.previewVise()
 
     def showAdding(self, which):
         """What Add puts in, while one is chosen: its picture, its name and what it is, also on
@@ -1496,6 +1510,11 @@ class _StopsClamps:
         vise = piece is not None and PathWorkholding.isVise(piece)
         self.remove.setEnabled(piece is not None)
         self.settings.setVisible(not vise)
+        adding = self.panel.adding
+        if piece is not None and adding and piece is not adding.vise:
+            # a placed piece picked: the vise only picked in Add taken out
+            self.item.setCurrentIndex(-1)
+            self.updateRow()
         self.panel.focusVise(piece if vise else None)
         if vise:
             piece = None
