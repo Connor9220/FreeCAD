@@ -54,18 +54,21 @@ import Path.Workholding.Source as PathSource
 import Path.Workholding.Vise as PathWorkholding
 
 from FreeCAD import Vector
-from Path.Workholding.Common import userLength
+from Path.Workholding.Common import stockTopUnder, userLength
 from Path.Workholding.Constants import (
     BOLT_COLOR,
     LEVER_BOLT_STEP,
     LEVER_EDGE_CLEARANCE,
     LEVER_END_REACH,
+    LEVER_HEEL_REST_MAX,
+    LEVER_HEEL_REST_MIN,
     LEVER_LEAST_OVERLAP,
     LEVER_LIFT_NOTED,
     LEVER_PROFILE_STEP,
     LEVER_TILT_NOTED,
     LEVER_RISER_LENGTH,
     LEVER_RISER_MARGIN,
+    LEVER_RISER_STEP,
     LEVER_SEAT_TOLERANCE,
     LEVER_RISER_THICKNESS,
     LEVER_STUD_ABOVE_NUT,
@@ -280,7 +283,14 @@ def readKit(doc):
                 boltEnd=_vec(sizes.SlotEnd),
                 width=float(sizes.B_Width.Value),
                 teeth=teeth * (pitch.Value if pitch is not None else 0.0),
+                # a heel with no teeth, a plain slope: on a meshed pair's flat top only
+                plain=not bool(getattr(sizes, "HeelToothed", True)),
             )
+            # how much of its end rests on a pair's flat top, at least and at most
+            for key, name in (("restMin", "HeelRestMin"), ("restMax", "HeelRestMax")):
+                rest = getattr(sizes, name, None)
+                if rest is not None:
+                    piece[key] = float(rest.Value)
             found["clamps"].append(piece)
         elif kind == "blocks":
             piece["volume"] = float(solid.Shape.Volume)
@@ -296,6 +306,8 @@ def readKit(doc):
                         # how tall it stands, and how far it reaches either way along X
                         "height": box.ZMax,
                         "reach": max(-box.XMin, box.XMax),
+                        "xmin": box.XMin,
+                        "xmax": box.XMax,
                         # its top along X, to mesh it with another teeth into teeth
                         "profile": _profile(posed),
                     }
@@ -421,6 +433,10 @@ class ObjectLever(PathWorkholding.LinkedGroup):
             PathItems.layout(job)
 
     def onDocumentRestored(self, obj):
+        # placed again when the stock changes: what watches it is loaded with the stops and
+        # clamps, which a Job holding only lever clamps would not load until one is moved
+        import Path.Workholding.Items  # noqa: F401
+
         # its file looked for again if it is not found
         PathSource.recoverLater(obj.Document)
         # a kit's clamp offered what its other end may rest on now
@@ -988,6 +1004,28 @@ def _riser(obj, wanted):
     return riser
 
 
+def _floorUnder(job, obj, heel, table):
+    """How high, in the clamp's frame, what its other end stands on is: the table, at table, or
+    the top of another piece of the workholding under it, a rail or a block, up to the stock's
+    top."""
+    import Path.Main.Job as PathJob
+
+    reach = _length(LEVER_END_REACH)
+    column = Part.makeBox(2 * reach, 2 * reach, -table, Vector(heel.x - reach, -reach, table))
+    column.Placement = obj.Placement.multiply(column.Placement)
+    floor = table
+    for part, shape in PathJob.workholdingParts(job, cuttable=None):
+        if not shape.BoundBox.intersect(column.BoundBox):
+            continue
+        if part == obj or PathWorkholding.memberOf(part)[1] == obj:
+            continue
+        common = shape.common(column)
+        if common.isNull() or not common.Solids:
+            continue
+        floor = max(floor, common.BoundBox.ZMax - obj.Placement.Base.z)
+    return floor
+
+
 def _tipping(heel, rise):
     """How far the clamp is tipped about where it presses for its other end, heel, to stand
     rise above where it presses: the turn and its angle up from level, and whether it reaches."""
@@ -1004,13 +1042,16 @@ def _tipping(heel, rise):
 
 def _blockFor(data, obj, height, room=None):
     """The step block, the way it stands and the step its heel goes on, as the clamp says: of
-    those that reach height, the step nearest above it, the smallest block of those. For Auto,
-    when none reaches, two meshed teeth into teeth, one standing as it does, the other upside
-    down on it, the heel on its flat top: the pair nearest above height. When nothing reaches,
-    the highest, a pair for Auto when that is higher. (block, pose, tread, reaches, meshed):
-    meshed, for a pair, (the block under, -, how high the top is, -, the upper one's middle along X
-    from the lower one's); None for one block."""
+    those that reach height and leave room past the stud, the step nearest above it, the
+    smallest block of those. Two meshed teeth into teeth, one standing as it does, the other
+    upside down on it, the heel on its flat top, the pair's highest, the pair nearest above
+    height: for a clamp whose heel has no teeth, always, a single block's steps giving it
+    nothing flat to stand on; for Auto, when no block reaches, or none that reaches leaves room
+    past the stud. Never a bigger block on a smaller one. When nothing reaches, the highest. (block, pose, tread,
+    reaches, meshed): meshed, for a pair, (the block under, -, how high the top is, -, the upper
+    one's middle along X from the lower one's); None for one block."""
     wanted = getattr(obj, "Block", Auto)
+    plain = _kitClamp(data, obj).get("plain", False)
     found = []
     for block in data["blocks"]:
         if wanted != Auto and block["label"] != wanted:
@@ -1020,27 +1061,37 @@ def _blockFor(data, obj, height, room=None):
                 found.append((block, pose, tread))
     if not found:
         return None
-    above = [f for f in found if f[2][0] >= height - 1e-6]
-    if room is not None:
-        # those whose lower steps, reaching back toward the work, stop short of the stud
-        fits = [f for f in above if f[2][1] + f[0][f[1]].get("reach", 0.0) <= room + 1e-6]
-        above = fits or above
-    # a step clamp's heel meshes with a block's teeth standing on end: lying only when no block
-    # standing reaches
-    standing = [f for f in above if f[1] == "standing"]
-    above = standing or above
-    if above:
-        best = min(above, key=lambda f: (round(f[2][0] - height, 6), f[0]["volume"]))
-        return best + (True, None)
     tallest = max(found, key=lambda f: f[2][0]) + (False, None)
-    if wanted != Auto:
-        return tallest
+    single = None
+    if not plain:
+        above = [f for f in found if f[2][0] >= height - 1e-6]
+        # a step clamp's heel meshes with a block's teeth standing on end: lying only when no
+        # block standing reaches
+        standing = [f for f in above if f[1] == "standing"]
+        above = standing or above
+        # those whose lower steps, reaching back toward the work, stop short of the stud
+        fits = above
+        if room is not None:
+            fits = [f for f in above if f[2][1] + f[0][f[1]].get("reach", 0.0) <= room + 1e-6]
+        nearest = lambda f: (round(f[2][0] - height, 6), f[0]["volume"])
+        if fits:
+            return min(fits, key=nearest) + (True, None)
+        if above:
+            # reaching, but meeting the stud: a pair, if one fits, before it
+            single = min(above, key=nearest) + (True, None)
+        if wanted != Auto:
+            return single or tallest
     # teeth into teeth: the upper one upside down on the lower one, both standing the same way so
     # their teeth match, sitting where they mesh; at least half the shorter one over the other,
-    # a column, not two blocks barely touching; the upper one clear of the table
+    # a column, not two blocks barely touching; the upper one clear of the table, and never
+    # bigger than the lower one
     pairs = []
     for lower in data["blocks"]:
         for upper in data["blocks"]:
+            if wanted != Auto and not (lower["label"] == upper["label"] == wanted):
+                continue
+            if upper["volume"] > lower["volume"] + 1e-6:
+                continue
             for pose in Poses:
                 low, up = lower.get(pose), upper.get(pose)
                 if not low or not up or "profile" not in low or "profile" not in up:
@@ -1051,11 +1102,14 @@ def _blockFor(data, obj, height, room=None):
                 key = (lower["solid"], upper["solid"], pose, len(low["profile"]["z"]))
                 shifts, tops, overlaps = _meshings(low["profile"], up["profile"], key)
                 # of the offsets standing clear of the table with half the shorter one over the
-                # other: the one nearest above height, else the highest
+                # other, its flat top the pair's highest, the lower one's steps nowhere above it
+                # to meet the bar: the one nearest above height, else the highest
                 usable = [
                     k
                     for k in range(len(tops))
-                    if tops[k] - tall >= -1e-6 and 2 * overlaps[k] >= shorter
+                    if tops[k] - tall >= -1e-6
+                    and 2 * overlaps[k] >= shorter
+                    and tops[k] >= low.get("height", 0.0) - LEVER_SEAT_TOLERANCE
                 ]
                 if not usable:
                     continue
@@ -1073,11 +1127,118 @@ def _blockFor(data, obj, height, room=None):
     if reaching:
         best = min(reaching, key=lambda p: (round(p[0] - height, 6), p[1]))
         return best[2][:3] + (True, best[2][3])
+    if single is not None:
+        return single
     if pairs:
         best = max(pairs, key=lambda p: (round(p[0], 6), -p[1]))
-        if best[0] > tallest[2][0] + 1e-6:
+        if plain or best[0] > tallest[2][0] + 1e-6:
             return best[2][:3] + (False, best[2][3])
     return tallest
+
+
+def _pairPlan(data, obj, chosen, heel, bolt, rise):
+    """Where the meshed pair of step blocks chosen goes under the clamp's other end, along the
+    bar before it is tipped, the lower one's middle at 0: the way round about Z, the upper one's
+    middle, the pair's edge nearest the work, where on the bar it bears first and where that is
+    along the pair, and what is said of it: on its top's edge nearest the work, or tipped down,
+    at the bar's end or the top's far edge. The bar's last HeelRestMin to
+    HeelRestMax rests on its top, the middle of that when it may: less to clear the stud at
+    bolt, or to keep the support farther from it than where the clamp presses, which would press
+    less than half as hard as the stud pulls; and never bearing out past the lower one's base,
+    where the pair would tip. First the way round putting the upper one's thick back under the
+    heel, not its thin point, the lower one's steps toward the work under the bar as it tips
+    up by rise over its length."""
+    clamp = _kitClamp(data, obj)
+    upper, pose, _, _, meshed = chosen
+    lower, shift = meshed[0], meshed[4]
+    # the upper one's edge over the lower one's, a column, as near as this
+    slack = LEVER_SEAT_TOLERANCE
+    least = clamp.get("restMin", _length(LEVER_HEEL_REST_MIN))
+    most = max(least, clamp.get("restMax", _length(LEVER_HEEL_REST_MAX)))
+    # the flat of the bar's underside ends at a plain heel's end, at a toothed one's first step
+    end = heel.x + (clamp.get("teeth", 0.0) if clamp.get("plain") else 0.0)
+    stud = bolt + _shank(data)
+
+    def span(posed):
+        reach = posed.get("reach", posed["treads"][-1][1])
+        return posed.get("xmin", -reach), posed.get("xmax", reach)
+
+    upLo, upHi = span(upper[pose])
+    lowLo, lowHi = span(lower[pose])
+    # the lower one's top along the pair, either way round; the bar over it rising toward its
+    # end from where it bears on the upper one's flat top
+    profile = lower[pose].get("profile")
+    slope = max(0.0, rise) / heel.x
+    if profile:
+        import numpy
+
+        heights = numpy.asarray(profile["z"])
+        along = profile["x0"] + profile["step"] * numpy.arange(len(heights))
+
+    def clash(way, near):
+        if not profile:
+            return 0.0
+        x = along if way > 0 else -along
+        under = x < near
+        if not under.any():
+            return 0.0
+        return float((heights[under] - (meshed[2] - (near - x[under]) * slope)).max())
+
+    plans = []
+    for way in (1, -1):
+        # the upper one upside down, end for end; the pair turned about Z for the other way
+        if way > 0:
+            top, base = (shift - upHi, shift - upLo), (lowLo, lowHi)
+        else:
+            top, base = (upLo - shift, upHi - shift), (-lowHi, -lowLo)
+        edge = min(top[0], base[0])
+        # bearing first on its top's edge, over the lower one's base, not out past it
+        tips = top[0] < base[0] - slack
+        # the lower one's steps toward the work up into the bar
+        meets = clash(way, top[0]) > LEVER_SEAT_TOLERANCE
+        # the pair's edge clear of the stud
+        clear = end - stud + edge - top[0]
+        # the support farther from the stud than where it presses
+        strong = end - 2 * bolt
+        # bearing no farther out than the lower one's base
+        inside = base[1] + slack - top[0] if top[1] > base[1] + slack else math.inf
+        # less than the least rather than into the stud, or the stock past it
+        rest = max(min(least, max(clear, 0.0)), min((least + most) / 2, clear, strong, inside))
+        bad = tips or meets or clear < least - 1e-6 or inside < least - 1e-6
+        weak = strong < least - 1e-6
+        plans.append(((bad, weak), tips, weak, way, top, edge, rest))
+    _, tips, weak, way, top, edge, rest = min(plans, key=lambda p: p[0])
+    notes = []
+    if tips:
+        notes.append(translate("CAM", "the pair of step blocks tips under the heel"))
+    # nothing of it on them at all is said once the stud is placed
+    if 1e-6 < rest < least - 1e-6:
+        notes.append(
+            translate(
+                "CAM",
+                "only %s of its end rests on the step blocks, clear of the stud, %s at least: use a "
+                "longer clamp, or put the bolt nearer the work",
+            )
+            % (userLength(rest), userLength(least))
+        )
+    if weak:
+        notes.append(
+            translate(
+                "CAM",
+                "its step blocks are nearer the stud than where it presses: it presses less than "
+                "half as hard as the stud pulls; put the bolt nearer the work",
+            )
+        )
+    # tipped down, the bar bears first at its end, or at the top's far edge short of it
+    bears = min(rest, top[1] - top[0]) if rise < 0 else 0.0
+    return dict(
+        way=way,
+        upper=way * shift,
+        near=top[0] + bears,
+        edge=edge,
+        contact=end - rest + bears,
+        notes=notes,
+    )
 
 
 def _NO_ROOM():
@@ -1128,39 +1289,59 @@ def place(job, obj, press, outward):
 
 def _place(job, obj, data, press, outward):
     box = job.Stock.Shape.BoundBox
-    height = box.ZLength
-    press = Vector(press.x, press.y, box.ZMax)
     kit = data.get("kind") == StrapKit
     notes = []
 
     toe, heel, bolt, frame = _lever(data, obj)
-    table = -height
 
     angle = math.degrees(math.atan2(outward.y, outward.x)) + obj.Angle.Value
-    obj.Placement = FreeCAD.Placement(press, FreeCAD.Rotation(Vector(0, 0, 1), angle))
+    turn = FreeCAD.Rotation(Vector(0, 0, 1), angle)
+    # pressing on the stock's top where its end is, across its width, not on the highest of a
+    # model's features elsewhere
+    half = _kitClamp(data, obj).get("width", data.get("width", 25.0)) / 2
+    reach = _length(LEVER_LEAST_OVERLAP)
+    top = stockTopUnder(job, FreeCAD.Placement(press, turn), (-reach, -half), (reach, half))
+    height = top - box.ZMin
+    press = Vector(press.x, press.y, top)
+    table = -height
+    obj.Placement = FreeCAD.Placement(press, turn)
 
-    # what its other end rests on, how high above the table
+    # what its other end rests on, how high above the table: on the table, or on top of another
+    # piece of the workholding there, a rail or a block, its floor
     restsOn = getattr(obj, "RestsOn", "Table")
-    support = 0.0
+    floor = _floorUnder(job, obj, heel, table) - table
+    support = floor
     chosen = None
     # a riser under its step block, as thick as RiserThickness
     under = obj.RiserThickness.Value if restsOn == "RiserAndStepBlock" else 0.0
     if restsOn == "Riser":
-        support = obj.RiserThickness.Value
+        support = floor + obj.RiserThickness.Value
     elif restsOn in ("StepBlock", "RiserAndStepBlock") and kit:
         # the room from the heel back to the stud, the bolt as near the work as it may go
         room = None
+        boltNear = bolt.x
         clear = _studClear(job, obj, data)
         end = _kitClamp(data, obj).get("boltEnd")
         if end is not None:
             nearest = min(bolt.x, frame.multVec(_vector(end)).x)
-            room = heel.x - max(nearest, clear if clear is not None else nearest) - _shank(data)
-        chosen = _blockFor(data, obj, height - under, room)
+            boltNear = max(nearest, clear if clear is not None else nearest)
+            room = heel.x - boltNear - _shank(data)
+        chosen = _blockFor(data, obj, height - floor - under, room)
+        if restsOn == "StepBlock" and chosen is not None and not chosen[3]:
+            # nothing in the kit reaching, a riser under it as thin as lets one reach
+            step = _length(LEVER_RISER_STEP)
+            thick = step
+            while thick < height - floor:
+                taller = _blockFor(data, obj, height - floor - thick, room)
+                if taller is not None and taller[3]:
+                    chosen, under = taller, thick
+                    break
+                thick += step
         if chosen is None:
             notes.append(translate("CAM", "the kit has no step block"))
         else:
             meshed = chosen[4]
-            support = under + (meshed[2] if meshed else chosen[2][0])
+            support = floor + under + (meshed[2] if meshed else chosen[2][0])
             if not chosen[3]:
                 notes.append(
                     translate(
@@ -1168,6 +1349,13 @@ def _place(job, obj, data, press, outward):
                     )
                 )
 
+    # a pair of step blocks: the bar bears first on its top's edge nearest the work, tipped
+    # about there, not about its heel
+    pivot, pair = heel, None
+    if kit and chosen is not None and chosen[4] and heel.x > 1e-9:
+        pair = _pairPlan(data, obj, chosen, heel, boltNear, support - height)
+        notes.extend(pair["notes"])
+        pivot = heel * (pair["contact"] / heel.x)
     if kit:
         _retarget(obj, "Clamp", _kitClamp(data, obj)["solid"], "ClampBar")
     bars = _barShapes(obj, data, frame)
@@ -1179,15 +1367,16 @@ def _place(job, obj, data, press, outward):
     # higher than the point its file gives as the bar tips, so tipped again by what is left
     rise = support - height
     for _ in range(4):
-        turn, tilt, reaches = _tipping(heel, rise)
+        turn, tilt, reaches = _tipping(pivot, rise)
         tipped = FreeCAD.Placement(Vector(), turn)
         heelAt = turn.multVec(heel)
+        pivotAt = turn.multVec(pivot)
         # a bar meeting the stock's edge rests on it, tipped about its other end until it is
         # clear: where it was to press is then lifted off the stock
         if bars:
-            lift = _clearing(bars, stock, tipped, heelAt)
+            lift = _clearing(bars, stock, tipped, pivotAt)
             if lift > 0:
-                tipped = _about(heelAt, lift).multiply(tipped)
+                tipped = _about(pivotAt, lift).multiply(tipped)
                 tilt -= lift
         if kit or not bars:
             break
@@ -1202,7 +1391,9 @@ def _place(job, obj, data, press, outward):
     if bars and chosen is not None and not chosen[4] and "profile" in chosen[0][chosen[1]]:
         block, pose, tread = chosen[0], chosen[1], chosen[2]
         for _ in range(3):
-            seat, lift = _heelSeat(bars, tipped, block, pose, heelAt.x - tread[1], table + under)
+            seat, lift = _heelSeat(
+                bars, tipped, block, pose, heelAt.x - tread[1], table + floor + under
+            )
             if abs(lift) < LEVER_SEAT_TOLERANCE:
                 break
             rise += lift
@@ -1298,7 +1489,7 @@ def _place(job, obj, data, press, outward):
         # its step block, the step's edge toward the taller ones under the heel's end
         if chosen is not None:
             block, pose, tread, _, meshed = chosen
-            base = table + under
+            base = table + floor + under
             steps = block[pose]["treads"]
             link = _retarget(obj, "Block", block["solid"], "ClampBlock")
             low = _retarget(
@@ -1321,35 +1512,10 @@ def _place(job, obj, data, press, outward):
                 )
             else:
                 lower, _, top, _, shift = meshed
-                lowSteps = lower[pose]["treads"]
-                # the upper one turned over end for end about Y, its teeth in the lower one's
-
-                margin = _length(LEVER_RISER_MARGIN)
-                upReach = block[pose].get("reach", steps[-1][1])
-                lowReach = lower[pose].get("reach", lowSteps[-1][1])
-                clear = boltAt.x + _shank(data)
-                # the pair either way round about Z: the heel over both the flat top and the
-                # lower one's base, not out past its center where it would tip the pair, just in
-                # from their near side, the pair away from the work. First the way round putting
-                # the upper one's thick back under the heel, not its thin point; the other only
-                # when that one tips or meets the stud between the heel and the work
-                ways = []
-                for way in (1, -1):
-                    upAt, lowAt = way * shift, 0.0
-                    near = max(upAt - upReach, lowAt - lowReach) + margin
-                    far = min(upAt + upReach, lowAt + lowReach) - margin
-                    if far < near:
-                        continue
-                    move = heelAt.x - near
-                    nearest = min(upAt - upReach, lowAt - lowReach) + move
-                    ways.append((nearest < clear - 1e-6, way, upAt + move, lowAt + move))
-                if not ways:
-                    notes.append(translate("CAM", "the pair of step blocks tips under the heel"))
-                    ways.append(
-                        (False, 1, heelAt.x + upReach - margin, heelAt.x + upReach - margin - shift)
-                    )
-                hits, way, upAt, lowAt = next((w for w in ways if not w[0]), ways[0])
-                if hits:
+                # the pair as planned, under where the bar bears first
+                way, move = pair["way"], pivotAt.x - pair["near"]
+                upAt, lowAt = pair["upper"] + move, move
+                if pair["edge"] + move < boltAt.x + _shank(data) - 1e-6:
                     notes.append(_NO_ROOM())
                 turned = FreeCAD.Rotation(Vector(0, 0, 1), 0 if way > 0 else 180)
                 link.Placement = FreeCAD.Placement(
@@ -1393,12 +1559,15 @@ def _place(job, obj, data, press, outward):
             if restsOn == "Riser"
             else translate("CAM", "the table")
         )
-    riser = _riser(obj, restsOn == "Riser" or (restsOn == "RiserAndStepBlock" and under > 0))
+    riser = _riser(
+        obj,
+        restsOn == "Riser" or (restsOn in ("StepBlock", "RiserAndStepBlock") and under > 0),
+    )
     if riser is not None:
         length, width = _length(LEVER_RISER_LENGTH), data.get("width", 25.0)
         width = _kitClamp(data, obj).get("width", width) + 2 * _length(LEVER_RISER_MARGIN)
         bottom = _linkOf(obj, "BlockUnder") or _linkOf(obj, "Block")
-        if restsOn == "RiserAndStepBlock" and bottom is not None:
+        if restsOn in ("StepBlock", "RiserAndStepBlock") and bottom is not None:
             # under the step block, past it all round by a margin
             margin = _length(LEVER_RISER_MARGIN)
             box = Part.getShape(bottom, "", transform=True).BoundBox
@@ -1406,11 +1575,14 @@ def _place(job, obj, data, press, outward):
                 box.XLength + 2 * margin,
                 box.YLength + 2 * margin,
                 under,
-                Vector(box.XMin - margin, box.YMin - margin, table),
+                Vector(box.XMin - margin, box.YMin - margin, table + floor),
             )
-        elif support > 0:
+        elif support > floor:
             riser.Shape = Part.makeBox(
-                length, width, support, Vector(heelAt.x - length / 2, -width / 2, table)
+                length,
+                width,
+                support - floor,
+                Vector(heelAt.x - length / 2, -width / 2, table + floor),
             )
     obj.Tilt = tilt
     if kit and tilt < -1e-6:
@@ -1517,8 +1689,9 @@ def _clearing(bars, stock, tipped, heel, most=20.0):
 def _heelSeat(bars, tipped, block, pose, at, base):
     """Where a step block standing on base, its middle along the clamp at at, seats the bars
     tipped so: slid along the clamp by less than half a tooth, the heel's teeth into its teeth
-    where they come nearest to just touching. (how far it is slid, how far the bars must then go
-    up to just touch it): below 0 when they stand clear of it, above when they cut into it."""
+    where they seat deepest, tooth tips in the corners, not tip on tip. (how far it is slid, how
+    far the bars must then go up to just touch it): below 0 when they stand clear of it, above
+    when they cut into it."""
     import numpy
 
     profile = block[pose]["profile"]
@@ -1548,9 +1721,9 @@ def _heelSeat(bars, tipped, block, pose, at, base):
             lift = gap if lift is None else max(lift, gap)
         if lift is None:
             continue
-        # cutting in least, then touching most nearly
-        score = (max(lift, 0.0), abs(lift))
-        if best is None or score < best[0]:
+        # the bars coming down furthest before they touch: the teeth meshed
+        score = lift
+        if best is None or score < best[0] - 1e-6:
             best = (score, k * step, lift)
     return (best[1], best[2]) if best else (0.0, 0.0)
 

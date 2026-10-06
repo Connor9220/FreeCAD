@@ -67,6 +67,12 @@ LEVER_LEAST_OVERLAP = "0.125 in"
 LEVER_RISER_LENGTH = "1.5 in"
 LEVER_RISER_MARGIN = "0.125 in"
 LEVER_RISER_THICKNESS = "0.125 in"
+# a riser put under a lever clamp's step blocks when none reaches is a multiple of this
+LEVER_RISER_STEP = "0.25 in"
+# how much of a strap clamp's end rests on a pair of step blocks' flat top, at least and at most,
+# when its file does not say: less bears on an edge, more brings the support nearer the stud
+LEVER_HEEL_REST_MIN = "0.5 in"
+LEVER_HEEL_REST_MAX = "1 in"
 # where it was to press lifted off the stock by more than this is said
 LEVER_LIFT_NOTED = "0.002 in"
 # a lever clamp's other end this many degrees above level, or more, is said to be too high

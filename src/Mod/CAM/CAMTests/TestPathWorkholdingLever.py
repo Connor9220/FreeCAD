@@ -417,15 +417,58 @@ class TestPathWorkholdingStrapKit(_Lever):
         self.assertIn("teeth into teeth", clamp.Support)
         self.assertEqual(clamp.Note, "")
 
-    def test08_meshed_when_none_reaches(self):
-        """Stock taller than any two meshed: the tallest pair, its heel low and said."""
+    def test08_riser_when_none_reaches(self):
+        """Stock taller than any two meshed: a riser under them, as thin as lets them reach,
+        in its steps, the heel not below level and not so high it is said."""
         self.doc.getObject("Box").Height = 90
+        self.doc.recompute()
+        clamp = Items.setClamps(self.job, [{"side": "-Y", "which": self.path}])[0]
+        riser = self.shapeOf(clamp, "Riser")
+        self.assertIsNotNone(riser)
+        self.assertIn("riser", clamp.Support)
+        self.assertNotIn("low", clamp.Note)
+        self.assertGreaterEqual(clamp.Tilt.Value, -1e-6)
+        self.assertLess(clamp.Tilt.Value, 10)
+
+    def test09_plain_heel_on_a_pair(self):
+        """A clamp whose heel has no teeth stands on a meshed pair's flat top, even where one
+        block reaches."""
+        for part in self.source.RootObjects:
+            if part.TypeId == "App::Part" and part.Name.startswith("StepClamp_"):
+                sizes = next(o for o in part.Group if o.TypeId == "App::VarSet")
+                sizes.addProperty("App::PropertyBool", "HeelToothed", "Dimensions", "")
+                sizes.HeelToothed = False
+        self.source.save()
+        self.doc.getObject("Box").Height = 20
+        self.doc.recompute()
+        clamp = Items.setClamps(self.job, [{"side": "-Y", "which": self.path}])[0]
+        self.assertIn("teeth into teeth", clamp.Support)
+
+    def test10_never_big_on_small(self):
+        """Of a pair, the block on top is never bigger than the one under it."""
+        self.doc.getObject("Box").Height = 50
         self.doc.recompute()
         clamp = Items.setClamps(self.job, [{"side": "-Y", "which": self.path}])[0]
         lower = self.shapeOf(clamp, "BlockUnder")
         upper = self.shapeOf(clamp, "Block")
-        self.assertGreater(upper.BoundBox.ZMax, lower.BoundBox.ZMax)
-        self.assertIn("low", clamp.Note)
+        self.assertGreaterEqual(lower.Volume + 1e-6, upper.Volume)
+
+    def test11_stands_on_what_is_under_it(self):
+        """A plate of the workholding under its other end: its step block stands on the plate,
+        not the table."""
+        self.doc.getObject("Box").Height = 20
+        self.doc.recompute()
+        clamp = Items.setClamps(self.job, [{"side": "-Y", "which": self.path}])[0]
+        before = self.shapeOf(clamp, "Block").BoundBox
+        plate = self.doc.addObject("Part::Box", "Plate")
+        plate.Length, plate.Width, plate.Height = before.XLength + 20, before.YLength + 20, 6
+        plate.Placement.Base = Vector(before.XMin - 10, before.YMin - 10, before.ZMin)
+        self.job.Workholding.addObject(plate)
+        self.doc.recompute()
+        Items.layout(self.job)
+        self.doc.recompute()
+        after = self.shapeOf(clamp, "Block").BoundBox
+        self.assertRoughly(after.ZMin, before.ZMin + 6, 1e-3)
 
     def test07_studs_joined(self):
         """Too tall for one stud: two, joined by the kit's coupling nut, the longer below."""

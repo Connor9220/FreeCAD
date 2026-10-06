@@ -57,7 +57,12 @@ import Path.Workholding.Vise as PathWorkholding
 import Path.Workholding.Source as PathSource
 
 from FreeCAD import Vector
-from Path.Workholding.Common import objectKinds, readDocumentXml, varsetProperties
+from Path.Workholding.Common import (
+    objectKinds,
+    readDocumentXml,
+    stockTopUnder,
+    varsetProperties,
+)
 from Path.Workholding.Constants import ACROSS_AT_LEAST, CLAMP_KINDS, TOUCH_MOVES, TOUCH_NEAR
 from PySide.QtCore import QT_TRANSLATE_NOOP
 
@@ -671,13 +676,22 @@ def _placeAt(job, piece, frame, x):
     if PathLever.isLever(piece):
         PathLever.placeOnSide(job, piece, frame, x)
         return
-    height = stockBox(job).ZLength
+    box = stockBox(job)
+    height = box.ZLength
     _, length = sideFrame(job, piece.StockSide)
     placement = frame.multiply(_touching(piece, x, height, length))
     if piece.Kind == Kind.HoldDown:
-        placement = FreeCAD.Placement(placement.Base + Vector(0, 0, height), placement.Rotation)
-        if hasattr(piece, "Drop") and abs(piece.Drop.Value - height) > 1e-9:
-            piece.Drop = height
+        # its lip on the stock's top where it grips, not on the highest of a model's features
+        # elsewhere
+        lip = _shapeOf(piece).BoundBox
+        at = FreeCAD.Placement(frame.multVec(Vector(x, 0, 0)), frame.Rotation)
+        drop = (
+            stockTopUnder(job, at, (lip.XMin, 0.0), (lip.XMax, max(lip.YMax, TOUCH_NEAR)))
+            - box.ZMin
+        )
+        placement = FreeCAD.Placement(placement.Base + Vector(0, 0, drop), placement.Rotation)
+        if hasattr(piece, "Drop") and abs(piece.Drop.Value - drop) > 1e-9:
+            piece.Drop = drop
     placement = _toStock(job, piece, placement, frame)
     if not piece.Placement.isSame(placement, 1e-9):
         piece.Placement = placement

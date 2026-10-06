@@ -68,6 +68,29 @@ class SidePart:
         obj.Shape = shape
 
 
+def stockTopUnder(job, place, low, high):
+    """stockTopUnder(job, place, low, high) ... how high the Job's stock's top is under the
+    rectangle from low to high, (x, y) corners in the frame place, turned about Z only: where a
+    clamp bears on it, not the highest of a model's features elsewhere. The top of the stock's
+    box when none of it is under there."""
+    import Part
+
+    stock = job.Stock.Shape
+    box = stock.optimalBoundingBox()
+    if stock.isNull() or high[0] <= low[0] or high[1] <= low[1]:
+        return box.ZMax
+    column = Part.makeBox(
+        high[0] - low[0], high[1] - low[1], box.ZLength + 2, FreeCAD.Vector(low[0], low[1], 0)
+    )
+    column.Placement = FreeCAD.Placement(
+        FreeCAD.Vector(place.Base.x, place.Base.y, box.ZMin - 1), place.Rotation
+    )
+    under = stock.common(column)
+    if under.isNull() or not under.Solids:
+        return box.ZMax
+    return under.BoundBox.ZMax
+
+
 def userLength(value):
     """userLength(value) ... a length in mm, as the document's units show it."""
     return FreeCAD.Units.Quantity(value, FreeCAD.Units.Length).UserString
