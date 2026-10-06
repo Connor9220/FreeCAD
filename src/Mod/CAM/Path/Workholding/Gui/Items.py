@@ -827,7 +827,7 @@ class _StopsClamps:
         self.item.currentIndexChanged.connect(self.itemChanged)
         self.browse.clicked.connect(self.browseClicked)
         self.add.clicked.connect(self.addClicked)
-        self.cancelAdd.clicked.connect(lambda: self.item.setCurrentIndex(-1))
+        self.cancelAdd.clicked.connect(self.cancelClicked)
         self.list.currentCellChanged.connect(lambda *args: self.showChosen())
         self.list.itemSelectionChanged.connect(self.picked)
         # the box being typed in is not written over until typing in it is done
@@ -1367,6 +1367,14 @@ class _StopsClamps:
         import Path.Workholding.Library as PathLibrary
 
         return PathLibrary.about(path).get("label") or name
+
+    def cancelClicked(self):
+        """Nothing put in: what Add shows taken out, the row back to Select… and one."""
+        self.addTimer.stop()
+        self.count.blockSignals(True)
+        self.count.setValue(1)
+        self.count.blockSignals(False)
+        self.item.setCurrentIndex(-1)
 
     def addClicked(self):
         """What the row says put on its side, spread along it; a clamp's file in a document not
