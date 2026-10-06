@@ -65,7 +65,7 @@ def _jobOfSelection():
         return None
     label, ok = QtWidgets.QInputDialog.getItem(
         FreeCADGui.getMainWindow(),
-        translate("CAM_Workholding", "Vise"),
+        translate("CAM_Workholding", "Workholding"),
         translate("CAM_AddVise", "Job"),
         [j.Label for j in jobs],
         0,
