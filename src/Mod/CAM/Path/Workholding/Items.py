@@ -851,13 +851,27 @@ def _widthAlong(job, piece):
         return 0.0, 0.0
     height = stockBox(job).ZLength
     box = shape.BoundBox
-    beside = shape.common(
-        Part.makeBox(
-            box.XLength + 2, box.YLength + 2, height, Vector(box.XMin - 1, box.YMin - 1, 0)
-        )
+    # found once for its shape and the stock's height: cutting it is slow, and placing a side
+    # asks often
+    key = (
+        piece.Document.Name,
+        piece.Name,
+        round(height, 6),
+        tuple(round(v, 6) for v in (box.XMin, box.XMax, box.YMin, box.YMax, box.ZMin, box.ZMax)),
     )
-    box = beside.BoundBox if not beside.isNull() and beside.Solids else box
-    return box.XMin, box.XMax
+    if key not in _widths:
+        beside = shape.common(
+            Part.makeBox(
+                box.XLength + 2, box.YLength + 2, height, Vector(box.XMin - 1, box.YMin - 1, 0)
+            )
+        )
+        found = beside.BoundBox if not beside.isNull() and beside.Solids else box
+        _widths[key] = (found.XMin, found.XMax)
+    return _widths[key]
+
+
+# what _widthAlong found, by piece, its shape's box and the stock's height
+_widths = {}
 
 
 def _touching(piece, x, height, length):
