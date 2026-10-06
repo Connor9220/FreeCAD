@@ -34,6 +34,7 @@ import Path.Workholding.Gui.Widgets as Widgets
 
 from Path.Workholding.Constants import (
     STOCK_SNAP_WIDTHS,
+    TOUCH_MOVES,
     TOUCH_NEAR,
     DRAG_SHOW_EVERY,
     ERROR_TEXT_COLOR,
@@ -561,10 +562,14 @@ class _StockDrag(_Drag):
             stops.append((shape, (out, FreeCAD.Vector(-out.y, out.x, 0))))
         # off those it is on top of: each back across its face, or along it, the least move
         # clearing them all, as few along them as can be
-        choices = [c for c in (_offStop(stock, shape, axes) for shape, axes in stops) if c]
+        choices = [
+            [(move, shape) for move in _offStop(stock, shape, axes)] for shape, axes in stops
+        ]
+        choices = [c for c in choices if c]
         off = None
         for picked in itertools.product(*(range(len(c)) for c in choices)):
-            move = _together([c[i] for c, i in zip(choices, picked)])
+            chosen = [c[i] for c, i in zip(choices, picked)]
+            move = _together([m for m, _ in chosen])
             if move is None:
                 continue
             moved = stock.translated(move)
@@ -572,10 +577,17 @@ class _StockDrag(_Drag):
                 continue
             score = (sum(picked), move.Length)
             if off is None or score < off[0]:
-                off = (score, move)
-        off = off[1] if off is not None else FreeCAD.Vector()
-        stock = stock.translated(off)
-        taken = [FreeCAD.Vector(m).normalize() for m in _parts(off)]
+                off = (score, move, chosen)
+        # each way it is moved, back toward the stops it was moved off or on to
+        toward = []
+        if off is not None:
+            _, more, chosen = off
+            for move, shape in chosen:
+                _toward(toward, FreeCAD.Vector(move).normalize() * -1, shape)
+        else:
+            more = FreeCAD.Vector()
+        stock = stock.translated(more)
+        taken = [way for way, _ in toward]
         found = []
         for shape, axes in stops:
             for axis in axes:
@@ -585,16 +597,31 @@ class _StockDrag(_Drag):
                     reach = PathWorkholding._extents(stock, FreeCAD.Vector(), way)[1]
                     near, far = PathWorkholding._extents(shape, FreeCAD.Vector(), way)
                     if -TOUCH_NEAR <= near - reach <= STOCK_SNAP_WIDTHS * (far - near):
-                        found.append((near - reach, way * (near - reach)))
-        more = FreeCAD.Vector(off)
-        for _, move in sorted(found, key=lambda f: f[0]):
-            if move.Length < 1e-9:
-                continue
-            way = FreeCAD.Vector(move).normalize()
+                        found.append((near - reach, way, shape))
+        for gap, way, shape in sorted(found, key=lambda f: f[0]):
             if any(abs(way.dot(t)) > 1e-3 for t in taken):
+                # another as near or nearer the same way: touched too, if the stock is round
+                if any(w.dot(way) > 1 - 1e-3 for w in taken):
+                    _toward(toward, way, shape)
                 continue
             taken.append(way)
-            more += move
+            _toward(toward, way, shape)
+            more += way * max(gap, 0.0)
+        # the boxes round them meeting, a round stock or a stop does not touch yet: on, each
+        # way, until it does, never into one
+        # each way in turn, again, as closing one opens another
+        stock = self.job.Stock.Shape.translated(slid + more)
+        for _ in range(TOUCH_MOVES):
+            moved = False
+            for way, shapes in toward:
+                gap = min(stock.distToShape(shape)[0] for shape in shapes)
+                if gap < TOUCH_NEAR:
+                    continue
+                stock = stock.translated(way * gap)
+                more += way * gap
+                moved = True
+            if not moved:
+                break
         return more
 
     def leaveFree(self):
@@ -676,11 +703,13 @@ def _offStop(stock, shape, axes):
     return moves
 
 
-def _parts(move):
-    """move split into the ways it goes along X and along Y."""
-    return [
-        v for v in (FreeCAD.Vector(move.x, 0, 0), FreeCAD.Vector(0, move.y, 0)) if v.Length > 1e-9
-    ]
+def _toward(toward, way, shape):
+    """shape, a stop the stock is moved toward along way, kept with the others that way."""
+    for w, shapes in toward:
+        if w.dot(way) > 1 - 1e-3:
+            shapes.append(shape)
+            return
+    toward.append((way, [shape]))
 
 
 def _together(moves):
