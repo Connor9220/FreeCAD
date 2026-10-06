@@ -506,6 +506,12 @@ class _StopsClamps:
         row.addWidget(self.side, 1)
         row.addWidget(self.count)
         row.addWidget(self.add)
+        # what Add shows taken out, nothing put in
+        self.cancelAdd = QtWidgets.QPushButton(translate("CAM_Workholding", "Cancel"))
+        self.cancelAdd.setToolTip(
+            translate("CAM_Workholding", "Put nothing in: what Add shows taken out again")
+        )
+        row.addWidget(self.cancelAdd)
         layout.addRow(self.addRow)
         # what Add puts in: its picture and what it is, while one is chosen
         self.addPicture = QtWidgets.QLabel()
@@ -818,6 +824,7 @@ class _StopsClamps:
         self.item.currentIndexChanged.connect(self.itemChanged)
         self.browse.clicked.connect(self.browseClicked)
         self.add.clicked.connect(self.addClicked)
+        self.cancelAdd.clicked.connect(lambda: self.item.setCurrentIndex(-1))
         self.list.currentCellChanged.connect(lambda *args: self.showChosen())
         self.list.itemSelectionChanged.connect(self.picked)
         # the box being typed in is not written over until typing in it is done
@@ -1485,6 +1492,12 @@ class _StopsClamps:
         pieces = Items.stopsOn(self.job) + Items.clampsOn(self.job)
         pieces += [o for o in Items.itemsOf(self.job) if o not in pieces]
         pieces = PathWorkholding.vises(self.job) + pieces
+        # what Add only shows is not placed until Add keeps it
+        shown = set(getattr(self, "previewing", []))
+        adding = getattr(self.panel, "adding", None)
+        if adding is not None and adding.vise is not None:
+            shown.add(adding.vise.Name)
+        pieces = [piece for piece in pieces if piece.Name not in shown]
 
         def order(piece):
             if PathWorkholding.isVise(piece):
