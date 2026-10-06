@@ -580,6 +580,30 @@ class TestPathWorkholdingAdd(PathTestUtils.PathTestBase):
         self.assertRoughly(self.jaw(vise).Placement.Base.y, -41)
         self.assertEqual(PathWorkholding.refreshSettings(vise), [])
 
+    def test14b_brought_up_to_date_when_opened(self):
+        """A Job opened again has its vise's file loaded only in part, for the links, or not at
+        all, so the vise in it cannot be read: the refresh on opening loads it whole and reads
+        it again."""
+        self.settings.setEditorMode("MaxOpening", ["ReadOnly"])
+        vise = PathWorkholding.addVise(self.job, self.part)
+        name = vise.Name
+        self.doc.save()
+        self.settings.MaxOpening = 125
+        self.source.save()
+        jobPath, sourcePath = self.doc.FileName, self.source.FileName
+        FreeCAD.closeDocument(self.doc.Name)
+        FreeCAD.closeDocument(self.source.Name)
+        self.doc = FreeCAD.openDocument(jobPath)
+        vise = self.doc.getObject(name)
+        files = PathSource.linkedDocuments(vise)
+        self.assertTrue(not files or files[0].Partial)
+        self.assertEqual(PathWorkholding.refreshSettings(vise), [])
+        self.assertEqual(PathSource.refreshAll(self.doc), [vise])
+        self.assertRoughly(vise.MaxOpening.Value, 125)
+        self.source = next(d for d in FreeCAD.listDocuments().values() if d.FileName == sourcePath)
+        self.assertFalse(self.source.Partial)
+        self.assertEqual(PathSource.refreshAll(self.doc), [])
+
     def test15_file_checked(self):
         """A vise's file is checked before it is used: one laid out as a vise passes; Python in
         it, or an Opening moving its jaw the wrong way, does not."""

@@ -98,6 +98,8 @@ def _recoverIdle(name):
             askLibrary=lambda file, item: _askLibrary(doc, file, item),
             askFile=lambda file: _askFile(doc, file),
         )
+        # vises and lever clamps made as their files are now
+        PathSource.refreshAll(doc)
         _askChanged(doc, PathSource.changedSources(doc))
     except Exception as e:
         Path.Log.error("%s: %s" % (doc.Label, e))
@@ -207,6 +209,52 @@ def _askChanged(doc, changed):
             )
         return
     PathSource.acceptChanged(changed)
+
+
+def askImported(row, name, here, item):
+    """askImported(row, name, here, item) ... what to do for a clamp imported into its Job without
+    the piece name it now needs: its file here, but changed since, updated, the whole clamp made
+    as it is now (Lever.Update); not here, downloaded from its library's item (Lever.Download);
+    None to leave it."""
+    import Path.Workholding.Lever as PathLever
+
+    window = FreeCADGui.getMainWindow()
+    title = translate("CAM_Workholding", "Workholding Imported")
+    if here:
+        answer = QtWidgets.QMessageBox.question(
+            window,
+            title,
+            translate(
+                "CAM_Workholding",
+                "%s was imported into this Job without a piece it now needs. Its file, %s, has "
+                "changed since.\n\nUpdate the whole clamp to its file as it is now?",
+            )
+            % (row.Label, os.path.basename(row.SourceFile)),
+        )
+        return PathLever.Update if answer == QtWidgets.QMessageBox.Yes else None
+    if item is None:
+        QtWidgets.QMessageBox.warning(
+            window,
+            title,
+            translate(
+                "CAM_Workholding",
+                "%s was imported into this Job without a piece it now needs, and its file, %s, "
+                "is not found here or in its library.",
+            )
+            % (row.Label, os.path.basename(row.SourceFile)),
+        )
+        return None
+    answer = QtWidgets.QMessageBox.question(
+        window,
+        title,
+        translate(
+            "CAM_Workholding",
+            "%s was imported into this Job without a piece it now needs. Its file, %s, is not "
+            "here. The library has it: %s.\n\nDownload it?",
+        )
+        % (row.Label, os.path.basename(row.SourceFile), item.get("label", item["id"])),
+    )
+    return PathLever.Download if answer == QtWidgets.QMessageBox.Yes else None
 
 
 def _askFile(doc, file):

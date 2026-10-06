@@ -102,6 +102,46 @@ def _savedLinks(doc):
     return found
 
 
+def sourceDocument(row, load=False):
+    """sourceDocument(row, load=False) ... the document of the file a vise's or clamp's parts are
+    linked from; None when its parts were imported into its own document, which cuts it off from
+    its file, or when its file is not found. FreeCAD may load a linked file only in part, for the
+    objects the links point at, or not at all until something asks for it: load opens it whole."""
+    found = linkedDocuments(row)
+    if found:
+        doc = found[0]
+        if load and doc.Partial and doc.FileName and os.path.exists(doc.FileName):
+            doc, _ = openFile(doc.FileName, row.Document)
+        return doc
+    if not load or not row.Document.FileName:
+        return None
+    # links whose file was not loaded: the file the document saved for them
+    saved = _savedLinks(row.Document)
+    folder = os.path.dirname(row.Document.FileName)
+    for part in getattr(row, "Group", []) or []:
+        if not part.isDerivedFrom("App::Link") or part.LinkedObject is not None:
+            continue
+        if part.Name not in saved:
+            continue
+        path = saved[part.Name][0]
+        if not os.path.isabs(path):
+            path = os.path.normpath(os.path.join(folder, path))
+        if os.path.exists(path):
+            doc, _ = openFile(path, row.Document)
+            return doc
+    return None
+
+
+def refreshAll(doc):
+    """refreshAll(doc) ... the document's vises and lever clamps made as their files are now,
+    each file opened whole to read it. Those cut off from their files are left alone. Returns
+    those that changed."""
+    import Path.Workholding.Lever as PathLever
+    import Path.Workholding.Vise as PathWorkholding
+
+    return PathWorkholding.refreshAll(doc) + PathLever.refreshAll(doc)
+
+
 def lostParts(doc):
     """lostParts(doc) ... the parts of the document's vises and clamps whose files are not found,
     by the file each was linked from, as it was saved: {file: [(part, the name of its object in
@@ -229,6 +269,18 @@ def _libraryItem(parts, base, sources, indexes):
             if os.path.basename(item["file"]) == base:
                 return item
     return None
+
+
+def libraryItemOf(row):
+    """libraryItemOf(row) ... the library's item for the file a vise's or clamp's row came from,
+    by the library and id kept on it; None if it has none or the library is not reached."""
+    import Path.Workholding.Library as PathLibrary
+
+    own, item = getattr(row, "SourceLibrary", ""), getattr(row, "SourceItem", "")
+    if not own or not item:
+        return None
+    indexes = PathLibrary.IndexCache(said=Path.Log.info)
+    return next((i for i in indexes.items(own) if i["id"] == item), None)
 
 
 def recoverParts(doc, folders=None, library=None, askLibrary=None, askFile=None):

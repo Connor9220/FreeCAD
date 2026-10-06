@@ -747,8 +747,32 @@ def _link(obj, target, role, name):
 
         Gui.ViewProviderViseMember(link.ViewObject)
     link.Label = target.Label
+    _keepSourceName(link, target)
     obj.addObject(link)
     return link
+
+
+def _keepSourceName(link, target):
+    """The name of what link links to in its file kept on it, to find it there again once
+    imported, its copy then perhaps named otherwise."""
+    name = target.Name
+    _add(
+        link,
+        "App::PropertyString",
+        "SourceObject",
+        "Lever",
+        QT_TRANSLATE_NOOP("App::Property", "What it links to, by its name in its file"),
+        name,
+        ["Hidden"],
+    )
+
+
+def _sourceName(link):
+    """The name in its file of what link links to."""
+    target = getattr(link, "LinkedObject", None)
+    if target is None:
+        return ""
+    return getattr(link, "SourceObject", "") or target.Name
 
 
 def _container(job, label):
@@ -808,37 +832,15 @@ def addLever(job, path):
                 )
                 % os.path.basename(path)
             )
-        data = _readLever(source, varset)
-        data["kind"] = Lever
+        data = _leverData(source, varset)
         obj = _container(job, source.Label)
         proxy = obj.Proxy
         proxy.placing = True
         try:
             PathWorkholding._copySettings(varset, obj)
-            radius = 0.0
-            for part in source.Group:
-                if part.TypeId == "App::VarSet" or not hasattr(part, "Shape"):
-                    continue
-                if part.TypeId == "App::Origin" or part.Shape.isNull():
-                    continue
-                role = data["roles"].get(part.Name, "Bar")
-                link = _link(obj, part, role, "ClampLink")
-                _add(
-                    link,
-                    "App::PropertyPlacement",
-                    "SourcePlacement",
-                    "Lever",
-                    QT_TRANSLATE_NOOP("App::Property", "Where it is in its file"),
-                    part.Placement,
-                    ["Hidden"],
-                )
-                if role == "Rides":
-                    box = part.Shape.BoundBox
-                    radius = max(radius, box.XLength / 2, box.YLength / 2)
-                elif role == "Anchored":
-                    data["boltRadius"] = max(data.get("boltRadius", 0.0), _shankRadius(part, data))
-            data["radius"] = radius
-            data["table"] = data["heel"][2]
+            for part in _leverParts(source):
+                link = _link(obj, part, data["roles"].get(part.Name, "Bar"), "ClampLink")
+                _sourcePlacement(link, part)
             _setData(obj, data)
             _addSettings(obj, False, data)
         finally:
@@ -848,11 +850,157 @@ def addLever(job, path):
     return obj
 
 
+def _leverParts(source):
+    """The parts of a lever clamp's own file it links to."""
+    for part in source.Group:
+        if part.TypeId == "App::VarSet" or not hasattr(part, "Shape"):
+            continue
+        if part.TypeId == "App::Origin" or part.Shape.isNull():
+            continue
+        yield part
+
+
+def _leverData(source, varset):
+    """What a clamp keeps of a lever clamp's own file: how it is placed, and how far what rides
+    on it and the bolt fixed in the table reach out."""
+    data = _readLever(source, varset)
+    data["kind"] = Lever
+    radius = 0.0
+    for part in _leverParts(source):
+        role = data["roles"].get(part.Name, "Bar")
+        if role == "Rides":
+            box = part.Shape.BoundBox
+            radius = max(radius, box.XLength / 2, box.YLength / 2)
+        elif role == "Anchored":
+            data["boltRadius"] = max(data.get("boltRadius", 0.0), _shankRadius(part, data))
+    data["radius"] = radius
+    data["table"] = data["heel"][2]
+    return data
+
+
+def _sourcePlacement(link, part):
+    _add(
+        link,
+        "App::PropertyPlacement",
+        "SourcePlacement",
+        "Lever",
+        QT_TRANSLATE_NOOP("App::Property", "Where it is in its file"),
+        part.Placement,
+        ["Hidden"],
+    )
+
+
+def _offer(obj, name, values):
+    """The choices of the enumeration name made values, what it was kept if it is one."""
+    if not hasattr(obj, name) or obj.getEnumerationsOfProperty(name) == values:
+        return
+    current = getattr(obj, name)
+    setattr(obj, name, values)
+    if current in values:
+        setattr(obj, name, current)
+
+
+def refresh(obj):
+    """refresh(obj) ... a lever clamp of a Job brought up to date with its file as it is now:
+    what it keeps of it read again, the kit's step clamps and blocks offered again, its settings
+    kept. Placed again if it changed. Returns whether it did; False when its file is not found
+    or its parts were imported into its document."""
+    if not isLever(obj):
+        return False
+    # its file, opened whole; none once its parts are imported into its document, which cuts it
+    # off from its file
+    doc = PathSource.sourceDocument(obj, load=True)
+    if doc is None:
+        return False
+    # what each link links to in its file kept, for one added before that was, to find it again
+    # once imported
+    for link in obj.Group:
+        target = getattr(link, "LinkedObject", None)
+        if target is not None and target.Document != obj.Document:
+            if getattr(link, "SourceObject", "") != target.Name:
+                _keepSourceName(link, target)
+                link.SourceObject = target.Name
+    data = _readFile(obj, doc)
+    if data is None or data == dataOf(obj):
+        return False
+    _keepData(obj, data, doc)
+    _placeAgain(obj)
+    return True
+
+
+def _readFile(obj, doc):
+    """What the clamp keeps of its file, doc, read from it as it is now, as LeverData holds it;
+    None if doc holds no clamp of its kind."""
+    if dataOf(obj).get("kind") == StrapKit:
+        if kitIn(doc) is None:
+            return None
+        data = readKit(doc)
+        data["kind"] = StrapKit
+    else:
+        source, varset = leverIn(doc)
+        if source is None:
+            return None
+        data = _leverData(source, varset)
+    return json.loads(json.dumps(data))
+
+
+def _keepData(obj, data, doc):
+    """data, read from its file doc, kept by the clamp: the kit's step clamps and blocks offered
+    again, its settings kept."""
+    proxy = obj.Proxy
+    proxy.placing = True
+    try:
+        _setData(obj, data)
+        if data["kind"] == StrapKit:
+            _offer(obj, "Clamp", [c["label"] for c in data["clamps"]])
+            _offer(obj, "Block", [Auto] + [b["label"] for b in data["blocks"]])
+        else:
+            for link in obj.Group:
+                part = doc.getObject(_sourceName(link)) if _sourceName(link) else None
+                if part is not None and hasattr(link, "SourcePlacement"):
+                    link.SourcePlacement = part.Placement
+    finally:
+        proxy.placing = False
+
+
+def _placeAgain(obj, later=False):
+    job, piece = PathWorkholding.memberOf(obj)
+    if job is not None and piece == obj:
+        import Path.Workholding.Items as PathItems
+
+        if later:
+            PathItems.layoutLater(job)
+        else:
+            PathItems.layout(job)
+
+
+def refreshAll(doc):
+    """refreshAll(doc) ... the document's lever clamps brought up to date with their files.
+    Returns those that changed."""
+    changed = []
+    for obj in doc.Objects:
+        if not isLever(obj):
+            continue
+        try:
+            if refresh(obj):
+                changed.append(obj)
+        except Exception as e:
+            Path.Log.warning("%s: %s" % (obj.Label, e))
+    return changed
+
+
 # placing it
 
 
 def _linkOf(obj, role):
     return next((o for o in obj.Group if getattr(o, "LeverRole", None) == role), None)
+
+
+def _imported(obj):
+    """Whether the clamp's parts were imported into its document: linked, but none to another
+    document. Such a clamp is cut off from its file."""
+    linked = [o.LinkedObject for o in obj.Group if getattr(o, "LinkedObject", None) is not None]
+    return bool(linked) and all(target.Document == obj.Document for target in linked)
 
 
 def _retarget(obj, role, solidName, name):
@@ -865,10 +1013,16 @@ def _retarget(obj, role, solidName, name):
             obj.Document.removeObject(link.Name)
         return None
     current = link.LinkedObject if link is not None else None
-    if current is not None and current.Name == solidName:
+    if current is not None and _sourceName(link) == solidName:
         return link
     target = None
-    if current is not None:
+    if _imported(obj):
+        # the piece it goes from kept to find again, as one imported may not say what it is
+        if current is not None and current.Document == obj.Document:
+            _tagCopy(obj, current, _sourceName(link))
+        # cut off from its kit's file: a piece it has, else that one piece pulled in
+        target = _importedCopy(obj, solidName) or _pullIn(obj, solidName)
+    elif current is not None:
         target = current.Document.getObject(solidName)
     if target is None:
         path = getattr(obj, "SourceFile", "")
@@ -884,7 +1038,138 @@ def _retarget(obj, role, solidName, name):
         return _link(obj, target, role, name)
     link.LinkedObject = target
     link.Label = target.Label
+    _keepSourceName(link, target)
+    link.SourceObject = solidName
     return link
+
+
+# an imported clamp: what to do for a piece it lacks when its kit's file is not the one it was
+# imported from, or not found; the GUI asks, without it nothing is done
+Update = "Update"
+Download = "Download"
+
+
+def _copyKey(obj, name):
+    """What a piece copied into the document from the clamp's file is known by."""
+    return "%s:%s" % (getattr(obj, "SourceItem", "") or os.path.basename(obj.SourceFile), name)
+
+
+def _tagCopy(obj, copy, name):
+    """copy, a piece of the clamp's file in its document, marked as the one named name there,
+    out of the tree and not shown: the clamp's link shows it."""
+    if getattr(copy, "WorkholdingCopy", ""):
+        return
+    _add(
+        copy,
+        "App::PropertyString",
+        "WorkholdingCopy",
+        "Lever",
+        QT_TRANSLATE_NOOP("App::Property", "The piece of a clamp's file it is a copy of"),
+        _copyKey(obj, name),
+        ["Hidden"],
+    )
+    if FreeCAD.GuiUp:
+        copy.ViewObject.ShowInTree = False
+        copy.ViewObject.Visibility = False
+
+
+def _importedCopy(obj, name):
+    """The copy in the clamp's document of the piece named name in its file: one pulled in, or
+    one imported with it, still named as in its file."""
+    key = _copyKey(obj, name)
+    for o in obj.Document.Objects:
+        if getattr(o, "WorkholdingCopy", "") == key:
+            return o
+    for link in obj.Group:
+        target = getattr(link, "LinkedObject", None)
+        if target is not None and _sourceName(link) == name:
+            return target
+    return None
+
+
+def _pullIn(obj, name):
+    """The piece named name of an imported clamp's file copied into its document: from the file
+    it was imported from, found here, or downloaded from its library when asked; the whole clamp
+    updated to its file as it is now first, when asked, if that has changed. Raises ValueError
+    when there is none."""
+    import Path.Workholding.Library as PathLibrary
+
+    path = getattr(obj, "SourceFile", "")
+    here = bool(path) and os.path.exists(path)
+    same = here and PathLibrary.fileSha256(path) == getattr(obj, "SourceSha256", "")
+    if not same:
+        item = None if here else PathSource.libraryItemOf(obj)
+        answer = None
+        if FreeCAD.GuiUp:
+            import Path.Workholding.Gui.Source as SourceGui
+
+            answer = SourceGui.askImported(obj, name, here, item)
+        if answer is None:
+            raise ValueError(
+                translate(
+                    "CAM",
+                    "%s: imported without the piece it now needs, and its file is %s",
+                )
+                % (
+                    obj.Label,
+                    translate("CAM", "changed") if here else translate("CAM", "not found"),
+                )
+            )
+        if answer == Download:
+            path = PathLibrary.download(item)
+        if PathLibrary.fileSha256(path) != getattr(obj, "SourceSha256", ""):
+            _updateImported(obj, path)
+    return _copyIn(obj, path, name)
+
+
+def _copyIn(obj, path, name):
+    """The piece named name of the file at path copied into the clamp's document, out of the
+    tree and not shown: the clamp's link shows it. The file closed again if it was opened for it."""
+    doc, opened = PathSource.openFile(path, obj.Document)
+    try:
+        source = doc.getObject(name)
+        if source is None:
+            raise ValueError(translate("CAM", "%s: its kit has no %s") % (obj.Label, name))
+        copy = obj.Document.copyObject(source, False)
+        _tagCopy(obj, copy, name)
+        return copy
+    finally:
+        if opened:
+            FreeCAD.closeDocument(doc.Name)
+
+
+def _updateImported(obj, path):
+    """An imported clamp made as its file at path is now: each of its pieces copied in again
+    from it, what it keeps of it read again, its file's sha256 kept. Placed again after."""
+    doc, opened = PathSource.openFile(path, obj.Document)
+    try:
+        data = _readFile(obj, doc)
+        if data is None:
+            raise ValueError(translate("CAM", "%s holds no such clamp") % os.path.basename(path))
+        stale = []
+        for link in obj.Group:
+            target = getattr(link, "LinkedObject", None)
+            name = _sourceName(link)
+            if target is None or target.Document != obj.Document or doc.getObject(name) is None:
+                continue
+            stale.append(target)
+            link.LinkedObject = doc.getObject(name)
+        _keepData(obj, data, doc)
+        PathSource.keepSource(obj, path)
+        # back in the document, as copies of the file as it is now
+        for link in obj.Group:
+            target = getattr(link, "LinkedObject", None)
+            if target is not None and target.Document == doc:
+                name = _sourceName(link)
+                link.LinkedObject = _copyIn(obj, path, name)
+                link.SourceObject = name
+        for old in stale:
+            if not old.InList and old.Document == obj.Document:
+                obj.Document.removeObject(old.Name)
+    finally:
+        if opened and doc.Name in FreeCAD.listDocuments():
+            FreeCAD.closeDocument(doc.Name)
+    _placeAgain(obj, later=True)
 
 
 class _Made:

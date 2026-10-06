@@ -571,16 +571,19 @@ def _same(a, b):
     return getattr(a, "Value", a) == getattr(b, "Value", b) if type(a) is type(b) else a == b
 
 
-def refreshSettings(vise):
-    """refreshSettings(vise) ... a vise of a Job made as its file now says: the settings the file
-    keeps fixed (read only there: the jaws' height, how far it opens, its steps...) and how its
-    settings move its parts. Its Opening, how it was seated and its jaws stay. Returns the names
-    of the settings that changed, none when the file is not open or has not changed."""
+def refreshSettings(vise, load=False):
+    """refreshSettings(vise, load=False) ... a vise of a Job made as its file now says: the
+    settings the file keeps fixed (read only there: the jaws' height, how far it opens, its
+    steps...) and how its settings move its parts. Its Opening, how it was seated and its jaws
+    stay. Returns the names of the settings that changed, none when the file is not open or has
+    not changed. A file FreeCAD loaded only in part, or not at all, holds no vise to read: load
+    opens it whole first (see Source.sourceDocument). A vise whose parts were imported into its
+    document has no file."""
     if not isinstance(getattr(vise, "Proxy", None), ObjectVise):
         return []
-    # the container in the vise's own file its parts are linked from, if that file is open
-    files = PathSource.linkedDocuments(vise)
-    source = viseIn(files[0]) if files else None
+    # the container in the vise's own file its parts are linked from
+    doc = PathSource.sourceDocument(vise, load)
+    source = viseIn(doc) if doc is not None else None
     if source is None:
         return []
     changed = []
@@ -626,6 +629,21 @@ def refreshSettings(vise):
             translate("CAM", "%s: brought up to date with its file: %s")
             % (vise.Label, ", ".join(changed))
         )
+    return changed
+
+
+def refreshAll(doc):
+    """refreshAll(doc) ... the document's vises brought up to date with their files, each file
+    opened whole if FreeCAD loaded it only in part. Returns the vises that changed."""
+    changed = []
+    for obj in doc.Objects:
+        if not isVise(obj):
+            continue
+        try:
+            if refreshSettings(obj, load=True):
+                changed.append(obj)
+        except Exception as e:
+            Path.Log.warning("%s: %s" % (obj.Label, e))
     return changed
 
 

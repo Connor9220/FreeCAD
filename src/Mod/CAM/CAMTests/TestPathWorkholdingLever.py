@@ -23,6 +23,7 @@
 table or a riser, and strap clamps from a kit, their heels on the step of a step block that
 brings them level, their studs as short as reaches."""
 
+import json
 import math
 import os
 import shutil
@@ -237,6 +238,18 @@ class TestPathWorkholdingLeverFile(_Lever):
         self.assertTrue(Lever.isLever(copy))
         self.assertEqual(copy.RestsOn, "Riser")
         self.assertEqual(len(Items.clampsOn(self.job, "-Y")), 2)
+
+    def test07_refreshed_from_its_file(self):
+        """Its file changed: refreshed, it keeps what the file says now, its settings kept;
+        refreshed again, nothing changes."""
+        clamp = Items.setClamps(self.job, [{"side": "-Y", "which": self.path}])[0]
+        clamp.RestsOn = "Riser"
+        self.doc.recompute()
+        self.source.getObject("Settings").ToeContact = Vector(0, 12, 0)
+        self.assertTrue(Lever.refresh(clamp))
+        self.assertEqual(Lever.dataOf(clamp)["toe"], [0, 12, 0])
+        self.assertEqual(clamp.RestsOn, "Riser")
+        self.assertFalse(Lever.refresh(clamp))
 
 
 class TestPathWorkholdingStrapKit(_Lever):
@@ -469,6 +482,90 @@ class TestPathWorkholdingStrapKit(_Lever):
         self.doc.recompute()
         after = self.shapeOf(clamp, "Block").BoundBox
         self.assertRoughly(after.ZMin, before.ZMin + 6, 1e-3)
+
+    def test12_refreshed_from_its_file(self):
+        """What it kept of its kit gone stale, as when the kit's file was updated after it was
+        added: refreshed, it keeps the kit as it is, its step clamp kept, and is placed again."""
+        clamp = Items.setClamps(self.job, [{"side": "-Y", "which": self.path}])[0]
+        clamp.Clamp = "StepClamp_Long"
+        self.doc.recompute()
+        fresh = Lever.dataOf(clamp)
+        stale = dict(fresh, blocks=[dict(b, standing={}) for b in fresh["blocks"]])
+        clamp.LeverData = json.dumps(stale)
+        self.assertTrue(Lever.refresh(clamp))
+        self.assertEqual(Lever.dataOf(clamp), fresh)
+        self.assertEqual(clamp.Clamp, "StepClamp_Long")
+        self.assertFalse(Lever.refresh(clamp))
+        # every Job's lever clamp of the document
+        clamp.LeverData = json.dumps(stale)
+        self.assertEqual(Lever.refreshAll(self.doc), [clamp])
+
+    def test13_imported_cut_off(self):
+        """Its parts imported into its document, as Import All Links does: cut off from its
+        kit's file, a refresh leaves it as it is, even with what it kept gone stale."""
+        clamp = Items.setClamps(self.job, [{"side": "-Y", "which": self.path}])[0]
+        self.doc.recompute()
+        self.doc.importLinks()
+        self.doc.recompute()
+        self.assertTrue(Lever._imported(clamp))
+        stale = dict(Lever.dataOf(clamp), clamps=[])
+        clamp.LeverData = json.dumps(stale)
+        self.assertFalse(Lever.refresh(clamp))
+        self.assertEqual(Lever.dataOf(clamp), stale)
+
+    def _imported(self):
+        clamp = Items.setClamps(self.job, [{"side": "-Y", "which": self.path}])[0]
+        self.doc.recompute()
+        self.doc.importLinks()
+        self.doc.recompute()
+        return clamp
+
+    def test14_imported_pulls_in_a_piece(self):
+        """Imported, its other step clamp chosen, its kit's file as it was imported from: that
+        one piece copied into the document, the clamp still cut off from its file."""
+        clamp = self._imported()
+        clamp.Clamp = "StepClamp_Long"
+        self.doc.recompute()
+        bar = next(o for o in clamp.Group if getattr(o, "LeverRole", None) == "Clamp")
+        self.assertEqual(bar.SourceObject, "StepClamp_Long_Solid")
+        self.assertEqual(bar.LinkedObject.Document, self.doc)
+        self.assertTrue(bar.LinkedObject.WorkholdingCopy.endswith(":StepClamp_Long_Solid"))
+        self.assertTrue(Lever._imported(clamp))
+        # back to the first: the copy imported with it, nothing pulled in
+        count = len(self.doc.Objects)
+        clamp.Clamp = "StepClamp_Short"
+        self.doc.recompute()
+        self.assertEqual(len(self.doc.Objects), count)
+
+    def test15_imported_file_changed(self):
+        """Imported, its kit's file changed since: without the GUI to ask, the piece is not
+        pulled in from the changed file."""
+        clamp = self._imported()
+        self.source.getObject("StepClamp_Long_Solid").Placement.Base.x = 1
+        self.source.save()
+        bar = next(o for o in clamp.Group if getattr(o, "LeverRole", None) == "Clamp")
+        before = bar.LinkedObject
+        with self.assertRaises(ValueError):
+            Lever._pullIn(clamp, "StepClamp_Long_Solid")
+        self.assertIs(bar.LinkedObject, before)
+        self.assertFalse(any(getattr(o, "WorkholdingCopy", "") for o in self.doc.Objects))
+
+    def test16_imported_updated(self):
+        """Imported, its kit's file changed since, updated when asked: each piece copied in again
+        from the file as it is now, the old copies gone, its file's sha256 kept, still cut off."""
+        import Path.Workholding.Library as PathLibrary
+
+        clamp = self._imported()
+        self.source.getObject("StepClamp_Short_Solid").Placement.Base.x = 1
+        self.source.save()
+        Lever._updateImported(clamp, self.path)
+        self.doc.recompute()
+        self.assertTrue(Lever._imported(clamp))
+        self.assertEqual(clamp.SourceSha256, PathLibrary.fileSha256(self.path))
+        bar = next(o for o in clamp.Group if getattr(o, "LeverRole", None) == "Clamp")
+        self.assertRoughly(bar.LinkedObject.Placement.Base.x, 1)
+        copies = [o for o in self.doc.Objects if o.TypeId == "Part::Feature" and not o.InList]
+        self.assertEqual(copies, [])
 
     def test07_studs_joined(self):
         """Too tall for one stud: two, joined by the kit's coupling nut, the longer below."""
