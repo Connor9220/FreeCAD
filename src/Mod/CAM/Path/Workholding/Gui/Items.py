@@ -751,6 +751,7 @@ def _againstRound(job, stock):
     within STOCK_SNAP_WIDTHS of their own widths of, each the way it is nearest, in turn until
     it touches them all, as a round sits between two dogs. Never into one. Worked out from above:
     the stock a circle, each stop a circle or the box round it."""
+    import math
     import Part
 
     shapes = []
@@ -778,9 +779,8 @@ def _againstRound(job, stock):
     def over(at):
         return [f for f in stops if _gapTo(at, radius, f)[0] < -1e-6]
 
-    def clear(at, way, most):
+    def clear(at, way, most, step):
         """How far along way from at it first stands clear of every stop, up to most."""
-        step = max(radius / 50.0, 0.1)
         t = 0.0
         while t <= most:
             if not over(at + way * t):
@@ -789,7 +789,7 @@ def _againstRound(job, stock):
         else:
             return None
         low, high = max(t - step, 0.0), t
-        for _ in range(40):
+        for _ in range(30):
             half = (low + high) / 2
             if over(at + way * half):
                 low = half
@@ -797,24 +797,28 @@ def _againstRound(job, stock):
                 high = half
         return high
 
-    # off those it is on top of, all together, the least way out of them
-    for _ in range(4):
-        under = over(center)
-        if not under:
-            break
-        way = FreeCAD.Vector()
+    # off those it is on top of: the nearest spot clear of them all, any way round, the way out
+    # from their middle first when as near
+    under = over(center)
+    if under:
+        most = 2 * radius + max(width(f) for f in stops) + 1.0
+        ways = []
+        out = FreeCAD.Vector()
         for f in under:
             _, toward = _gapTo(center, radius, f)
-            way -= toward if toward is not None else (middle(f) - center)
-        if way.Length < 1e-9:
-            way = center - middle(under[0])
-        if way.Length < 1e-9:
-            break
-        way.normalize()
-        far = clear(center, way, 2 * radius + max(width(f) for f in under) + 1.0)
-        if far is None:
-            break
-        center = center + way * far
+            out -= toward if toward is not None else (middle(f) - center)
+        if out.Length > 1e-9:
+            ways.append(FreeCAD.Vector(out).normalize())
+        for k in range(72):
+            a = math.radians(5 * k)
+            ways.append(FreeCAD.Vector(math.cos(a), math.sin(a), 0))
+        best = None
+        for way in ways:
+            far = clear(center, way, most if best is None else min(most, best[0]), 0.5)
+            if far is not None and (best is None or far < best[0] - 1e-6):
+                best = (far, way)
+        if best is not None:
+            center = center + best[1] * best[0]
     near = sorted(
         (f for f in stops if _gapTo(center, radius, f)[0] <= STOCK_SNAP_WIDTHS * width(f)),
         key=lambda f: _gapTo(center, radius, f)[0],
