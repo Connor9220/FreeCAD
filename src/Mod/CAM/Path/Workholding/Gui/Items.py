@@ -823,42 +823,82 @@ def _againstRound(job, stock):
         (f for f in stops if _gapTo(center, radius, f)[0] <= STOCK_SNAP_WIDTHS * width(f)),
         key=lambda f: _gapTo(center, radius, f)[0],
     )
-    # against them, each in turn, sliding along those it already touches, never into one
-    for _ in range(200):
-        moved = False
-        for f in near:
-            gap, way = _gapTo(center, radius, f)
-            if gap < TOUCH_NEAR or way is None:
-                continue
-            slide = FreeCAD.Vector(way)
-            for g in stops:
-                if g is f:
-                    continue
-                touch, toward = _gapTo(center, radius, g)
-                if touch < TOUCH_NEAR and toward is not None and slide.dot(toward) > 0:
-                    slide -= toward * slide.dot(toward)
-            if slide.Length < 1e-6:
-                continue
-            slide.normalize()
-            closing = slide.dot(way)
-            if closing < 1e-3:
-                continue
-            most = gap / closing
-            low, high = 0.0, most
-            if over(center + slide * most) or _gapTo(center + slide * most, radius, f)[0] < 0:
+    if not near:
+        return center - start
+
+    def gapOf(at, f):
+        return _gapTo(at, radius, f)[0]
+
+    # first, straight against the nearest; one in the way is met first instead
+    first = near[0]
+    gap, way = _gapTo(center, radius, first)
+    if way is not None and gap > 0:
+        low, high = 0.0, gap
+        hit = over(center + way * gap)
+        if hit:
+            for _ in range(40):
+                half = (low + high) / 2
+                if over(center + way * half):
+                    high = half
+                else:
+                    low = half
+            first = min(hit, key=lambda f: gapOf(center + way * low, f))
+            gap = low
+        center = center + way * gap
+
+    def onto(at, f):
+        """at put back touching f, along the way from f's nearest point."""
+        _, toward = _gapTo(at, radius, f)
+        if toward is None:
+            return at
+        return at + toward * gapOf(at, f)
+
+    # then round the one it touches, keeping touching it, to the nearest other in reach: seated
+    # against two, done
+    others = sorted(
+        (f for f in stops if f is not first and gapOf(center, f) <= STOCK_SNAP_WIDTHS * width(f)),
+        key=lambda f: gapOf(center, f),
+    )
+    step = 0.5
+    for second in others:
+        _, n = _gapTo(center, radius, first)
+        if n is None:
+            continue
+        tangent = FreeCAD.Vector(-n.y, n.x, 0)
+        ahead = onto(center + tangent * step, first)
+        back = onto(center - tangent * step, first)
+        if gapOf(back, second) < gapOf(ahead, second):
+            tangent = tangent * -1
+        at = center
+        best = gapOf(at, second)
+        reached = None
+        for _ in range(int(3.2 * radius / step) + 1):
+            _, n = _gapTo(at, radius, first)
+            if n is None:
+                break
+            tangent = FreeCAD.Vector(-n.y, n.x, 0) * (
+                1 if tangent.dot(FreeCAD.Vector(-n.y, n.x, 0)) >= 0 else -1
+            )
+            nxt = onto(at + tangent * step, first)
+            g = gapOf(nxt, second)
+            if g <= 0 or over(nxt):
+                # the touch between at and nxt
+                low, high = 0.0, 1.0
                 for _ in range(40):
                     half = (low + high) / 2
-                    at = center + slide * half
-                    if over(at) or _gapTo(at, radius, f)[0] < 0:
+                    p = onto(at + (nxt - at) * half, first)
+                    if gapOf(p, second) <= 0 or over(p):
                         high = half
                     else:
                         low = half
-                most = low
-            if most < 1e-4:
-                continue
-            center = center + slide * most
-            moved = True
-        if not moved:
+                reached = onto(at + (nxt - at) * low, first)
+                break
+            if g > best + 1e-9:
+                break
+            best = g
+            at = nxt
+        if reached is not None:
+            center = reached
             break
     return center - start
 
