@@ -92,8 +92,15 @@ def _recoverIdle(name):
     if doc is None:
         _recovering.discard(name)
         return
-    # waits its turn: the document loaded, no other dialog up
-    if doc.Restoring or QtWidgets.QApplication.activeModalWidget() is not None:
+    # waits its turn: the document loaded, no other dialog up, nothing recomputing; a file
+    # opened whole mid-recompute replaces objects being recomputed
+    busy = any(getattr(d, "Recomputing", False) for d in FreeCAD.listDocuments().values())
+    if (
+        doc.Restoring
+        or busy
+        or QtWidgets.QApplication.activeModalWidget() is not None
+        or QtWidgets.QApplication.overrideCursor() is not None
+    ):
         QtCore.QTimer.singleShot(300, lambda: _recoverIdle(name))
         return
     try:
