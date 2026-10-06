@@ -245,17 +245,15 @@ def draggerPlacement(dragger):
     return FreeCAD.Placement(FreeCAD.Vector(*at), FreeCAD.Rotation(*turn))
 
 
-def stockDragger(quarter=False):
-    """stockDragger(quarter=False) ... the Transform dragger on the stock: across the table and
-    turned about the vertical, a degree at a time, or with quarter a quarter turn at a time: held
-    in a vise, square to its jaws as it is dragged."""
+def stockDragger():
+    """stockDragger() ... the Transform dragger on the stock: across the table and turned about
+    the vertical, a degree at a time."""
     import math
 
     dragger = findDragger()
     if dragger is None:
         return
-    step = 90.0 if quarter else DRAG_TURN_STEP
-    dragger.getField("rotationIncrement").set(repr(math.radians(step)))
+    dragger.getField("rotationIncrement").set(repr(math.radians(DRAG_TURN_STEP)))
     for name in ("zTranslatorDragger", "xRotatorDragger", "yRotatorDragger"):
         part = dragger.getPart(name, True)
         if part is not None:

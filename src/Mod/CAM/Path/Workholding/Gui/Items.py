@@ -499,7 +499,6 @@ class _StockDrag(_Drag):
     def letGo(self, piece, start, at, free):
         # drawn where they are again: what holds them moves instead
         _unhang(self.stops)
-        _shiftWatch.watch(False)
         if start is None:
             return
         stock = piece
@@ -541,41 +540,6 @@ class _StockDrag(_Drag):
     def after(self, piece):
         self.stops.fillList()
         self.stops.showChosen()
-
-
-class _ShiftWatch(QtCore.QObject if FreeCAD.GuiUp else object):
-    """Shift pressed or let go while the stock is dragged in a vise: its dragger turning a degree
-    at a time, free, or a quarter at a time, square to the jaws. Told by Qt, as the keys go."""
-
-    def __init__(self):
-        super().__init__()
-        self.on = False
-        self.stops = None
-
-    def watch(self, on, stops=None):
-        self.stops = stops if on else None
-        app = QtWidgets.QApplication.instance()
-        if on and not self.on:
-            app.installEventFilter(self)
-        elif self.on and not on:
-            app.removeEventFilter(self)
-        self.on = on
-
-    def eventFilter(self, obj, event):
-        if event.type() in (QtCore.QEvent.KeyPress, QtCore.QEvent.KeyRelease):
-            stops = self.stops
-            stock = getattr(getattr(stops, "job", None), "Stock", None)
-            if (
-                event.key() == QtCore.Qt.Key_Shift
-                and not event.isAutoRepeat()
-                and stock is not None
-                and stops.editing == stock.Name
-            ):
-                ViewProviders.stockDragger(quarter=event.type() == QtCore.QEvent.KeyRelease)
-        return False
-
-
-_shiftWatch = _ShiftWatch() if FreeCAD.GuiUp else None
 
 
 def _transformOf(obj):
@@ -2659,13 +2623,7 @@ class _StopsClamps:
             self.dragFrom = FreeCAD.Placement(PathWorkholding.placementOf(piece))
             self.dragSeated = bool(getattr(piece, "Seated", True))
             if piece is self.job.Stock:
-                # held in a vise: turned a quarter at a time, square to its jaws as dragged,
-                # a degree at a time while Shift is held
-                quarter = any(
-                    not PathWorkholding.isShared(v) for v in PathWorkholding.vises(self.job)
-                )
-                ViewProviders.stockDragger(quarter=quarter and not _shiftHeld())
-                _shiftWatch.watch(quarter, self)
+                ViewProviders.stockDragger()
             self.dragRules(piece).begin(piece)
             self.dragTimer.start()
 
@@ -2812,7 +2770,6 @@ class _StopsClamps:
             return
         # anything hung from the stock's transform drawn from its own again
         _unhang(self)
-        _shiftWatch.watch(False)
         if self.editing is not None:
             self.editing = None
             gui = FreeCADGui.getDocument(self.job.Document.Name)
