@@ -532,17 +532,19 @@ class _StockDrag(_Drag):
         self.settle(not free)
 
     def againstStops(self, slid):
-        """How much further the stock moves, slid by slid, to rest against the stops it comes
-        within STOCK_SNAP_WIDTHS of their own widths of, on any side of them; one it is let go on
-        top of, pushed off it to the side its middle is on, however far that is. The nearest each way,
-        those square to one another only."""
+        """How much further the stock moves, slid by slid: off the stops it is let go on top of,
+        however far, each to the side of it the stock's middle is on, back across its face, or
+        along it where that clears none, the least move that clears them all; then on to rest against those it comes
+        within STOCK_SNAP_WIDTHS of their own widths of, on any side of them, the nearest each
+        way, square to one another and to the way it was moved off."""
+        import itertools
         import Part
 
         stock = self.job.Stock.Shape
         if stock.isNull():
             return FreeCAD.Vector()
         stock = stock.translated(slid)
-        found = []
+        stops = []
         for stop in Items.itemsOf(self.job):
             if not Items.isStop(stop):
                 continue
@@ -556,35 +558,35 @@ class _StockDrag(_Drag):
                 continue
             out.normalize()
             # round, or long: against it from any side, across the way it faces or along it
-            offs = []
-            for axis in (out, FreeCAD.Vector(-out.y, out.x, 0)):
-                side = FreeCAD.Vector(-axis.y, axis.x, 0)
-                low, high = PathWorkholding._extents(stock, FreeCAD.Vector(), side)
-                first, last = PathWorkholding._extents(shape, FreeCAD.Vector(), side)
-                # beside the stock, not across from it this way: touching it end on is beside
-                if last <= low + TOUCH_NEAR or first >= high - TOUCH_NEAR:
+            stops.append((shape, (out, FreeCAD.Vector(-out.y, out.x, 0))))
+        # off those it is on top of: each back across its face, or along it, the least move
+        # clearing them all, as few along them as can be
+        choices = [c for c in (_offStop(stock, shape, axes) for shape, axes in stops) if c]
+        off = None
+        for picked in itertools.product(*(range(len(c)) for c in choices)):
+            move = _together([c[i] for c, i in zip(choices, picked)])
+            if move is None:
+                continue
+            moved = stock.translated(move)
+            if any(_offStop(moved, shape, axes) for shape, axes in stops):
+                continue
+            score = (sum(picked), move.Length)
+            if off is None or score < off[0]:
+                off = (score, move)
+        off = off[1] if off is not None else FreeCAD.Vector()
+        stock = stock.translated(off)
+        taken = [FreeCAD.Vector(m).normalize() for m in _parts(off)]
+        found = []
+        for shape, axes in stops:
+            for axis in axes:
+                if not _across(stock, shape, axis):
                     continue
-                gaps = []
                 for way in (axis, -axis):
                     reach = PathWorkholding._extents(stock, FreeCAD.Vector(), way)[1]
                     near, far = PathWorkholding._extents(shape, FreeCAD.Vector(), way)
-                    gaps.append((way, near - reach, far - near))
-                if gaps[0][1] < -TOUCH_NEAR and gaps[1][1] < -TOUCH_NEAR:
-                    # on top of it: off it to the side of it the stock's middle is on
-                    beyond = stock.BoundBox.Center.dot(axis) > shape.BoundBox.Center.dot(axis)
-                    way, gap, _ = gaps[1] if beyond else gaps[0]
-                    back, reach = PathWorkholding._extents(stock, FreeCAD.Vector(), axis)
-                    # the way that is least of the stock's own length that way
-                    offs.append((abs(gap) / max(reach - back, 1e-9), way * gap))
-                    continue
-                for way, gap, width in gaps:
-                    if -TOUCH_NEAR <= gap <= STOCK_SNAP_WIDTHS * width:
-                        found.append((gap, way * gap))
-            if offs:
-                # off it however far, before any other
-                found.append((-1.0, min(offs, key=lambda o: o[0])[1]))
-        more = FreeCAD.Vector()
-        taken = []
+                    if -TOUCH_NEAR <= near - reach <= STOCK_SNAP_WIDTHS * (far - near):
+                        found.append((near - reach, way * (near - reach)))
+        more = FreeCAD.Vector(off)
         for _, move in sorted(found, key=lambda f: f[0]):
             if move.Length < 1e-9:
                 continue
@@ -645,6 +647,62 @@ class _StockDrag(_Drag):
     def after(self, piece):
         self.stops.fillList()
         self.stops.showChosen()
+
+
+def _across(stock, shape, axis):
+    """Whether shape is across from the stock along axis, not beside it: touching it end on is
+    beside."""
+    side = FreeCAD.Vector(-axis.y, axis.x, 0)
+    low, high = PathWorkholding._extents(stock, FreeCAD.Vector(), side)
+    first, last = PathWorkholding._extents(shape, FreeCAD.Vector(), side)
+    return last > low + TOUCH_NEAR and first < high - TOUCH_NEAR
+
+
+def _offStop(stock, shape, axes):
+    """The moves that take the stock off shape, a stop it is on top of, across from it along
+    each of axes, one along each, to the side of it the stock's middle is on; none when it is not
+    on top of it."""
+    moves = []
+    for axis in axes:
+        if not _across(stock, shape, axis):
+            return []
+        gaps = []
+        for way in (axis, -axis):
+            reach = PathWorkholding._extents(stock, FreeCAD.Vector(), way)[1]
+            near = PathWorkholding._extents(shape, FreeCAD.Vector(), way)[0]
+            gaps.append(way * (near - reach))
+        beyond = stock.BoundBox.Center.dot(axis) > shape.BoundBox.Center.dot(axis)
+        moves.append(gaps[1] if beyond else gaps[0])
+    return moves
+
+
+def _parts(move):
+    """move split into the ways it goes along X and along Y."""
+    return [
+        v for v in (FreeCAD.Vector(move.x, 0, 0), FreeCAD.Vector(0, move.y, 0)) if v.Length > 1e-9
+    ]
+
+
+def _together(moves):
+    """One move doing all of moves, each as far as the furthest the same way; None when two go
+    opposite ways."""
+    ways = []
+    for move in moves:
+        if move.Length < 1e-9:
+            continue
+        way = FreeCAD.Vector(move).normalize()
+        for i, (w, length) in enumerate(ways):
+            if w.dot(way) > 1 - 1e-6:
+                ways[i] = (w, max(length, move.Length))
+                break
+            if w.dot(way) < -1 + 1e-6:
+                return None
+        else:
+            ways.append((way, move.Length))
+    total = FreeCAD.Vector()
+    for way, length in ways:
+        total += way * length
+    return total
 
 
 def _transformOf(obj):
