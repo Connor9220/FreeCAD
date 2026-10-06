@@ -71,6 +71,12 @@ def _unselectable(vobj):
         vobj.Selectable = False
 
 
+def _outOfTree(vobj):
+    """A part of a vise or clamp not listed in the tree; the tree's Show Hidden lists it."""
+    if vobj is not None and "ShowInTree" in vobj.PropertiesList and vobj.ShowInTree:
+        vobj.ShowInTree = False
+
+
 def thinLines(vobj):
     """thinLines(vobj) ... its edges and vertices drawn thin, its vertices, where it says, the
     color of its edges, not drawn over them."""
@@ -124,7 +130,17 @@ class _PartViewProvider:
 
 class ViewProviderViseMember(_PartViewProvider):
     """A part of a vise of a Job's Workholding: deleting it deletes the whole vise, a vise
-    short of a part being no use."""
+    short of a part being no use. Left out of the tree: the vise is what is worked with, its
+    parts placed by it."""
+
+    def attach(self, vobj):
+        super().attach(vobj)
+        _outOfTree(vobj)
+
+    def finishRestoring(self):
+        super().finishRestoring()
+        # one saved before it was so: out of the tree too
+        _outOfTree(getattr(self, "vobj", None))
 
     def onDelete(self, vobj, subelements):
         obj = vobj.Object

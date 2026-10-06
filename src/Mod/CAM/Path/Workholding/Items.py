@@ -1488,6 +1488,32 @@ def addTable(job):
     return table
 
 
+def clampFacts(path):
+    """clampFacts(path) ... what a clamp's own file says of it, read without opening it: its Kind,
+    and its Width, Reach, MinStockThickness and MaxStockThickness in mm and its Thread, those it
+    gives. Empty if it holds no clamp."""
+    root = readDocumentXml(path)
+    if root is None:
+        return {}
+    for _, props in varsetProperties(root, objectKinds(root)):
+        kind = props.get("Kind")
+        if kind is None or kind.find("String") is None:
+            continue
+        if kind.find("String").get("value") not in CLAMP_KINDS:
+            continue
+        facts = {"Kind": kind.find("String").get("value")}
+        for name in ("Width", "Reach", "MinStockThickness", "MaxStockThickness"):
+            value = props.get(name)
+            number = value.find("Float") if value is not None else None
+            if number is not None:
+                facts[name] = float(number.get("value"))
+        thread = props.get("Thread")
+        if thread is not None and thread.find("String") is not None:
+            facts["Thread"] = thread.find("String").get("value")
+        return facts
+    return {}
+
+
 def clampFile(path):
     """clampFile(path) ... the clamp a clamp's own file holds, read from the file without opening
     it: its name, the file's, and its Kind, HoldDown, Push, Lever or StrapKit, a strap clamp kit.

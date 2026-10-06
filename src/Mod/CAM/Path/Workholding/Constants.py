@@ -116,6 +116,15 @@ DRAG_SHOW_EVERY = 60
 # a lever clamp is placed again this many ms after the last turn of the wheel in its panel
 LEVER_EDIT_DELAY = 250
 
+# the stops and clamps panel: how many clamps' files it offers as used lately, kept in the CAM
+# preferences under this name, one path a line; the pictures in the item box, in its list and in
+# the preview of what Add puts in, and the picture beside the picked piece's settings, pixels
+RECENT_CLAMPS = 5
+RECENT_CLAMPS_PREF = "WorkholdingRecentClamps"
+ITEM_ICON = 22
+ITEM_LIST_ICON = 40
+ITEM_PREVIEW = 96
+
 # what the panels say in: something wrong, a clearance the tools have, one they do not
 ERROR_TEXT_COLOR = "#d04040"
 CLEAR_TEXT_COLOR = "#46be5a"

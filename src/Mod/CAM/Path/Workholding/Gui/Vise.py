@@ -910,6 +910,7 @@ class TaskPanelVise:
             defaults["bite"],
         )
         self.gripCount = QtWidgets.QSpinBox()
+        self.gripCount.setKeyboardTracking(False)
         self.gripCount.setRange(1, 6)
         self.gripCount.setValue(defaults["grips"])
         self.gripCount.setToolTip(translate("CAM_Workholding", "How many grips on each jaw"))

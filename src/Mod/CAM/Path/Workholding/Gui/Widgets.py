@@ -39,8 +39,14 @@ def mmBox(ui, tip=None, value=None, step=None, minimum=0.0):
     0 unless given, a coordinate's lower."""
     box = ui.createWidget("Gui::QuantitySpinBox")
     box.setProperty("unit", "mm")
+    # what is typed put in on Enter or leaving the box, as CAM's other panels do; the arrows and
+    # the wheel at once
+    box.setKeyboardTracking(False)
     box.setProperty("minimum", minimum)
     box.setProperty("singleStep", LENGTH_STEP if step is None else step)
+    # as narrow as the panel needs, not kept as wide as its longest number: two to a row fit a
+    # narrow panel
+    box.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
     if value is not None:
         box.setProperty("rawValue", value)
     if tip is not None:
@@ -105,15 +111,28 @@ class Note(QtWidgets.QLabel if FreeCAD.GuiUp else object):
         self.setVisible(bool(text))
 
 
-def combo(wide=False):
-    """combo(wide=False) ... a drop-down; a wide one no wider than its shortest choices in the
-    panel, its list as wide as its longest."""
-    combo = QtWidgets.QComboBox()
+def combo(wide=False, below=False):
+    """combo(wide=False, below=False) ... a drop-down; a wide one no wider than its shortest
+    choices in the panel, its list as wide as its longest; below, its list opening below it."""
+    combo = DropDown() if below else QtWidgets.QComboBox()
     combo.setMaxVisibleItems(16)
     if wide:
         combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
         combo.setMinimumContentsLength(6)
     return combo
+
+
+class DropDown(QtWidgets.QComboBox if FreeCAD.GuiUp else object):
+    """A drop-down whose list always opens below it: the style otherwise lays the list over it
+    with the current choice on the box, so one far down the list opens it upward."""
+
+    def showPopup(self):
+        super().showPopup()
+        popup = self.view().window()
+        below = self.mapToGlobal(QtCore.QPoint(0, self.height()))
+        screen = self.screen().availableGeometry() if self.screen() else None
+        if screen is None or below.y() + popup.height() <= screen.bottom():
+            popup.move(popup.x(), below.y())
 
 
 def header(combo, text):

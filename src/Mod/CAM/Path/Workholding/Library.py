@@ -481,6 +481,9 @@ def about(path):
     parts = [n for n, links in groups.items() if settings in links]
     if parts and parts[0] in labels:
         found["label"] = labels[parts[0]]
+    elif not parts and settings in labels:
+        # a kit's, stamped on its settings
+        found["label"] = labels[settings]
     return found
 
 

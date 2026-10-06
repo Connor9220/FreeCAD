@@ -108,7 +108,7 @@ def _words(kind):
                 "Other file….",
             ),
             "other": translate("CAM_AddVise", "Open a Clamp"),
-            "get": translate("CAM_AddVise", "Choose"),
+            "get": translate("CAM_AddVise", "Select"),
             "update": translate("CAM_AddVise", "Update Clamp"),
         }
     return {
@@ -644,6 +644,13 @@ class LibraryDialog(QtWidgets.QDialog):
         """The one picked, or None."""
         index = self.pickedIndex()
         return None if index is None else self.items[index]
+
+    def keyPressEvent(self, event):
+        # a tab of the Workholding Library window: Esc closes the window, not the tab
+        if not self.isWindow() and event.key() == QtCore.Qt.Key_Escape:
+            event.ignore()
+            return
+        super().keyPressEvent(event)
 
     def done(self, result):
         # what is still being fetched comes to nothing

@@ -35,7 +35,12 @@ import Path.Workholding.Gui.Widgets as Widgets
 from Path.Workholding.Constants import (
     DRAG_SHOW_EVERY,
     ERROR_TEXT_COLOR,
+    ITEM_ICON,
+    ITEM_LIST_ICON,
+    ITEM_PREVIEW,
     LEVER_EDIT_DELAY,
+    RECENT_CLAMPS,
+    RECENT_CLAMPS_PREF,
     STOCK_DRAWING_COLOR,
     TRANSFORM_NO_DIALOG,
 )
@@ -57,11 +62,17 @@ def _bound(obj, name):
     return any(path == name for path, _ in getattr(obj, "ExpressionEngine", []))
 
 
-def _pieceDrawing(piece, palette, width=330, height=130):
+# how big a stop's drawing is drawn, its views one above the other, pixels
+_DRAWING_WIDTH = 170
+_DRAWING_HEIGHT = 170
+
+
+def _pieceDrawing(piece, palette, width=_DRAWING_WIDTH, height=_DRAWING_HEIGHT, stacked=True):
     """A drawing of a stop or clamp made here, its sizes named on it as the panel names them:
     from the front, facing the stock's side, its height, the stock behind it standing taller;
     and from above, along the stock across and front to back down, the stock's edge beyond it.
-    Each view fills its half. None for any other."""
+    Each view fills its half, the one above the other when stacked, else side by side. None for
+    any other."""
     kind = type(getattr(piece, "Proxy", None)).__name__
     if kind not in ("ObjectDog", "ObjectFence", "ObjectSideClamp", "ObjectEdgeClamp"):
         return None
@@ -123,17 +134,35 @@ def _pieceDrawing(piece, palette, width=330, height=130):
         return min(sx, sy * 2.5), min(sy, sx * 2.5)
 
     margin, band = 8, 10
-    cellW = (width - 3 * margin) / 2
-    cellTop = textH + 6
-    cellH = height - cellTop - margin
+    # each view's room: its left, its top, as wide and as high
+    if stacked:
+        cellW = width - 2 * margin
+        cellH = height / 2 - textH - 6 - margin
+        rooms = [(margin, 0.0), (margin, height / 2)]
+    else:
+        cellW = (width - 3 * margin) / 2
+        cellH = height - textH - 6 - margin
+        rooms = [(margin, 0.0), (2 * margin + cellW, 0.0)]
     labelW = max(metrics.horizontalAdvance(n) for n in ("Height", "Drop", "Rise", deep[0])) + 10
     under = textH + 6
+    lipW = (metrics.horizontalAdvance("Reach") + 10) if edge else 0
+    stockTall = v("Drop") if edge else tall * 1.5
+    frontX, frontY = fit(cellW - labelW - 16, wide[1], cellH - under - 4, max(stockTall, tall))
+    aboveX, aboveY = fit(
+        cellW - labelW - lipW - 8, wide[1], cellH - band - under - 4, deep[1] + reach
+    )
+    # the piece as wide from the front as from above, one view over the other
+    acrossX = min(frontX, aboveX)
+    if kind == "ObjectDog":
+        # round, as it is
+        aboveY = min(acrossX, aboveY)
+        acrossX = aboveY
 
     # from the front: the stock behind, taller; the piece on the table before it
-    x0 = margin
-    text(x0 + cellW / 2, textH, translate("CAM_Workholding", "From the front"), faint)
-    stockTall = v("Drop") if edge else tall * 1.5
-    sx, sy = fit(cellW - labelW - 16, wide[1], cellH - under - 4, max(stockTall, tall))
+    x0, y0 = rooms[0]
+    cellTop = y0 + textH + 6
+    text(x0 + cellW / 2, y0 + textH, translate("CAM_Workholding", "From the front"), faint)
+    sx, sy = acrossX, frontY
     w, h, st = wide[1] * sx, tall * sy, stockTall * sy
     left = x0 + labelW + (cellW - labelW - w) / 2
     base = cellTop + (cellH - under + max(st, h)) / 2
@@ -152,13 +181,10 @@ def _pieceDrawing(piece, palette, width=330, height=130):
         up(left - 14, base - h, base, "Height")
 
     # from above: the stock's edge beyond, the piece against it, front to back down
-    x0 = 2 * margin + cellW
-    text(x0 + cellW / 2, textH, translate("CAM_Workholding", "From above"), faint)
-    lipW = (metrics.horizontalAdvance("Reach") + 10) if edge else 0
-    sx, sy = fit(cellW - labelW - lipW - 8, wide[1], cellH - band - under - 4, deep[1] + reach)
-    if kind == "ObjectDog":
-        # round, as it is
-        sx = sy = min(sx, sy)
+    x0, y0 = rooms[1]
+    cellTop = y0 + textH + 6
+    text(x0 + cellW / 2, y0 + textH, translate("CAM_Workholding", "From above"), faint)
+    sx, sy = acrossX, aboveY
     w, d, r = wide[1] * sx, deep[1] * sy, reach * sy
     left = x0 + labelW + (cellW - labelW - lipW - w) / 2
     top = cellTop + (cellH - under - band - d) / 2
@@ -192,6 +218,78 @@ def _length(value):
     return FreeCAD.Units.Quantity(round(value, 6) + 0.0, FreeCAD.Units.Length).UserString
 
 
+# the pictures of the stops made here in the item box: a dog, a pin standing up, and a fence, a
+# bar lying along the stock, in greys that read on a light or a dark panel
+_PICTURES = {
+    "Dog": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+<ellipse cx="20" cy="29" rx="9" ry="3" fill="#7d838c"/>
+<rect x="11" y="12" width="18" height="17" fill="#9aa1aa"/>
+<ellipse cx="20" cy="12" rx="9" ry="3" fill="#c3c8ce"/></svg>""",
+    "Fence": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+<path d="M5 26 L30 18 L36 21 L11 29 Z" fill="#c3c8ce"/>
+<path d="M11 29 L36 21 L36 25 L11 33 Z" fill="#7d838c"/>
+<path d="M5 26 L11 29 L11 33 L5 30 Z" fill="#9aa1aa"/></svg>""",
+}
+
+
+def _picture(which, size):
+    """The picture of what the item box offers, size pixels square: a stop made here drawn, a
+    clamp's own file's thumbnail; None if it has none."""
+    pixmap = None
+    if which in _PICTURES:
+        from PySide import QtSvg
+
+        pixmap = QtGui.QPixmap(size, size)
+        pixmap.fill(QtCore.Qt.transparent)
+        painter = QtGui.QPainter(pixmap)
+        QtSvg.QSvgRenderer(QtCore.QByteArray(_PICTURES[which].encode())).render(painter)
+        painter.end()
+    elif isinstance(which, str) and os.path.isfile(which):
+        import Path.Workholding.Library as PathLibrary
+
+        data = PathLibrary.thumbnail(which)
+        if data:
+            pixmap = QtGui.QPixmap()
+            pixmap.loadFromData(data)
+            pixmap = pixmap.scaled(
+                size, size, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
+            )
+    return pixmap
+
+
+class _Sizes:
+    """What a stop made here is given as it is made, its sizes, gathered without making one."""
+
+    def addProperty(self, *args):
+        return self
+
+
+def _madeSizes(which):
+    """The sizes a stop made here starts with, by name, mm."""
+    sizes = _Sizes()
+    Items.Classes[which].addProperties(Items.Classes[which].__new__(Items.Classes[which]), sizes)
+    return {name: value for name, value in vars(sizes).items() if isinstance(value, float)}
+
+
+def _recentClamps():
+    """The clamps' files added or browsed to lately, the latest first, those still there."""
+    import Path.Workholding.Library as PathLibrary
+
+    text = PathLibrary._prefs().GetString(RECENT_CLAMPS_PREF, "")
+    return [path for path in text.splitlines() if path and os.path.isfile(path)]
+
+
+def _rememberClamp(path):
+    """A clamp's file added or browsed to, first of those used lately; the oldest forgotten."""
+    import Path.Workholding.Library as PathLibrary
+
+    real = os.path.realpath(path)
+    kept = [p for p in _recentClamps() if os.path.realpath(p) != real]
+    PathLibrary._prefs().SetString(
+        RECENT_CLAMPS_PREF, "\n".join([path] + kept[: RECENT_CLAMPS - 1])
+    )
+
+
 class _StopsClamps:
     """The stops and clamps holding a Job's stock on the table, two sections of the panel: one row
     adding them, a side of the part, what to put there and how many, spread along it; and those
@@ -210,14 +308,9 @@ class _StopsClamps:
         self.timer.setSingleShot(True)
         self.timer.setInterval(150)
         self.timer.timeout.connect(self.preview)
-        # the clamps' files the Job uses, and those chosen since: (name, path, kind)
-        self.files = []
-        for piece in Items.clampsOn(self.job):
-            which = getattr(piece, "Source", "")
-            if which and which not in Items.Classes:
-                clamp = Items.clampFile(which)
-                if clamp is not None and all(p != which for _, p, _ in self.files):
-                    self.files.append((self._clampName(which, clamp[0]), which, clamp[1]))
+        # clamps' files browsed to while the panel is open, not placed yet: used lately once they
+        # are
+        self.browsed = []
         sections = []
         for title, icon in (
             (translate("CAM_Workholding", "Add"), Widgets.themedIcon(":/icons/xy-in-stock.svg")),
@@ -233,8 +326,9 @@ class _StopsClamps:
         for layout in self.layouts:
             layout.setFormAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
 
-        # the row adding them: the side, picked on the stock in the 3D view or named; what goes
-        # there, made here or from a file, or another Job's stop; how many, spread along it
+        # adding them: what goes there, made here, a clamp's own file or another Job's stop, or
+        # one browsed to; the side, picked on the stock in the 3D view or named; how many, spread
+        # along it; and a picture of what goes there
         layout = self.layouts[0]
         self.side = Widgets.combo()
         self.side.setToolTip(
@@ -244,17 +338,28 @@ class _StopsClamps:
                 "picked in the 3D view",
             )
         )
-        self.item = Widgets.combo(wide=True)
+        self.item = Widgets.combo(wide=True, below=True)
         self.item.setToolTip(
             translate(
                 "CAM_Workholding",
-                "What goes there: a stop or clamp made here, a clamp's own file, one from a "
-                "library, or another Job's stop to share",
+                "What goes there: a stop made here, a clamp this Job uses or one used lately, or "
+                "another Job's stop to share",
             )
+        )
+        # its picture small in the box, larger in its list
+        self.item.setIconSize(QtCore.QSize(ITEM_ICON, ITEM_ICON))
+        view = QtWidgets.QListView()
+        view.setIconSize(QtCore.QSize(ITEM_LIST_ICON, ITEM_LIST_ICON))
+        self.item.setView(view)
+        self.item.setItemDelegate(QtWidgets.QStyledItemDelegate(self.item))
+        self.item.setMaxVisibleItems(8)
+        self.item.setPlaceholderText(translate("CAM_Workholding", "Select…"))
+        self.browse = Widgets.browseButton(
+            translate("CAM_Workholding", "Choose a clamp from a library or a file to add")
         )
         self.count = QtWidgets.QSpinBox()
         self.count.setRange(1, 12)
-        self.count.setValue(2)
+        self.count.setValue(1)
         self.count.setToolTip(translate("CAM_Workholding", "How many, spread along the side"))
         self.add = QtWidgets.QPushButton(translate("CAM_Workholding", "Add"))
         self.add.setToolTip(
@@ -264,17 +369,42 @@ class _StopsClamps:
             )
         )
         row = QtWidgets.QHBoxLayout()
-        row.addWidget(self.side, 2)
-        row.addWidget(self.item, 3)
+        row.addWidget(self.item, 1)
+        row.addWidget(self.browse)
+        layout.addRow(row)
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(self.side, 1)
         row.addWidget(self.count)
         row.addWidget(self.add)
         layout.addRow(row)
+        # what Add puts in: its picture and what it is, while one is chosen
+        self.addPicture = QtWidgets.QLabel()
+        self.addPicture.setFixedSize(ITEM_PREVIEW, ITEM_PREVIEW)
+        self.addPicture.setAlignment(QtCore.Qt.AlignCenter)
+        self.addName = QtWidgets.QLabel()
+        self.addName.setWordWrap(True)
+        font = self.addName.font()
+        font.setBold(True)
+        self.addName.setFont(font)
+        self.addFacts = QtWidgets.QLabel()
+        self.addFacts.setWordWrap(True)
+        self.addFacts.setEnabled(False)
+        words = QtWidgets.QVBoxLayout()
+        words.addWidget(self.addName)
+        words.addWidget(self.addFacts)
+        self.adding = QtWidgets.QWidget()
+        self.adding.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
+        row = QtWidgets.QHBoxLayout(self.adding)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.addPicture)
+        row.addLayout(words, 1)
+        row.setAlignment(words, QtCore.Qt.AlignVCenter)
+        layout.addRow(self.adding)
         self.shared = Widgets.Note()
         layout.addRow(self.shared)
         self.error = Widgets.Note()
         self.error.setStyleSheet("color: %s" % ERROR_TEXT_COLOR)
         layout.addRow(self.error)
-        self.lastItem = 0
         # while the panel is open the stock is picked in the 3D view, an edge or face of it
         # offered as the side
         self.stockSelectable = None
@@ -336,6 +466,24 @@ class _StopsClamps:
         for column in (1, 2, 3):
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.ResizeToContents)
         layout.addRow(self.list)
+        self.remove = QtWidgets.QPushButton(translate("CAM_Workholding", "Remove"))
+        self.remove.setToolTip(translate("CAM_Workholding", "Take the one picked away"))
+        layout.addRow(self.remove)
+        # the one picked's settings, its picture beside them
+        self.settings = QtWidgets.QWidget()
+        grid = QtWidgets.QGridLayout(self.settings)
+        grid.setContentsMargins(0, 0, 0, 0)
+        self.picture = QtWidgets.QLabel()
+        self.picture.setAlignment(QtCore.Qt.AlignCenter)
+        grid.addWidget(self.picture, 0, 0, QtCore.Qt.AlignTop)
+        fields = QtWidgets.QWidget()
+        self.settingsForm = QtWidgets.QFormLayout(fields)
+        self.settingsForm.setContentsMargins(0, 0, 0, 0)
+        self.settingsForm.setFormAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
+        grid.addWidget(fields, 0, 1, QtCore.Qt.AlignTop)
+        grid.setColumnStretch(1, 1)
+        layout.addRow(self.settings)
+        layout = self.settingsForm
         # where it is: the Job's X and Y, the one across its side greyed, kept against the stock
         self.placeAt = []
         for axis in ("X", "Y"):
@@ -351,25 +499,26 @@ class _StopsClamps:
                     minimum=-10000.0,
                 )
             )
-        self.remove = QtWidgets.QPushButton(translate("CAM_Workholding", "Remove"))
-        self.remove.setToolTip(translate("CAM_Workholding", "Take the one picked away"))
-        row = QtWidgets.QHBoxLayout()
+        # X over Y, beside the piece's picture
+        row = QtWidgets.QGridLayout()
+        self.placeGrid = row
         self.placeLabels = []
-        for axis, box in zip(("X", "Y"), self.placeAt):
+        for i, (axis, box) in enumerate(zip(("X", "Y"), self.placeAt)):
             self.placeLabels.append(QtWidgets.QLabel(axis))
-            row.addWidget(self.placeLabels[-1])
-            row.addWidget(box, 1)
-        row.addWidget(self.remove)
+            row.addWidget(self.placeLabels[-1], i, 0)
+            row.addWidget(box, i, 1)
+        row.setColumnStretch(1, 1)
         # in a widget of its own: a layout cannot be hidden where QFormLayout has no
         # setRowVisible, Qt before 6.4
         holder = QtWidgets.QWidget()
         row.setContentsMargins(0, 0, 0, 0)
         holder.setLayout(row)
-        layout.addRow(translate("CAM_Workholding", "Position"), holder)
+        layout.addRow(holder)
         self.placeRow = holder
-        self.positionLabel = layout.labelForField(holder)
         # a side clamp picked: how far it is turned, pushing at a slant
         self.slant = self.ui.createWidget("Gui::QuantitySpinBox")
+        self.slant.setKeyboardTracking(False)
+        self.slant.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
         self.slant.setProperty("unit", "deg")
         self.slant.setProperty("minimum", -90.0)
         self.slant.setProperty("maximum", 90.0)
@@ -379,7 +528,14 @@ class _StopsClamps:
                 "How far it is turned from square to its side, seen from above, pushing at a slant",
             )
         )
-        layout.addRow(translate("CAM_Workholding", "Angle"), self.slant)
+        self.slantGrid = QtWidgets.QGridLayout()
+        self.slantGrid.addWidget(QtWidgets.QLabel(translate("CAM_Workholding", "Angle")), 0, 0)
+        self.slantGrid.addWidget(self.slant, 0, 1)
+        self.slantGrid.setColumnStretch(1, 1)
+        self.slantRow = QtWidgets.QWidget()
+        self.slantGrid.setContentsMargins(0, 0, 0, 0)
+        self.slantRow.setLayout(self.slantGrid)
+        layout.addRow(self.slantRow)
         # a lever clamp picked: where it presses and how it stands, in place of where it is along
         # its side
         self.leverRows = []
@@ -400,6 +556,8 @@ class _StopsClamps:
         row.addWidget(self.pressY, 1)
         self._leverRow(layout, translate("CAM_Workholding", "Presses at"), row)
         self.angle = self.ui.createWidget("Gui::QuantitySpinBox")
+        self.angle.setKeyboardTracking(False)
+        self.angle.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
         self.angle.setProperty("unit", "deg")
         self.angle.setProperty("minimum", -180.0)
         self.angle.setProperty("maximum", 180.0)
@@ -498,8 +656,9 @@ class _StopsClamps:
         self.sizes = QtWidgets.QWidget()
         self.sizeGrid = QtWidgets.QGridLayout(self.sizes)
         self.sizeGrid.setContentsMargins(0, 0, 0, 0)
+        self.sizeGrid.setColumnStretch(1, 1)
         self.sizeBoxes = {}
-        layout.addRow(translate("CAM_Workholding", "Size"), self.sizes)
+        layout.addRow(self.sizes)
         self.sameSide = QtWidgets.QCheckBox(
             translate("CAM_Workholding", "The others on its side too")
         )
@@ -511,9 +670,6 @@ class _StopsClamps:
         )
         self.sameSide.setChecked(True)
         layout.addRow("", self.sameSide)
-        self.picture = QtWidgets.QLabel()
-        self.picture.setAlignment(QtCore.Qt.AlignCenter)
-        layout.addRow(self.picture)
 
         # under it all, the table: in the Stock section
         self.table = QtWidgets.QPushButton(translate("CAM_Workholding", "Put a table under it"))
@@ -526,6 +682,7 @@ class _StopsClamps:
         )
 
         self.item.currentIndexChanged.connect(self.itemChanged)
+        self.browse.clicked.connect(self.browseClicked)
         self.add.clicked.connect(self.addClicked)
         self.list.currentCellChanged.connect(lambda *args: self.showChosen())
         self.list.itemSelectionChanged.connect(self.picked)
@@ -597,8 +754,9 @@ class _StopsClamps:
         self.table.clicked.connect(self.addTable)
 
     def showRow(self, field, shown):
-        """A row of the Placed section shown, or gone with its label and the space it takes."""
-        form = self.layouts[1]
+        """A row of the picked one's settings shown, or gone with its label and the space it
+        takes."""
+        form = self.settingsForm
         if hasattr(form, "setRowVisible"):
             form.setRowVisible(field, shown)
         else:
@@ -666,88 +824,176 @@ class _StopsClamps:
                     return None
         return None
 
-    def fillItems(self):
-        """What the row can put on a side: a dog or a fence, the clamps' files the Job uses, those
-        installed and those chosen since, then Browse; and the other Jobs' stops to share. The
-        one chosen kept."""
-        import Path.Workholding.Library as PathLibrary
-
-        keep = self.item.currentData()
+    def fillItems(self, choose=None):
+        """What the row can put on a side, each with its picture: the stops made here; the
+        clamps' files this Job uses; those browsed to and not placed yet; those used lately, the
+        latest first; and the other Jobs' stops to share. The one chosen kept, else choose, else
+        none: Select…"""
+        keep = choose if choose is not None else self.item.currentData()
         self.item.blockSignals(True)
         self.item.clear()
-        for label, which in (
-            (translate("CAM_Workholding", "Dog"), "Dog"),
-            (translate("CAM_Workholding", "Fence"), "Fence"),
-        ):
-            self.item.addItem(label, which)
-        Widgets.header(self.item, translate("CAM_Workholding", "From files"))
+
+        def add(label, which, picture=None):
+            pixmap = _picture(picture or which, ITEM_LIST_ICON)
+            if pixmap is not None:
+                self.item.addItem(QtGui.QIcon(pixmap), label, which)
+            else:
+                self.item.addItem(label, which)
+
+        Widgets.header(self.item, translate("CAM_Workholding", "Parametric"))
+        add(translate("CAM_Workholding", "Dog"), "Dog")
+        add(translate("CAM_Workholding", "Fence"), "Fence")
         seen = set()
-        files = list(self.files)
-        for found in PathLibrary.localItems("clamp"):
-            files.append((found.get("label", found["id"]), found["path"], None))
-        for name, path, _ in files:
+        used = []
+        for piece in Items.clampsOn(self.job):
+            which = getattr(piece, "Source", "")
+            if which and which not in Items.Classes and os.path.isfile(which):
+                real = os.path.realpath(which)
+                if real not in seen and Items.clampFile(which) is not None:
+                    seen.add(real)
+                    used.append(which)
+        if used:
+            Widgets.header(self.item, translate("CAM_Workholding", "In this Job"))
+            for path in used:
+                add(self._clampName(path, Items.clampFile(path)[0]), path)
+        browsed = []
+        for path in self.browsed:
             real = os.path.realpath(path)
-            if real in seen:
-                continue
-            seen.add(real)
-            self.item.addItem("   " + name, path)
-        self.item.addItem("   " + translate("CAM_Workholding", "Browse…"), "browse")
+            if real not in seen and os.path.isfile(path) and Items.clampFile(path) is not None:
+                seen.add(real)
+                browsed.append(path)
+        if browsed:
+            Widgets.header(self.item, translate("CAM_Workholding", "Browsed"))
+            for path in browsed:
+                add(self._clampName(path, Items.clampFile(path)[0]), path)
+        recent = []
+        for path in _recentClamps():
+            real = os.path.realpath(path)
+            if real not in seen and Items.clampFile(path) is not None:
+                seen.add(real)
+                recent.append(path)
+        if recent:
+            Widgets.header(self.item, translate("CAM_Workholding", "Recent"))
+            for path in recent:
+                add(self._clampName(path, Items.clampFile(path)[0]), path)
         owners = Items.shareableStops(self.job)
         if owners:
-            Widgets.header(self.item, translate("CAM_Workholding", "Share"))
+            Widgets.header(self.item, translate("CAM_Workholding", "Other Jobs"))
             for owner in owners:
-                self.item.addItem(
-                    "   "
-                    + translate("CAM_Workholding", "%s, in %s")
+                kind = type(getattr(owner, "Proxy", None)).__name__.replace("Object", "")
+                add(
+                    translate("CAM_Workholding", "%s, in %s")
                     % (owner.Label, PathWorkholding.memberOf(owner)[0].Label),
                     ("share", owner.Name),
+                    kind,
                 )
-        index = self.item.findData(keep) if keep not in (None, "browse") else -1
-        if index < 0:
-            index = self.item.findData("Dog")
-        self.item.setCurrentIndex(index)
-        self.lastItem = index
+        # Select… until one is chosen
+        self.item.setCurrentIndex(self.item.findData(keep) if keep is not None else -1)
         self.item.blockSignals(False)
         Widgets.fitList(self.item)
         self.updateRow()
 
     def itemChanged(self, *args):
-        """Browse chosen: the picker opened, what it chooses put in the list and chosen, else
-        what was chosen before."""
-        if self.item.currentData() == "browse":
-            import Path.Workholding.Gui.Library as LibraryGui
-
-            path = LibraryGui.getClamp()
-            index = self.addClampFile(path) if path else None
-            self.item.blockSignals(True)
-            self.item.setCurrentIndex(index if index is not None and index >= 0 else self.lastItem)
-            self.item.blockSignals(False)
-        self.lastItem = self.item.currentIndex()
+        """Another chosen: its picture and what it is shown; a piece placed picked no longer,
+        only one of the two shown at a time."""
+        if self.item.currentData() is not None and self.list.selectionModel().hasSelection():
+            self.list.clearSelection()
+            self.list.setCurrentCell(-1, -1)
         self.updateRow()
 
     def updateRow(self):
-        """One of another Job's stops is shared one at a time."""
-        share = isinstance(self.item.currentData(), (tuple, list))
+        """One of another Job's stops is shared one at a time; what Add puts in shown."""
+        which = self.item.currentData()
+        share = isinstance(which, (tuple, list))
         self.count.setEnabled(not share)
+        self.add.setEnabled(which is not None)
+        self.showAdding(which)
 
-    def addClampFile(self, path):
-        """A clamp's file put in the list if it is not there: its place in the list, None if it
-        holds no clamp."""
-        for _, known, _ in self.files:
-            if os.path.exists(known) and os.path.samefile(known, path):
-                self.fillItems()
-                return self.item.findData(known)
-        clamp = Items.clampFile(path)
-        if clamp is None:
+    def showAdding(self, which):
+        """What Add puts in, while one is chosen: its picture, its name and what it is, also on
+        the item box as it is pointed at."""
+        self.adding.setVisible(which is not None)
+        if which is None:
+            self.item.setToolTip(
+                translate("CAM_Workholding", "What goes there: pick a stop or clamp to add")
+            )
+            return
+        name = self.item.currentText().strip()
+        facts = ""
+        if isinstance(which, (tuple, list)):
+            facts = translate(
+                "CAM_Workholding", "A stop of another Job, shared: the part moves to it"
+            )
+        elif which in Items.Classes:
+            sizes = _madeSizes(which)
+            parts = [translate("CAM_Workholding", "Stop")]
+            if "Diameter" in sizes:
+                parts.append(translate("CAM_Workholding", "%s across") % _length(sizes["Diameter"]))
+            if "Length" in sizes:
+                parts.append(translate("CAM_Workholding", "%s long") % _length(sizes["Length"]))
+            if "Width" in sizes:
+                parts.append(translate("CAM_Workholding", "%s wide") % _length(sizes["Width"]))
+            if "Height" in sizes:
+                parts.append(translate("CAM_Workholding", "%s tall") % _length(sizes["Height"]))
+            parts.append(translate("CAM_Workholding", "sized once placed"))
+            facts = " · ".join(parts)
+        elif isinstance(which, str):
+            facts = self._clampFacts(which)
+        self.item.setToolTip("%s\n%s" % (name, facts) if facts else name)
+        picture = which
+        if isinstance(which, (tuple, list)):
+            owner = self.job.Document.getObject(which[1])
+            picture = type(getattr(owner, "Proxy", None)).__name__.replace("Object", "")
+        pixmap = _picture(picture, ITEM_PREVIEW)
+        self.addPicture.setPixmap(pixmap if pixmap is not None else QtGui.QPixmap())
+        self.addName.setText(name)
+        self.addFacts.setText(facts)
+
+    @staticmethod
+    def _clampFacts(path):
+        """A clamp's file said in a line: what it is, how wide, how far it reaches over the stock
+        and the stock it is made for, as much as it says."""
+        import Path.Workholding.Library as PathLibrary
+
+        facts = Items.clampFacts(path)
+        kinds = {
+            "HoldDown": translate("CAM_Workholding", "Edge clamp"),
+            "Push": translate("CAM_Workholding", "Side clamp"),
+            "Lever": translate("CAM_Workholding", "Hold-down clamp"),
+            "StrapKit": translate("CAM_Workholding", "Strap clamp kit"),
+        }
+        parts = [PathLibrary.about(path).get("type") or kinds.get(facts.get("Kind"), "")]
+        if "Width" in facts:
+            parts.append(translate("CAM_Workholding", "%s wide") % _length(facts["Width"]))
+        if "Reach" in facts:
+            parts.append(translate("CAM_Workholding", "reaches %s") % _length(facts["Reach"]))
+        low, high = facts.get("MinStockThickness"), facts.get("MaxStockThickness")
+        if low is not None and high is not None:
+            parts.append(
+                translate("CAM_Workholding", "stock %s to %s") % (_length(low), _length(high))
+            )
+        if "Thread" in facts:
+            parts.append(translate("CAM_Workholding", "%s studs") % facts["Thread"])
+        return " · ".join(p for p in parts if p)
+
+    def browseClicked(self):
+        """Browse: the picker opened, what it selects listed as browsed and chosen; used lately
+        once it is placed."""
+        import Path.Workholding.Gui.Library as LibraryGui
+
+        path = LibraryGui.getClamp()
+        if not path:
+            return
+        if Items.clampFile(path) is None:
             QtWidgets.QMessageBox.warning(
                 FreeCADGui.getMainWindow(),
                 translate("CAM_Workholding", "Clamps"),
                 translate("CAM_Workholding", "%s holds no clamp.") % os.path.basename(path),
             )
-            return None
-        self.files.append((self._clampName(path, clamp[0]), path, clamp[1]))
-        self.fillItems()
-        return self.item.findData(path)
+            return
+        real = os.path.realpath(path)
+        self.browsed = [path] + [p for p in self.browsed if os.path.realpath(p) != real]
+        self.fillItems(choose=path)
 
     @staticmethod
     def _clampName(path, name):
@@ -763,7 +1009,7 @@ class _StopsClamps:
         if isinstance(side, tuple):
             side = side[1]
         which = self.item.currentData()
-        if side is None or which in (None, "browse"):
+        if side is None or which is None:
             return
         if isinstance(which, str) and which not in Items.Classes and not self.job.Document.FileName:
             QtWidgets.QMessageBox.warning(
@@ -782,6 +1028,10 @@ class _StopsClamps:
             self.error.setText(str(e))
             return
         self.error.setText("")
+        if isinstance(which, str) and which not in Items.Classes:
+            _rememberClamp(which)
+        # added: Select… again
+        self.item.setCurrentIndex(-1)
         self.readIn(new[-1] if new else None)
 
     # read in from the Job
@@ -1023,6 +1273,12 @@ class _StopsClamps:
                 FreeCADGui.Selection.addSelection(piece)
         finally:
             self.syncing = False
+        # a piece placed picked: the row adding them back to Select…, only one of the two shown
+        if self.chosenAll() and self.item.currentIndex() >= 0:
+            self.item.blockSignals(True)
+            self.item.setCurrentIndex(-1)
+            self.item.blockSignals(False)
+            self.updateRow()
         self.showChosen()
 
     def showChosen(self):
@@ -1036,16 +1292,9 @@ class _StopsClamps:
             self.shownPiece = piece
         self.showPlace(piece)
         self.remove.setEnabled(piece is not None)
-        # nothing picked, nothing to place or take away: the row gone whole, its boxes left
-        # hidden with it
-        self.showRow(self.placeRow, piece is not None)
+        # a lever clamp is placed where it presses, not along its side
         lever = Lever.isLever(piece)
-        if piece is not None:
-            # a lever clamp is placed where it presses, not along its side: Remove only
-            for widget in self.placeAt + self.placeLabels:
-                widget.setVisible(not lever)
-            if self.positionLabel is not None:
-                self.positionLabel.setVisible(not lever)
+        self.showRow(self.placeRow, piece is not None and not lever)
         self.showLever(piece if lever else None)
         self.showSize(piece)
         self.dragChosen(piece)
@@ -1064,7 +1313,7 @@ class _StopsClamps:
         for axis, box in enumerate(self.placeAt):
             self.showValue(box, where[axis] if where is not None else 0.0)
             box.setEnabled(free and (axis == along or pushes))
-        self.showRow(self.slant, pushes)
+        self.showRow(self.slantRow, pushes)
         if pushes and angle is None:
             turned = getattr(piece, "Angle", None)
             angle = turned.Value if turned is not None else 0.0
@@ -1127,7 +1376,7 @@ class _StopsClamps:
             x, y = Lever.pressOf(self.job, piece)
             self.showValue(self.pressX, x)
             self.showValue(self.pressY, y)
-            self.showValue(self.angle, piece.Angle.Value)
+            self.showValue(self.angle, round(piece.Angle.Value, 6) + 0.0)
             self.presses.setCurrentIndex(max(0, self.presses.findData(piece.Presses)))
             self.leverClamp.clear()
             if kit:
@@ -1296,33 +1545,40 @@ class _StopsClamps:
             box.setEnabled(not fixed and not _bound(piece, name))
             box.valueChanged.connect(lambda *args, name=name, box=box: self.sizeTyped(name, box))
             box.editingFinished.connect(lambda box=box: self.typedDone(box, self.sizeTimer))
-            self.sizeGrid.addWidget(
-                QtWidgets.QLabel(translate("App::Property", name)), i // 2, (i % 2) * 2
-            )
-            self.sizeGrid.addWidget(box, i // 2, (i % 2) * 2 + 1)
+            # one to a row, beside its drawing
+            self.sizeGrid.addWidget(QtWidgets.QLabel(translate("App::Property", name)), i, 0)
+            self.sizeGrid.addWidget(box, i, 1)
             self.sizeBoxes[name] = box
         self.showRow(self.sizes, bool(names))
         self.showRow(self.sameSide, bool(names) and not fixed and bool(self.others(piece)))
+        self.alignFields()
         self.showPicture(piece)
 
-    def showPicture(self, piece):
-        """The picked one's picture: its drawing as it is now, or a clamp's own thumbnail."""
-        pixmap = None
-        if piece is not None:
-            pixmap = _pieceDrawing(piece, self.picture.palette())
-            source = getattr(piece, "Source", "")
-            if pixmap is None and source and os.path.isfile(source):
-                import Path.Workholding.Library as PathLibrary
+    def alignFields(self):
+        """Where it is, its angle and its sizes, their boxes all as wide and lined up: the names
+        in front of them in a column as wide as the widest."""
+        grids = (self.placeGrid, self.slantGrid, self.sizeGrid)
+        names = [
+            grid.itemAtPosition(row, 0).widget()
+            for grid in grids
+            for row in range(grid.rowCount())
+            if grid.itemAtPosition(row, 0) is not None
+        ]
+        wide = max((name.sizeHint().width() for name in names if name is not None), default=0)
+        for grid in grids:
+            grid.setColumnMinimumWidth(0, wide)
 
-                data = PathLibrary.thumbnail(source)
-                if data:
-                    pixmap = QtGui.QPixmap()
-                    pixmap.loadFromData(data)
-                    pixmap = pixmap.scaled(
-                        160, 160, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
-                    )
+    def showPicture(self, piece):
+        """The picked one's picture beside its settings: one made here its drawing as it is
+        now, its views one above the other; a clamp's own file its thumbnail."""
+        pixmap = _pieceDrawing(piece, self.picture.palette()) if piece is not None else None
+        source = getattr(piece, "Source", "") if piece is not None else ""
+        if pixmap is None and source:
+            pixmap = _picture(source, ITEM_PREVIEW)
         self.picture.setPixmap(pixmap if pixmap is not None else QtGui.QPixmap())
-        self.showRow(self.picture, pixmap is not None)
+        if pixmap is not None:
+            self.picture.setFixedSize(pixmap.size())
+        self.picture.setVisible(pixmap is not None)
 
     def sizeTyped(self, name, box):
         """A size typed or turned: put in once the edits stop coming."""
@@ -1439,7 +1695,9 @@ class _StopsClamps:
                 box.setProperty("rawValue", value)
                 box.blockSignals(False)
             self.angle.blockSignals(True)
-            self.angle.setProperty("rawValue", angle)
+            # the dragger turns in single precision: a hair either side of square shown as
+            # 0.00, not -0.00
+            self.angle.setProperty("rawValue", round(angle, 3) + 0.0)
             self.angle.blockSignals(False)
         else:
             self.showPlace(piece, at.Base, angle)
