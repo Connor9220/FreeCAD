@@ -522,6 +522,26 @@ def sideFrame(job, side):
     return FreeCAD.Placement(middle + out * half, _turnOf(along, inward)), length
 
 
+def _slots(job, group, frame, length):
+    """Where each of a side's pieces is spread to, in its frame: the side's even shares, each
+    pinned piece taking the one nearest where it is pinned, the others the rest in order, so
+    none is spread onto one moved there."""
+    slots = spread(length, len(group))
+    taken = {}
+    pinned = [p for p in group if getattr(p, "Pinned", False)]
+    # nearest first, so a piece pinned on a slot keeps it
+    wants = sorted(
+        (abs(_alongSide(job, p, frame, 0.0) - x), i, p.Name)
+        for p in pinned
+        for i, x in enumerate(slots)
+    )
+    for _, i, name in wants:
+        if name not in taken and i not in taken.values():
+            taken[name] = i
+    free = iter(i for i in range(len(slots)) if i not in taken.values())
+    return [slots[taken[p.Name]] if p.Name in taken else slots[next(free)] for p in group]
+
+
 def spread(length, count):
     """spread(length, count) ... where count pieces go along a side length long, from its middle:
     each in the middle of its even share of the side."""
@@ -984,7 +1004,7 @@ def _layout(job, sides=None):
             except ValueError as e:
                 Path.Log.warning(str(e))
                 continue
-            for piece, x in zip(group, spread(length, len(group))):
+            for piece, x in zip(group, _slots(job, group, frame, length)):
                 if piece not in shared:
                     _placeAt(job, piece, frame, _alongSide(job, piece, frame, x))
     job.Document.recompute()
