@@ -505,9 +505,9 @@ class _StopsClamps:
         row = QtWidgets.QHBoxLayout(self.addRow)
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(self.side, 1)
-        row.addWidget(self.count)
-        # Add and Cancel kept their own size at the right, a vise's row without side and count too
+        # how many, Add and Cancel kept their own size at the right, a vise's row without side too
         row.addStretch(0)
+        row.addWidget(self.count)
         row.addWidget(self.add)
         # what Add shows taken out, nothing put in
         self.cancelAdd = QtWidgets.QPushButton(translate("CAM_Workholding", "Cancel"))

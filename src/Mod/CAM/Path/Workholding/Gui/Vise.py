@@ -1183,12 +1183,23 @@ class TaskPanelVise:
     def open(self):
         # the toolpaths held back while open: moving the stock does not compute them each time
         self.frozen = _Frozen(self.job)
+        # the files open before: those of vises opened for the panel closed again after it
+        self.openBefore = set(FreeCAD.listDocuments())
         self.focusChanged()
 
     def unfreeze(self, kept):
         frozen = getattr(self, "frozen", None)
         if frozen is not None:
             frozen.release(kept)
+        # the files of vises opened for the panel and no longer used, closed
+        before = getattr(self, "openBefore", None)
+        if before is not None:
+            self.openBefore = None
+            for name in set(FreeCAD.listDocuments()) - before:
+                doc = FreeCAD.getDocument(name)
+                if doc is not self.job.Document:
+                    _closeIfUnused(doc)
+            FreeCADGui.setActiveDocument(self.job.Document.Name)
 
     def focusVise(self, vise):
         """The vise picked in Placed, its settings shown; None, a stop or clamp picked or none:
