@@ -523,13 +523,28 @@ def sideFrame(job, side):
 
 
 def _slots(job, group, frame, length):
-    """Where each of a side's pieces is spread to, in its frame: the side's even shares, each
-    pinned piece taking the one nearest where it is pinned, the others the rest in order, so
-    none is spread onto one moved there."""
-    slots = spread(length, len(group))
-    taken = {}
+    """Where each of a side's pieces is spread to, in its frame. None moved: the side's even
+    shares. One moved: from it to as far the other way from the side's middle, the next added
+    there and the others between, in the order they were added. Two or more moved: evenly from
+    the first moved to the last, the others between them. Each moved piece takes the place
+    nearest where it is, the others the rest in order. Too narrow a span for them side by side,
+    or fences, which share the side's length: the side's even shares."""
+    count = len(group)
     pinned = [p for p in group if getattr(p, "Pinned", False)]
-    # nearest first, so a piece pinned on a slot keeps it
+    slots = spread(length, count)
+    fences = any(isinstance(getattr(p, "Proxy", None), ObjectFence) for p in group)
+    if pinned and count > 1 and not fences:
+        at = [_alongSide(job, p, frame, 0.0) for p in pinned]
+        if len(pinned) == 1:
+            # from it to its mirror about the side's middle
+            start, end = at[0], -at[0]
+        else:
+            start, end = min(at), max(at)
+        low, high = _widthAlong(job, group[0])
+        if abs(end - start) >= (count - 1) * (high - low):
+            slots = [start + (end - start) * i / (count - 1) for i in range(count)]
+    taken = {}
+    # nearest first, so a piece pinned on a place keeps it
     wants = sorted(
         (abs(_alongSide(job, p, frame, 0.0) - x), i, p.Name)
         for p in pinned

@@ -320,18 +320,16 @@ class TestPathWorkholdingStops(_Stock):
         self.assertIs(Items.addTable(self.job), table)
 
     def test08_positioned_and_removed(self):
-        """A piece put at a Job X stays there as the side's count changes, the others spread to
-        the shares it leaves, none onto it; on the back, whose side runs against X, the same; when
-        the stock moves it goes with it, kept from the stock's near end. One taken away, the one
-        pinned stays."""
+        """A piece put at a Job X stays there as the side's count changes, the others spread from
+        it to as far the other way from the side's middle; on the back, whose side runs against
+        X, the same; when the stock moves it goes with it, kept from the stock's near end. One
+        taken away, the one pinned stays."""
         dogs = Items.setStops(self.job, [{"side": "-Y", "count": 2}])
-        first, second = self.middle(dogs[0]).x, self.middle(dogs[1]).x
         x = self.bb().XMin + 12
         Items.setPosition(dogs[1], x)
         self.assertRoughly(Items.positionOf(dogs[1]), x)
-        # moved onto the first's share: the first spread to the one it left
-        self.assertRoughly(self.middle(dogs[0]).x, second)
-        self.assertTrue(abs(first - x) < abs(second - x))
+        # the other as far from the middle the other way
+        self.assertRoughly(self.middle(dogs[0]).x, self.bb().XMax - 12)
         self.assertTouches(dogs[1])
         # pinned as the side is set again, with more
         dogs = Items.setStops(self.job, [{"side": "-Y", "count": 3}])
