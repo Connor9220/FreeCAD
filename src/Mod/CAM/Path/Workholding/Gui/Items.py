@@ -445,9 +445,9 @@ class _StockDrag(_Drag):
     coordinates, the WCS going with the stock, so its toolpaths stand: what holds it moved the
     other way instead, the vises of this Job, its stops and clamps and the table, and the view
     with them, so the stock is seen where it was let go. Turned, a quarter at a time: the
-    machine's X and Y do not turn with it, so the part is turned in the Job, its stock with it,
-    and the WCS put back on the same corner of the stock; what holds it stays where it is but
-    for how far the stock slid. A vise seated again; the stops and clamps left where they
+    machine's X and Y do not turn with it, so the part is turned in the Job about the stock's
+    middle, its stock with it, the WCS left where it is, as the Job's own Rotate leaves it; what
+    holds it stays where it is but for how far the stock slid. A vise seated again; the stops and clamps left where they
     were, free. Free: nothing seated."""
 
     def begin(self, piece):
@@ -546,23 +546,12 @@ class _StockDrag(_Drag):
             return
         pivot = self.stops.dragPivot
         slid = moved.multVec(pivot) - pivot
-        before = Items.stockBox(self.job)
         # left free first: placed by the part's own sides, they would turn with it
         self.leaveFree()
+        # turned as the Job's own Rotate turns the part, the WCS left where it is; what holds it
+        # moved back by as far as the stock slid
         self.turnPart(quarters, pivot)
-        # the WCS on the same corner of the stock, as far across it as it was: the part moved
-        # to it, what holds it by as much less how far the stock slid
-        after = Items.stockBox(self.job)
-        back = FreeCAD.Vector()
-        for axis, (low, length) in enumerate(
-            ((before.XMin, before.XLength), (before.YMin, before.YLength))
-        ):
-            across = -low / length if length > 1e-9 else 0.0
-            back[axis] = -(
-                (after.XMin, after.YMin)[axis] + across * (after.XLength, after.YLength)[axis]
-            )
-        PathWorkholding.moveModel(self.job, back)
-        self.carry(FreeCAD.Placement(back - slid, FreeCAD.Rotation()), not free)
+        self.carry(FreeCAD.Placement(-slid, FreeCAD.Rotation()), not free)
 
     def leaveFree(self):
         """The Job's own stops and clamps left where they are, not placed against the stock."""
