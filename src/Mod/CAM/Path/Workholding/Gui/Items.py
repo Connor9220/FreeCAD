@@ -288,12 +288,28 @@ def _viseFile(vise):
 
 class _ViseArea(QtWidgets.QWidget if FreeCAD.GuiUp else object):
     """A vise's settings in the Placed section, where a clamp's show: its sections, each under a
-    heading of its own."""
+    heading of its own, its picture beside them."""
 
     def __init__(self):
         super().__init__()
-        self.column = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout(self)
+        grid.setContentsMargins(0, 0, 0, 0)
+        self.picture = QtWidgets.QLabel()
+        self.picture.setAlignment(QtCore.Qt.AlignCenter)
+        grid.addWidget(self.picture, 0, 0, QtCore.Qt.AlignTop)
+        self.column = QtWidgets.QVBoxLayout()
         self.column.setContentsMargins(0, 0, 0, 0)
+        grid.addLayout(self.column, 0, 1)
+        grid.setColumnStretch(1, 1)
+
+    def showPicture(self, vise):
+        """The vise's thumbnail from its file, none if it has none."""
+        path = _viseFile(vise) if vise is not None else None
+        pixmap = _picture(path, ITEM_PREVIEW) if path else None
+        self.picture.setPixmap(pixmap if pixmap is not None else QtGui.QPixmap())
+        if pixmap is not None:
+            self.picture.setFixedSize(pixmap.size())
+        self.picture.setVisible(pixmap is not None)
 
     def addSections(self, sections):
         for title, widget in sections:
@@ -443,11 +459,14 @@ class _StopsClamps:
         self.viseSeat.setCurrentIndex(self.viseSeat.findData("-Z"))
         self.viseJawsFor("+Y")
         self.viseRows.setVisible(False)
-        row = QtWidgets.QHBoxLayout()
+        # the side, how many and Add, once something is picked to add
+        self.addRow = QtWidgets.QWidget()
+        row = QtWidgets.QHBoxLayout(self.addRow)
+        row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(self.side, 1)
         row.addWidget(self.count)
         row.addWidget(self.add)
-        layout.addRow(row)
+        layout.addRow(self.addRow)
         # what Add puts in: its picture and what it is, while one is chosen
         self.addPicture = QtWidgets.QLabel()
         self.addPicture.setFixedSize(ITEM_PREVIEW, ITEM_PREVIEW)
@@ -1073,6 +1092,7 @@ class _StopsClamps:
         self.count.setEnabled(kind != "share")
         self.viseRows.setVisible(kind == "vise")
         self.add.setEnabled(which is not None)
+        self.addRow.setVisible(which is not None)
         self.showAdding(which)
         self.previewVise()
 
@@ -1510,6 +1530,7 @@ class _StopsClamps:
         vise = piece is not None and PathWorkholding.isVise(piece)
         self.remove.setEnabled(piece is not None)
         self.settings.setVisible(not vise)
+        self.viseArea.showPicture(piece if vise else None)
         adding = self.panel.adding
         if piece is not None and adding and piece is not adding.vise:
             # a placed piece picked: the vise only picked in Add taken out

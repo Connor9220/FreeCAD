@@ -963,12 +963,13 @@ class TaskPanelVise:
         # what it comes to, at the end of the seat: why it cannot be seated, a vise too small
         # for the stock; else the grip, how much stands above the jaws, and how far the model's
         # bottom is above them, the clearance the tools have to cut it whole
-        self.fit = Widgets.Note()
+        # not shown for now: too much under the parallels; why it cannot be seated still logged
+        self.fit = Widgets.Note(shown=False)
         self.fit.setStyleSheet("color: %s" % ERROR_TEXT_COLOR)
         layout.addRow("", self.fit)
-        self.other = Widgets.Note()
+        self.other = Widgets.Note(shown=False)
         layout.addRow("", self.other)
-        self.clearance = Widgets.Note()
+        self.clearance = Widgets.Note(shown=False)
         self.clearance.setToolTip(
             translate(
                 "CAM_SeatInVise",
@@ -1082,7 +1083,7 @@ class TaskPanelVise:
         # a vise being added shows in the view; its settings once Add has put it in
         self.stops.viseArea.setVisible(shown and not self.adding)
         for note in (self.fit, self.other, self.clearance):
-            note.setVisible(shown and bool(note.text()))
+            note.setVisible(note.shown and shown and bool(note.text()))
         if not shown:
             self.seatFaces.hide()
             return

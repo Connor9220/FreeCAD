@@ -99,16 +99,18 @@ def sides():
 
 
 class Note(QtWidgets.QLabel if FreeCAD.GuiUp else object):
-    """A line of the panel saying how things stand: wrapped, and gone while it says nothing."""
+    """A line of the panel saying how things stand: wrapped, and gone while it says nothing;
+    one not shown, never shown, what it says still read."""
 
-    def __init__(self):
+    def __init__(self, shown=True):
         super().__init__()
+        self.shown = shown
         self.setWordWrap(True)
         self.setVisible(False)
 
     def setText(self, text):
         super().setText(text)
-        self.setVisible(bool(text))
+        self.setVisible(self.shown and bool(text))
 
 
 def combo(wide=False, below=False):
