@@ -967,6 +967,53 @@ def getVise(parent=None):
     return None
 
 
+class PickWindow(QtWidgets.QDialog):
+    """The vises and clamps, each a tab, to pick one from, on this computer or from a library."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent or FreeCADGui.getMainWindow())
+        self.setWindowTitle(translate("CAM_AddVise", "Workholding Library"))
+        self.setWindowIcon(QtGui.QIcon(":/icons/CAM_Vise.svg"))
+        self.resize(600, 620)
+        self.downloaded = None
+        layout = QtWidgets.QVBoxLayout(self)
+        self.tabs = QtWidgets.QTabWidget()
+        self.browsers = []
+        for kind, text in (
+            ("vise", translate("CAM_AddVise", "Vises")),
+            ("clamp", translate("CAM_AddVise", "Clamps")),
+        ):
+            browser = LibraryDialog(self, kind=kind)
+            browser.setWindowFlags(QtCore.Qt.Widget)
+            # its Select picks it for this window; its Cancel closes this window
+            browser.accepted.connect(lambda b=browser: self.picked(b))
+            browser.rejected.connect(self.reject)
+            self.browsers.append(browser)
+            self.tabs.addTab(browser, QtGui.QIcon(_words(kind)["icon"]), text)
+        layout.addWidget(self.tabs, 1)
+
+    def picked(self, browser):
+        self.downloaded = browser.downloaded
+        self.accept()
+
+    def done(self, result):
+        # each tab let go, what it still fetches coming to nothing; quietly, its Cancel would
+        # close this window again
+        for browser in self.browsers:
+            browser.blockSignals(True)
+            browser.done(result)
+        super().done(result)
+
+
+def getWorkholding(parent=None):
+    """getWorkholding(parent=None) ... the path of a vise or clamp chosen, on this computer or
+    from a library, downloaded; None if none was."""
+    dialog = PickWindow(parent)
+    if dialog.exec() == QtWidgets.QDialog.Accepted:
+        return dialog.downloaded
+    return None
+
+
 def getClamp(parent=None):
     """getClamp(parent=None) ... the path of a clamp chosen, on this computer or from a library,
     downloaded; None if none was."""

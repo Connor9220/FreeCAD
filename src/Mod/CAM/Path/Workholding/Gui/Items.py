@@ -257,6 +257,56 @@ def _picture(which, size):
     return pixmap
 
 
+def _kindOf(which):
+    """What an entry of the Add box is: "made", a stop made here; "clamp", a clamp's own file;
+    "share", another Job's stop; "vise", a vise's own file; "viseshare", another Job's vise; None
+    for none."""
+    if which is None:
+        return None
+    if isinstance(which, (tuple, list)):
+        return which[0]
+    return "made" if which in Items.Classes else "clamp"
+
+
+def _fileKind(path):
+    """ "vise" or "clamp", as the file at path says of itself; None if it is neither."""
+    import Path.Workholding.Library as PathLibrary
+
+    return PathLibrary.about(path).get("kind") if os.path.isfile(path) else None
+
+
+def _viseFile(vise):
+    """The file a vise of the Job was added from, None if it is not found."""
+    import Path.Workholding.Source as PathSource
+
+    path = getattr(vise, "SourceFile", "")
+    if path and os.path.isfile(path):
+        return path
+    found = PathSource.linkedDocuments(vise)
+    return found[0].FileName if found and found[0].FileName else None
+
+
+class _ViseArea(QtWidgets.QWidget if FreeCAD.GuiUp else object):
+    """A vise's settings in the Placed section, where a clamp's show: its sections, each under a
+    heading of its own."""
+
+    def __init__(self):
+        super().__init__()
+        self.column = QtWidgets.QVBoxLayout(self)
+        self.column.setContentsMargins(0, 0, 0, 0)
+
+    def addSections(self, sections):
+        for title, widget in sections:
+            heading = QtWidgets.QLabel(title)
+            font = heading.font()
+            font.setBold(True)
+            heading.setFont(font)
+            self.column.addWidget(heading)
+            if widget.layout() is not None:
+                widget.layout().setContentsMargins(0, 0, 0, 0)
+            self.column.addWidget(widget)
+
+
 class _Sizes:
     """What a stop made here is given as it is made, its sizes, gathered without making one."""
 
@@ -372,6 +422,27 @@ class _StopsClamps:
         row.addWidget(self.item, 1)
         row.addWidget(self.browse)
         layout.addRow(row)
+        # a vise to add: how the stock first sits in it, the side on its bottom and the side
+        # against its fixed jaw; changed after it is added with the rest of its settings
+        self.viseSeat = QtWidgets.QComboBox()
+        self.viseSeat.setToolTip(
+            translate("CAM_Workholding", "The side of the part on the floor or the parallels")
+        )
+        for label, direction in Widgets.sides():
+            self.viseSeat.addItem(label, direction)
+        self.viseJaw = QtWidgets.QComboBox()
+        self.viseJaw.setToolTip(
+            translate("CAM_Workholding", "The side of the part against the fixed jaw")
+        )
+        self.viseRows = QtWidgets.QWidget()
+        rows = QtWidgets.QFormLayout(self.viseRows)
+        rows.setContentsMargins(0, 0, 0, 0)
+        rows.addRow(translate("CAM_Workholding", "Bottom side"), self.viseSeat)
+        rows.addRow(translate("CAM_Workholding", "Fixed jaw side"), self.viseJaw)
+        layout.addRow(self.viseRows)
+        self.viseSeat.setCurrentIndex(self.viseSeat.findData("-Z"))
+        self.viseJawsFor("+Y")
+        self.viseRows.setVisible(False)
         row = QtWidgets.QHBoxLayout()
         row.addWidget(self.side, 1)
         row.addWidget(self.count)
@@ -483,6 +554,10 @@ class _StopsClamps:
         grid.addWidget(fields, 0, 1, QtCore.Qt.AlignTop)
         grid.setColumnStretch(1, 1)
         layout.addRow(self.settings)
+        # a vise picked: its settings in place of a clamp's
+        self.viseArea = _ViseArea()
+        layout.addRow(self.viseArea)
+        self.viseArea.setVisible(False)
         layout = self.settingsForm
         # where it is: the Job's X and Y, the one across its side greyed, kept against the stock
         self.placeAt = []
@@ -751,6 +826,7 @@ class _StopsClamps:
             lambda *args: self.later("BoltLength", self.boltLength.property("rawValue"))
         )
         self.remove.clicked.connect(self.removeChosen)
+        self.viseSeat.currentIndexChanged.connect(lambda *args: self.viseJawsFor())
         self.table.clicked.connect(self.addTable)
 
     def showRow(self, field, shown):
@@ -774,6 +850,23 @@ class _StopsClamps:
             field = holder
         layout.addRow(label, field)
         self.leverRows.append(field)
+
+    def viseJawsFor(self, keep=None):
+        """The sides that can be against a vise's fixed jaw, square to the one on its bottom:
+        keep, or the one there was, if it still can."""
+        seat = self.viseSeat.currentData()
+        keep = keep or self.viseJaw.currentData()
+        self.viseJaw.blockSignals(True)
+        self.viseJaw.clear()
+        for label, direction in Widgets.sides():
+            if (
+                abs(PathWorkholding.Directions[direction].dot(PathWorkholding.Directions[seat]))
+                < 1e-9
+            ):
+                self.viseJaw.addItem(label, direction)
+        found = self.viseJaw.findData(keep)
+        self.viseJaw.setCurrentIndex(found if found >= 0 else 0)
+        self.viseJaw.blockSignals(False)
 
     def changed(self, *args):
         """Something the panel says changed: put in a moment after, not as it is read in."""
@@ -845,6 +938,12 @@ class _StopsClamps:
         add(translate("CAM_Workholding", "Fence"), "Fence")
         seen = set()
         used = []
+        vises = []
+        for vise in PathWorkholding.vises(self.job):
+            path = _viseFile(vise)
+            if path and os.path.realpath(path) not in seen:
+                seen.add(os.path.realpath(path))
+                vises.append(path)
         for piece in Items.clampsOn(self.job):
             which = getattr(piece, "Source", "")
             if which and which not in Items.Classes and os.path.isfile(which):
@@ -852,33 +951,61 @@ class _StopsClamps:
                 if real not in seen and Items.clampFile(which) is not None:
                     seen.add(real)
                     used.append(which)
-        if used:
-            Widgets.header(self.item, translate("CAM_Workholding", "In this Job"))
-            for path in used:
+
+        def addFile(path):
+            """A vise's or a clamp's own file, as the entry its kind is."""
+            if _fileKind(path) == "vise":
+                add(self._clampName(path, os.path.basename(path)), ("vise", path), path)
+            else:
                 add(self._clampName(path, Items.clampFile(path)[0]), path)
+
+        def usable(path):
+            return os.path.isfile(path) and (
+                _fileKind(path) == "vise" or Items.clampFile(path) is not None
+            )
+
+        if used or vises:
+            Widgets.header(self.item, translate("CAM_Workholding", "In this Job"))
+            for path in vises + used:
+                addFile(path)
         browsed = []
         for path in self.browsed:
             real = os.path.realpath(path)
-            if real not in seen and os.path.isfile(path) and Items.clampFile(path) is not None:
+            if real not in seen and usable(path):
                 seen.add(real)
                 browsed.append(path)
         if browsed:
             Widgets.header(self.item, translate("CAM_Workholding", "Browsed"))
             for path in browsed:
-                add(self._clampName(path, Items.clampFile(path)[0]), path)
+                addFile(path)
         recent = []
         for path in _recentClamps():
             real = os.path.realpath(path)
-            if real not in seen and Items.clampFile(path) is not None:
+            if real not in seen and usable(path):
                 seen.add(real)
                 recent.append(path)
         if recent:
             Widgets.header(self.item, translate("CAM_Workholding", "Recent"))
             for path in recent:
-                add(self._clampName(path, Items.clampFile(path)[0]), path)
+                addFile(path)
+        import Path.Workholding.Gui.Vise as ViseGui
+
         owners = Items.shareableStops(self.job)
-        if owners:
+        viseOwners = ViseGui._shareable(self.job)
+        if owners or viseOwners:
             Widgets.header(self.item, translate("CAM_Workholding", "Other Jobs"))
+            for owner in viseOwners:
+                free = PathWorkholding.freeStations(owner)
+                add(
+                    translate("CAM_Workholding", "%s, in %s (station %s free)")
+                    % (
+                        owner.Label,
+                        PathWorkholding.memberOf(owner)[0].Label,
+                        ", ".join(str(n) for n in free),
+                    ),
+                    ("viseshare", owner.Name),
+                    _viseFile(owner),
+                )
             for owner in owners:
                 kind = type(getattr(owner, "Proxy", None)).__name__.replace("Object", "")
                 add(
@@ -888,10 +1015,31 @@ class _StopsClamps:
                     kind,
                 )
         # Select… until one is chosen
-        self.item.setCurrentIndex(self.item.findData(keep) if keep is not None else -1)
+        self.item.setCurrentIndex(self.findItem(keep))
         self.item.blockSignals(False)
         Widgets.fitList(self.item)
         self.updateRow()
+
+    def findItem(self, which):
+        """The row of the Add box holding which, -1 if none: a file the same file however its
+        path is written, an entry of a kind and its file or Job's piece the same."""
+        if which is None:
+            return -1
+
+        def same(a, b):
+            if isinstance(a, (tuple, list)) and isinstance(b, (tuple, list)):
+                return len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))
+            if isinstance(a, str) and isinstance(b, str):
+                if a == b:
+                    return True
+                return os.path.isfile(a) and os.path.isfile(b) and os.path.samefile(a, b)
+            return a == b
+
+        for row in range(self.item.count()):
+            data = self.item.itemData(row)
+            if data is not None and same(data, which):
+                return row
+        return -1
 
     def itemChanged(self, *args):
         """Another chosen: its picture and what it is shown; a piece placed picked no longer,
@@ -904,8 +1052,13 @@ class _StopsClamps:
     def updateRow(self):
         """One of another Job's stops is shared one at a time; what Add puts in shown."""
         which = self.item.currentData()
-        share = isinstance(which, (tuple, list))
-        self.count.setEnabled(not share)
+        kind = _kindOf(which)
+        vise = kind in ("vise", "viseshare")
+        # a vise goes where the stock is, not on a side: how the stock sits in it instead
+        self.side.setVisible(not vise)
+        self.count.setVisible(not vise)
+        self.count.setEnabled(kind != "share")
+        self.viseRows.setVisible(kind == "vise")
         self.add.setEnabled(which is not None)
         self.showAdding(which)
 
@@ -920,7 +1073,14 @@ class _StopsClamps:
             return
         name = self.item.currentText().strip()
         facts = ""
-        if isinstance(which, (tuple, list)):
+        kind = _kindOf(which)
+        if kind == "vise":
+            facts = self._viseFacts(which[1])
+        elif kind == "viseshare":
+            facts = translate(
+                "CAM_Workholding", "A vise of another Job, shared: the part goes in a station free"
+            )
+        elif isinstance(which, (tuple, list)):
             facts = translate(
                 "CAM_Workholding", "A stop of another Job, shared: the part moves to it"
             )
@@ -941,13 +1101,36 @@ class _StopsClamps:
             facts = self._clampFacts(which)
         self.item.setToolTip("%s\n%s" % (name, facts) if facts else name)
         picture = which
-        if isinstance(which, (tuple, list)):
+        if kind == "vise":
+            picture = which[1]
+        elif kind == "viseshare":
+            picture = _viseFile(self.job.Document.getObject(which[1]))
+        elif isinstance(which, (tuple, list)):
             owner = self.job.Document.getObject(which[1])
             picture = type(getattr(owner, "Proxy", None)).__name__.replace("Object", "")
         pixmap = _picture(picture, ITEM_PREVIEW)
         self.addPicture.setPixmap(pixmap if pixmap is not None else QtGui.QPixmap())
         self.addName.setText(name)
         self.addFacts.setText(facts)
+
+    @staticmethod
+    def _viseFacts(path):
+        """A vise's file said in a line: what it is, who makes it, how wide and tall its jaws
+        are and how far it opens, as much as it says."""
+        import Path.Workholding.Library as PathLibrary
+
+        about = PathLibrary.about(path)
+        settings = about.get("settings") or {}
+        parts = [translate("CAM_Workholding", "Vise"), about.get("maker", "")]
+        if settings.get("jawWidth"):
+            parts.append(
+                translate("CAM_Workholding", "jaws %s wide") % _length(settings["jawWidth"])
+            )
+        if settings.get("maxOpening"):
+            parts.append(
+                translate("CAM_Workholding", "opens to %s") % _length(settings["maxOpening"])
+            )
+        return " · ".join(p for p in parts if p)
 
     @staticmethod
     def _clampFacts(path):
@@ -981,10 +1164,10 @@ class _StopsClamps:
         once it is placed."""
         import Path.Workholding.Gui.Library as LibraryGui
 
-        path = LibraryGui.getClamp()
+        path = LibraryGui.getWorkholding()
         if not path:
             return
-        if Items.clampFile(path) is None:
+        if _fileKind(path) != "vise" and Items.clampFile(path) is None:
             QtWidgets.QMessageBox.warning(
                 FreeCADGui.getMainWindow(),
                 translate("CAM_Workholding", "Clamps"),
@@ -993,7 +1176,7 @@ class _StopsClamps:
             return
         real = os.path.realpath(path)
         self.browsed = [path] + [p for p in self.browsed if os.path.realpath(p) != real]
-        self.fillItems(choose=path)
+        self.fillItems(choose=("vise", path) if _fileKind(path) == "vise" else path)
 
     @staticmethod
     def _clampName(path, name):
@@ -1005,10 +1188,17 @@ class _StopsClamps:
     def addClicked(self):
         """What the row says put on its side, spread along it; a clamp's file in a document not
         saved refused first: its parts are linked."""
+        which = self.item.currentData()
+        if _kindOf(which) in ("vise", "viseshare"):
+            if self.panel.addVise(which, self.viseSeat.currentData(), self.viseJaw.currentData()):
+                if which[0] == "vise":
+                    _rememberClamp(which[1])
+                self.item.setCurrentIndex(-1)
+                self.updateRow()
+            return
         side = self.side.currentData()
         if isinstance(side, tuple):
             side = side[1]
-        which = self.item.currentData()
         if side is None or which is None:
             return
         if isinstance(which, str) and which not in Items.Classes and not self.job.Document.FileName:
@@ -1130,8 +1320,11 @@ class _StopsClamps:
         keep = keep.Name if keep is not None else None
         pieces = Items.stopsOn(self.job) + Items.clampsOn(self.job)
         pieces += [o for o in Items.itemsOf(self.job) if o not in pieces]
+        pieces = PathWorkholding.vises(self.job) + pieces
 
         def order(piece):
+            if PathWorkholding.isVise(piece):
+                return (-1, 0.0)
             edge = Items.edgeOf(self.job, piece)
             if edge is None:
                 return (len(Items.AllSides), 0.0)
@@ -1290,8 +1483,14 @@ class _StopsClamps:
             self.slantTimer.stop()
             self.typing = None
             self.shownPiece = piece
-        self.showPlace(piece)
+        # a vise picked: its settings in place of a clamp's
+        vise = piece is not None and PathWorkholding.isVise(piece)
         self.remove.setEnabled(piece is not None)
+        self.settings.setVisible(not vise)
+        self.panel.focusVise(piece if vise else None)
+        if vise:
+            piece = None
+        self.showPlace(piece)
         # a lever clamp is placed where it presses, not along its side
         lever = Lever.isLever(piece)
         self.showRow(self.placeRow, piece is not None and not lever)
@@ -1752,7 +1951,16 @@ class _StopsClamps:
         self.panel.begin()
         FreeCADGui.Selection.clearSelection()
         for piece in pieces:
-            if piece.isAttachedToDocument():
+            if not piece.isAttachedToDocument():
+                continue
+            if PathWorkholding.isVise(piece):
+                if piece is self.panel.existing:
+                    self.panel.focusVise(None)
+                PathWorkholding.release(piece)
+                doc = piece.Document
+                for obj in list(piece.Group) + [piece]:
+                    doc.removeObject(obj.Name)
+            else:
                 Items.removePiece(piece)
         self.readIn()
 

@@ -448,26 +448,6 @@ def _imperial():
 _header = Widgets.header
 
 
-class _TabChoice:
-    """One tab of a tab bar, asked and set as a radio button is: checked when it is the one
-    picked."""
-
-    def __init__(self, bar, text, icon, data, tip=None):
-        self.bar = bar
-        self.data = data
-        self.row = bar.addTab(icon, text)
-        bar.setTabData(self.row, data)
-        if tip:
-            bar.setTabToolTip(self.row, tip)
-
-    def isChecked(self):
-        return self.bar.currentIndex() == self.row
-
-    def setChecked(self, checked):
-        if checked:
-            self.bar.setCurrentIndex(self.row)
-
-
 class _ComboChoice:
     """One choice of a drop-down, asked and set as a radio button is: checked when it is the
     one picked, grayed or left out of the list."""
@@ -839,6 +819,11 @@ class TaskPanelVise:
         row.addWidget(self.vise, 1)
         row.addWidget(self.browse)
         layout.addRow(translate("CAM_SeatInVise", "Vise"), row)
+        # vises are picked in Add and in Placed with the stops and clamps: this row is the
+        # panel's own, not shown
+        for widget in (layout.labelForField(row), self.vise, self.browse):
+            if widget is not None:
+                widget.setVisible(False)
         # the station of a vise of several the stock goes in: its own, or one free
         self.station = QtWidgets.QComboBox()
         self.station.setToolTip(
@@ -1023,35 +1008,17 @@ class TaskPanelVise:
         )
         layout.addRow(translate("CAM_SeatInVise", "What moves"), self.moves)
 
-        # what holds the stock, a section of its own above the rest: a vise, or stops and clamps
-        holds = QtWidgets.QWidget()
-        holds.setWindowTitle(translate("CAM_Workholding", "Workholding"))
-        holds.setWindowIcon(QtGui.QIcon(":/icons/CAM_Job.svg"))
-        holdsLayout = QtWidgets.QFormLayout(holds)
-        # a tab each: the sections below are what the tab picked shows
-        self.holds = QtWidgets.QTabBar()
-        self.holds.setExpanding(True)
-        self.holds.setDrawBase(False)
-        self.byVise = _TabChoice(
-            self.holds,
-            translate("CAM_Workholding", "Vises"),
-            QtGui.QIcon(),
-            "vise",
-            translate("CAM_Workholding", "The stock seated in a vise"),
-        )
-        self.byStops = _TabChoice(
-            self.holds,
-            translate("CAM_Workholding", "Clamps"),
-            QtGui.QIcon(),
-            "stops",
-            translate("CAM_Workholding", "The stock on the table, pushed onto stops and clamped"),
-        )
-        holdsLayout.addRow(self.holds)
         self.stops = _StopsClamps(self, ui)
-        # the table it stands on, with the stops and clamps
+        # the table under it waits; the button is kept, not shown
         sections[1][1].addRow(self.stops.table)
-        self.form = [holds] + self.form + self.stops.forms
-        _alignLabels([layout for _, layout in sections] + [holdsLayout] + self.stops.layouts)
+        self.stops.table.setVisible(False)
+        # the vise's sections inside Placed, where a clamp's settings show, each under a
+        # heading of its own
+        self.stops.viseArea.addSections(
+            [(section.windowTitle(), section) for section, _ in sections]
+        )
+        self.form = self.stops.forms
+        _alignLabels([layout for _, layout in sections] + self.stops.layouts)
 
         self.vise.currentIndexChanged.connect(self.viseChanged)
         self.browse.clicked.connect(self.browseVise)
@@ -1084,44 +1051,73 @@ class TaskPanelVise:
         ):
             signal.connect(self.changed)
         self.updateGrip()
-        # what the Job's Workholding holds: a vise, else stops and clamps, else a vise to add
-        stopsFirst = piece is not None or (vise is None and not vises and Items.itemsOf(job))
-        (self.byStops if stopsFirst else self.byVise).setChecked(True)
+        # the vise asked for picked in Placed, else the piece asked for, else none
         self.stops.readIn()
         if piece is not None:
             self.stops.fillList(PathWorkholding.memberOf(piece)[1])
-        self.holds.currentChanged.connect(self.holdsChanged)
-        self.holdsChanged()
-        # the sections in their task boxes by then, hidden whole
-        QtCore.QTimer.singleShot(0, self.holdsChanged)
+        elif vise is not None:
+            self.stops.fillList(vise)
+        else:
+            self.focusVise(None)
 
     def open(self):
-        self.holdsChanged()
+        self.focusChanged()
 
-    def holdsChanged(self, *args):
-        """The sections of what holds the stock shown: the vise's, or the stops' and clamps'; the
-        stock's for both, what it stands on as they have it, the vise's floor, its parallels or a
-        step, or the table."""
-        stops = self.byStops.isChecked()
-        for form in (self.viseForm, self.positionForm):
-            _showSection(form, not stops)
-        for form in self.stops.forms:
-            _showSection(form, stops)
-        self.stops.table.setVisible(stops)
-        for widget in (self.standsOnLabel, self.standsOn):
-            widget.setVisible(not stops)
+    def focusVise(self, vise):
+        """The vise picked in Placed, its settings shown; None, a stop or clamp picked or none:
+        the vise's settings gone. What was being changed of the vise before stays pending."""
+        if vise is not None and not self.adding and vise is not self.existing:
+            self.existing = vise
+            PathWorkholding.refreshSettings(vise)
+            self.updateGrip()
+        elif vise is None and not self.adding:
+            self.existing = None
+        self.focusChanged()
+
+    def focusChanged(self, *args):
+        """The vise's sections shown while a vise is the one being added or picked; what the
+        stock stands on as it has it, its floor, its parallels or a step."""
+        job, vise = self.current()
+        shown = vise is not None
+        self.stops.viseArea.setVisible(shown)
         for note in (self.fit, self.other, self.clearance):
-            note.setVisible(not stops and bool(note.text()))
-        if stops:
-            self.parallels.setShown(False)
-            self.step.setVisible(False)
+            note.setVisible(shown and bool(note.text()))
+        if not shown:
             self.seatFaces.hide()
             return
         self.heightByChanged()
-        job, vise = self.current()
-        if vise is not None:
-            self.updateFit()
-            self.showSeat()
+        self.updateFit()
+        self.showSeat()
+
+    def addVise(self, which, seat, jaw):
+        """Add's vise put in: from its file, or another Job's shared; seated with the side of
+        the stock on its bottom and the side against its fixed jaw asked for, kept, and picked in
+        Placed. True if it was."""
+        kind, value = which
+        if kind == "viseshare":
+            owner = self.job.Document.getObject(value)
+            index = next(
+                (i for i, e in enumerate(self.entries) if e[0] == "share" and e[1] == owner), None
+            )
+            if owner is None or index is None:
+                return False
+            self.shareChanged(index, owner)
+        else:
+            self.addFile(value)
+        if not self.adding or self.adding.vise is None:
+            return False
+        if kind != "viseshare" and seat is not None:
+            self.seat.setCurrentIndex(max(0, self.seat.findData(seat)))
+            self.seatChanged(jaw=jaw)
+        if not self.apply():
+            return False
+        vise = self.adding.vise
+        self.adding.finish(keep=True)
+        self.adding = None
+        self.existing = vise
+        self.updateGrip()
+        self.stops.readIn(vise)
+        return True
 
     def begin(self):
         """The step the stops' and clamps' changes go into, opened if it is not: pending until
@@ -1759,16 +1755,21 @@ class TaskPanelVise:
 
     def clicked(self, button):
         if button == QtWidgets.QDialogButtonBox.Apply:
-            if self.byStops.isChecked():
-                if self.applyStops():
-                    self.stops.readIn()
-            elif self.apply():
-                # on from where it now is
-                self.updateGrip()
+            if self.applyAll():
+                self.stops.readIn(self.existing)
+
+    def applyAll(self):
+        """The stops and clamps kept, and the vise picked seated as its settings say."""
+        if not self.applyStops():
+            return False
+        job, vise = self.current()
+        if vise is not None and (self.pending or self.adding):
+            return self.apply()
+        return True
 
     def accept(self):
         self.previewTimer.stop()
-        if self.applyStops() if self.byStops.isChecked() else self.apply():
+        if self.applyAll():
             self.seatFaces.hide()
             FreeCADGui.Control.closeDialog()
             if self.adding:
