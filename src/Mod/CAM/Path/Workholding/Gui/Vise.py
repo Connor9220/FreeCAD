@@ -2031,8 +2031,7 @@ class TaskPanelVise:
     def applyAll(self):
         """The stops and clamps kept, and the vise picked seated as its settings say; one only
         picked in Add, not added, taken out."""
-        self.dropAdd()
-        self.stops.dropPieces()
+        self.stops.dropShown()
         if not self.applyStops():
             return False
         job, vise = self.current()

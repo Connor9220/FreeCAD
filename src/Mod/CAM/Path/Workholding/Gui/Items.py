@@ -1049,6 +1049,27 @@ class _StopsClamps:
         self.fillList()
         self.dragChosen(self.previewPiece() if not self.chosen() else None)
 
+    def shown(self):
+        """What Add shows, not yet kept: the vises being added, or the stops or clamps."""
+        adding = getattr(self.panel, "adding", None)
+        if adding:
+            return adding.all()
+        doc = self.job.Document
+        return [p for p in (doc.getObject(n) for n in getattr(self, "previewing", [])) if p]
+
+    def shownFirst(self):
+        """The one of what Add shows that its dragger moves: the first vise, or the one stop or
+        clamp; None if none, or several stops or clamps."""
+        adding = getattr(self.panel, "adding", None)
+        if adding:
+            return adding.vise
+        return self.previewPiece()
+
+    def dropShown(self):
+        """What Add shows taken out, whatever it is."""
+        self.panel.dropAdd()
+        self.dropPieces()
+
     def previewPiece(self):
         """The one stop or clamp Add shows, None if it shows none or several."""
         if len(getattr(self, "previewing", [])) != 1:
@@ -1765,11 +1786,8 @@ class _StopsClamps:
         self.remove.setEnabled(piece is not None)
         self.settings.setVisible(not vise)
         self.viseArea.showPicture(piece if vise else None)
-        adding = self.panel.adding
-        shown = getattr(self, "previewing", [])
-        if piece is not None and (
-            (adding and piece is not adding.vise) or (shown and piece.Name not in shown)
-        ):
+        shown = self.shown()
+        if piece is not None and shown and piece not in shown:
             # a placed piece picked: what Add only shows taken out
             self.item.setCurrentIndex(-1)
             self.updateRow()
@@ -1784,8 +1802,7 @@ class _StopsClamps:
         self.showSize(piece)
         # what Add shows keeps its dragger while nothing placed is picked; the stock its own
         # while asked for and nothing else is
-        adding = self.panel.adding
-        picked = self.chosen() or (adding.vise if adding else self.previewPiece())
+        picked = self.chosen() or self.shownFirst()
         if picked is not None and self.moveStock.isChecked():
             self.moveStock.blockSignals(True)
             self.moveStock.setChecked(False)
@@ -2344,8 +2361,7 @@ class _StopsClamps:
         # the dragger made again where the piece now is: it does not follow the piece placed
         self.editing = None
         FreeCADGui.getDocument(self.job.Document.Name).resetEdit()
-        adding = self.panel.adding
-        if (adding and piece is adding.vise) or piece.Name in getattr(self, "previewing", []):
+        if piece in self.shown():
             # what Add shows stays Add's, not picked in Placed
             self.fillList()
             self.dragChosen(piece)
