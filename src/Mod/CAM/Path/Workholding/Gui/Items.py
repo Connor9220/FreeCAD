@@ -307,6 +307,9 @@ class _Drag:
         self.panel = stops.panel
         self.job = stops.job
 
+    def begin(self, piece):
+        """Its dragger on it, a drag about to start."""
+
     def letGoAt(self, piece):
         """Where the piece is as it is let go, read before its dragger goes."""
         return PathWorkholding.placementOf(piece)
@@ -444,7 +447,36 @@ class _StockDrag(_Drag):
     let go. Held in a vise, turned square to its jaws and the vise seated again; the stops and
     clamps placed against it again. Free: turned as let go, nothing seated."""
 
+    def begin(self, piece):
+        # the part and what is placed on it, where they start: they ride along with the stock
+        import Path.Main.Job as PathJob
+
+        carried = list(self.job.Model.Group) + list(PathJob.objectsInModelFrame(self.job))
+        self.stops.dragCarried = [(obj.Name, FreeCAD.Placement(obj.Placement)) for obj in carried]
+
+    def carry(self, delta):
+        """The part and what is placed on it moved by delta from where they started."""
+        doc = self.job.Document
+        for name, placement in getattr(self.stops, "dragCarried", []):
+            obj = doc.getObject(name)
+            if obj is not None:
+                to = delta.multiply(placement)
+                if not obj.Placement.isSame(to, 1e-9):
+                    obj.Placement = to
+
+    def shows(self, piece, at):
+        start = getattr(self.stops, "dragFrom", None)
+        if start is None:
+            return
+        delta = at.multiply(start.inverse())
+        # the dragger in single precision: not moved, the part left exactly where it is
+        if delta.Base.Length < 1e-4 and abs(delta.Rotation.Angle) < 1e-6:
+            return
+        self.carry(delta)
+
     def letGo(self, piece, start, at, free):
+        # the part back where it started: what holds it moves instead
+        self.carry(FreeCAD.Placement())
         if start is None:
             return
         stock = piece
@@ -2553,6 +2585,7 @@ class _StopsClamps:
             # where the drag starts: a vise turned by it, or slid along its jaws; seated then
             self.dragFrom = FreeCAD.Placement(PathWorkholding.placementOf(piece))
             self.dragSeated = bool(getattr(piece, "Seated", True))
+            self.dragRules(piece).begin(piece)
             self.dragTimer.start()
 
     def showDragging(self):
