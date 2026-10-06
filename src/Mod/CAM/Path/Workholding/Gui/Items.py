@@ -438,9 +438,11 @@ class _ViseDrag(_Drag):
 
 
 class _StockDrag(_Drag):
-    """The stock's: the part moved and turned with it, the stock and what is placed on it; held
-    in a vise, turned square to its jaws and the vise seated again; the stops and clamps placed
-    against it again. Free: turned as let go."""
+    """The stock's, the part with it, its work planes and its WCS: none of them moved in the
+    Job's coordinates, so its toolpaths stand; what holds it moved the other way instead, the
+    vises of this Job and the table, and the view with them, so the stock is seen where it was
+    let go. Held in a vise, turned square to its jaws and the vise seated again; the stops and
+    clamps placed against it again. Free: turned as let go, nothing seated."""
 
     def letGo(self, piece, start, at, free):
         if start is None:
@@ -449,30 +451,71 @@ class _StockDrag(_Drag):
         delta = at.multiply(start.inverse())
         pivot = start.Base
         turn = delta.Rotation
-        vises = PathWorkholding.vises(self.job)
+        vises = [v for v in PathWorkholding.vises(self.job) if not PathWorkholding.isShared(v)]
         if vises and not free:
             # in a vise: square to its jaws, a quarter at a time
             yaw = turn.toEuler()[0]
             turn = FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), round(yaw / 90.0) * 90.0)
         # how far the pivot went, the turn about it
         shift = delta.Base - pivot + delta.Rotation.multVec(pivot)
+        moved = FreeCAD.Placement(shift, FreeCAD.Rotation()).multiply(
+            FreeCAD.Placement(FreeCAD.Vector(), turn, pivot)
+        )
+        back = moved.inverse()
         stock.Placement = start
-        if not turn.isSame(FreeCAD.Rotation(), 1e-9):
-            PathWorkholding.turnModel(self.job, turn, pivot)
-        if shift.Length > 1e-9:
-            PathWorkholding.moveModel(self.job, shift)
+        if moved.isIdentity():
+            return
+        for vise in vises:
+            # held to no seat while it is moved
+            proxy = getattr(vise, "Proxy", None)
+            was = getattr(proxy, "free", False)
+            if proxy is not None:
+                proxy.free = True
+            try:
+                vise.Placement = back.multiply(vise.Placement)
+            finally:
+                if proxy is not None:
+                    proxy.free = was
+        for table in Items.itemsOf(self.job):
+            if getattr(table, "Kind", None) == Items.Kind.Table:
+                table.Placement = back.multiply(table.Placement)
         PathWorkholding.recompute(self.job.Document)
-        if vises:
-            vise = self.panel.existing if self.panel.existing in vises else vises[0]
-            self.panel.existing = vise
-            self.panel.updateGrip()
-            self.panel.preview()
+        if vises and not free:
+            # seated again where the stock now is in it, the vise moving, never the part
+            panel = self.panel
+            first = panel.existing if panel.existing in vises else vises[0]
+            for vise in [first] + [v for v in vises if v is not first]:
+                panel.existing = vise
+                panel.updateGrip()
+                offset = PathWorkholding.seating(self.job, vise)["offset"]
+                panel.seatVise(vise, offset, moveVise=True)
+            panel.existing = first
+            panel.updateGrip()
         Items.layout(self.job)
+        _carryView(self.job, back)
 
     def after(self, piece):
         self.stops.fillList()
         self.stops.showChosen()
         QtCore.QTimer.singleShot(0, ViewProviders.stockDragger)
+
+
+def _carryView(job, placement):
+    """The 3D view of the Job's document moved as placement moves what holds the part: what is
+    on screen stays where it was seen."""
+    gui = FreeCADGui.getDocument(job.Document.Name)
+    view = getattr(gui, "ActiveView", None) if gui is not None else None
+    if view is None or not hasattr(view, "getCameraNode"):
+        return
+    from pivy import coin
+
+    camera = view.getCameraNode()
+    position = FreeCAD.Vector(*camera.position.getValue().getValue())
+    position = placement.multVec(position)
+    camera.position.setValue(position.x, position.y, position.z)
+    q = placement.Rotation.Q
+    turn = coin.SbRotation(q[0], q[1], q[2], q[3])
+    camera.orientation.setValue(camera.orientation.getValue() * turn)
 
 
 def _shiftHeld():
