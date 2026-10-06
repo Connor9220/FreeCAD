@@ -908,13 +908,15 @@ def layingOut():
     return _layingOut[0] > 0
 
 
-def layout(job):
-    """layout(job) ... the Job's stops and clamps placed round its stock as each says: a stop
-    shared with another Job stays where it is, the part moving to it first; the rest are put
-    against the stock where it then is, spread along their sides, or where they are pinned."""
+def layout(job, sides=None):
+    """layout(job, sides=None) ... the Job's stops and clamps placed round its stock as each says:
+    a stop shared with another Job stays where it is, the part moving to it first; the rest are
+    put against the stock where it then is, spread along their sides, or where they are pinned.
+    With sides, those on these sides only, as one is added to or taken off them: the others
+    stand as they were."""
     _layingOut[0] += 1
     try:
-        _layout(job)
+        _layout(job, sides)
     finally:
         _layingOut[0] -= 1
 
@@ -966,15 +968,17 @@ def layoutLater(job):
     _stockWatch.pending.add((job.Document.Name, job.Name))
 
 
-def _layout(job):
+def _layout(job, sides=None):
     shared = [p for p in stopsOn(job) if PathWorkholding.isShared(p)]
-    if shared:
+    if shared and sides is None:
         _toShared(job, shared)
     for test in (isStop, isClamp):
         bySide = {}
         for piece in _on(job, test):
             bySide.setdefault(piece.StockSide, []).append(piece)
         for side, group in bySide.items():
+            if sides is not None and side not in sides:
+                continue
             try:
                 frame, length = sideFrame(job, side)
             except ValueError as e:
@@ -1004,7 +1008,7 @@ def removePiece(piece):
 def removePieces(pieces):
     """removePieces(pieces) ... stops, clamps or tables taken out of their Job together, no longer
     shared: those left on their sides spread along them again, once."""
-    jobs, docs = [], []
+    jobs, docs, sides = [], [], {}
     for each in pieces:
         job, piece = PathWorkholding.memberOf(each)
         if piece is None:
@@ -1018,8 +1022,9 @@ def removePieces(pieces):
                 other.SideIndex = i
             if job not in jobs:
                 jobs.append(job)
+            sides.setdefault(job.Name, set()).add(side)
     for job in jobs:
-        layout(job)
+        layout(job, sides[job.Name])
     for doc in docs:
         doc.recompute()
 
@@ -1344,7 +1349,8 @@ def addPieces(job, side, which, count=1):
         _, length = sideFrame(job, side)
         for piece in new:
             piece.Length = length / (len(current) + count)
-    layout(job)
+    # only their side placed again: the others stand as they were
+    layout(job, [side])
     return new
 
 

@@ -554,6 +554,9 @@ class _StopsClamps:
             vobj.Selectable = True
         # and the stops and clamps picked in it, a click on one picking its row
         self.pickable = {}
+        # what Add shows, put in but not yet kept: the pieces' names, and what the row said
+        self.previewing = []
+        self.previewKey = None
         self.makePickable()
         ViewProviders.setWholePicks(True)
         FreeCADGui.Selection.addObserver(self)
@@ -971,9 +974,14 @@ class _StopsClamps:
         linked."""
         key = self._addKey(which)
         doc = self.job.Document
-        if key == getattr(self, "previewKey", None) and all(
-            doc.getObject(name) is not None for name in self.previewing
-        ):
+        shown = getattr(self, "previewKey", None)
+        whole = all(doc.getObject(name) is not None for name in self.previewing)
+        if key == shown and whole:
+            return
+        if shown is not None and whole and key[:2] == shown[:2] and which != "Fence":
+            # only how many changed: the difference put in or taken out, those shown kept where
+            # they are; fences share their side's length, so made again
+            self.addMore(which, key)
             return
         dropped = self.dropPieces(again=False)
         if (
@@ -996,6 +1004,27 @@ class _StopsClamps:
         self.fillList()
         # one alone moved by its dragger before Add keeps it
         self.dragChosen(new[0] if len(new) == 1 and not self.chosen() else None)
+
+    def addMore(self, which, key):
+        """What Add shows made as many as key says: more put on the side, or the last taken off."""
+        doc = self.job.Document
+        have = list(self.previewing)
+        self.panel.begin()
+        if key[2] > len(have):
+            try:
+                new = Items.addPieces(self.job, key[1], which, key[2] - len(have))
+                self.error.setText("")
+            except ValueError as e:
+                self.error.setText(str(e))
+                return
+            self.previewing = have + [piece.Name for piece in new]
+        else:
+            extra = [doc.getObject(name) for name in have[key[2] :]]
+            Items.removePieces([piece for piece in extra if piece is not None])
+            self.previewing = [name for name in have if doc.getObject(name) is not None]
+        self.previewKey = key
+        self.fillList()
+        self.dragChosen(self.previewPiece() if not self.chosen() else None)
 
     def previewPiece(self):
         """The one stop or clamp Add shows, None if it shows none or several."""
