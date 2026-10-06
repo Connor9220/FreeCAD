@@ -87,6 +87,9 @@ class ViewProvider(object):
         elif 1 == mode:
             FreeCADGui.runCommand("Std_TransformManip")
             return True
+        elif 4 == mode:
+            # Transform's dragger alone, a task panel of the caller's open: FreeCAD's own
+            return None
         return False
 
     def unsetEdit(self, vobj, mode):

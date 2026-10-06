@@ -242,6 +242,23 @@ def draggerPlacement(dragger):
     return FreeCAD.Placement(FreeCAD.Vector(*at), FreeCAD.Rotation(*turn))
 
 
+def stockDragger():
+    """stockDragger() ... the Transform dragger on the stock: across the table and turned about
+    the vertical, a degree at a time."""
+    import math
+
+    dragger = findDragger()
+    if dragger is None:
+        return
+    dragger.getField("rotationIncrement").set(repr(math.radians(DRAG_TURN_STEP)))
+    for name in ("zTranslatorDragger", "xRotatorDragger", "yRotatorDragger"):
+        part = dragger.getPart(name, True)
+        if part is not None:
+            part.getField("visible").set("FALSE")
+    for name in ("yzPlanarTranslatorSwitch", "zxPlanarTranslatorSwitch"):
+        dragger.set("%s { whichChild -1 }" % name)
+
+
 def _limitedDragger(piece):
     """The Transform dragger on piece showing only what moves it as its kind allows: across the
     table, and a lever clamp or a side clamp turned too."""

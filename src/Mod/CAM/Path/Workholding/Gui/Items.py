@@ -610,7 +610,20 @@ class _StopsClamps:
         layout.addRow(self.list)
         self.remove = QtWidgets.QPushButton(translate("CAM_Workholding", "Remove"))
         self.remove.setToolTip(translate("CAM_Workholding", "Take the one picked away"))
-        layout.addRow(self.remove)
+        # the stock, and the part with it, moved by a dragger: where it goes, the holding after
+        self.moveStock = QtWidgets.QPushButton(translate("CAM_Workholding", "Move stock"))
+        self.moveStock.setCheckable(True)
+        self.moveStock.setToolTip(
+            translate(
+                "CAM_Workholding",
+                "Move and turn the stock, the part with it, by a dragger in the 3D view: held in "
+                "a vise it turns square to the jaws",
+            )
+        )
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(self.moveStock)
+        row.addWidget(self.remove, 1)
+        layout.addRow(row)
         # the one picked's settings, its picture beside them
         self.settings = QtWidgets.QWidget()
         grid = QtWidgets.QGridLayout(self.settings)
@@ -898,6 +911,7 @@ class _StopsClamps:
             lambda *args: self.later("BoltLength", self.boltLength.property("rawValue"))
         )
         self.remove.clicked.connect(self.removeChosen)
+        self.moveStock.toggled.connect(self.stockToggled)
         self.viseSeat.currentIndexChanged.connect(lambda *args: self.viseJawsFor())
         self.viseSeat.currentIndexChanged.connect(lambda *args: self.previewPicked())
         self.viseJaw.currentIndexChanged.connect(lambda *args: self.previewPicked())
@@ -1753,9 +1767,17 @@ class _StopsClamps:
         self.showRow(self.placeRow, piece is not None and not lever)
         self.showLever(piece if lever else None)
         self.showSize(piece)
-        # what Add shows keeps its dragger while nothing placed is picked
+        # what Add shows keeps its dragger while nothing placed is picked; the stock its own
+        # while asked for and nothing else is
         adding = self.panel.adding
-        self.dragChosen(self.chosen() or (adding.vise if adding else self.previewPiece()))
+        picked = self.chosen() or (adding.vise if adding else self.previewPiece())
+        if picked is not None and self.moveStock.isChecked():
+            self.moveStock.blockSignals(True)
+            self.moveStock.setChecked(False)
+            self.moveStock.blockSignals(False)
+        if picked is None and self.moveStock.isChecked():
+            picked = self.job.Stock
+        self.dragChosen(picked)
 
     def showPlace(self, piece, at=None, angle=None):
         """Where the piece picked is, where it meets the stock, the Job's X and Y, or where at
@@ -2113,7 +2135,9 @@ class _StopsClamps:
         """FreeCAD's Transform dragger on the one piece picked, without its task panel, its
         arrows those its kind moves by; off another, or when several or none are picked."""
         want = None
-        if piece is not None and len(self.chosenAll()) <= 1 and _canDrag(piece):
+        if piece is not None and piece is self.job.Stock:
+            want = piece.Name
+        elif piece is not None and len(self.chosenAll()) <= 1 and _canDrag(piece):
             want = piece.Name
         if want == self.editing:
             return
@@ -2145,6 +2169,8 @@ class _StopsClamps:
         if shown == self.dragShown:
             return
         self.dragShown = shown
+        if piece is self.job.Stock:
+            return
         if PathWorkholding.isVise(piece):
             # along the jaws: where the stock is along them; turned: the side against the
             # fixed jaw and how far off square to it
@@ -2190,6 +2216,61 @@ class _StopsClamps:
         start = getattr(self, "dragFrom", None)
         return start is None or at.Rotation.isSame(start.Rotation, 1e-6)
 
+    def stockToggled(self, on):
+        """Move stock: nothing else picked, the dragger on the stock; off, gone."""
+        if on:
+            self.resetRow()
+            self.list.clearSelection()
+            self.list.setCurrentCell(-1, -1)
+            FreeCADGui.Selection.clearSelection()
+        self.showChosen()
+        if on:
+            QtCore.QTimer.singleShot(0, ViewProviders.stockDragger)
+
+    def stockMoved(self):
+        """The stock let go by its dragger: put back, and the part moved with it as far and
+        turned as much, the stock and what is placed on the part with it; held in a vise, turned
+        square to its jaws, the vise seated again; the stops and clamps placed against it again."""
+        import math
+
+        stock = self.job.Stock
+        start = getattr(self, "dragFrom", None)
+        now = PathWorkholding.placementOf(stock)
+        self.editing = None
+        FreeCADGui.getDocument(self.job.Document.Name).resetEdit()
+        if start is None:
+            return
+        self.applying = True
+        try:
+            self.panel.begin()
+            delta = now.multiply(start.inverse())
+            pivot = start.Base
+            turn = delta.Rotation
+            vises = PathWorkholding.vises(self.job)
+            if vises:
+                # in a vise: square to its jaws, a quarter at a time
+                yaw = turn.toEuler()[0]
+                turn = FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), round(yaw / 90.0) * 90.0)
+            # how far the pivot went, the turn about it
+            shift = delta.Base - pivot + delta.Rotation.multVec(pivot)
+            stock.Placement = start
+            if not turn.isSame(FreeCAD.Rotation(), 1e-9):
+                PathWorkholding.turnModel(self.job, turn, pivot)
+            if shift.Length > 1e-9:
+                PathWorkholding.moveModel(self.job, shift)
+            PathWorkholding.recompute(self.job.Document)
+            if vises:
+                vise = self.panel.existing if self.panel.existing in vises else vises[0]
+                self.panel.existing = vise
+                self.panel.updateGrip()
+                self.panel.preview()
+            Items.layout(self.job)
+        finally:
+            self.applying = False
+        self.fillList()
+        self.showChosen()
+        QtCore.QTimer.singleShot(0, ViewProviders.stockDragger)
+
     def showRowAt(self, piece, words):
         """The piece's row saying where it is, mid-drag: its X, Y and angle."""
         for row in range(self.list.rowCount()):
@@ -2214,6 +2295,9 @@ class _StopsClamps:
     def applyDrag(self):
         piece = self.job.Document.getObject(self.editing) if self.editing else None
         if piece is None or self.applying:
+            return
+        if piece is self.job.Stock:
+            self.stockMoved()
             return
         self.applying = True
         try:
