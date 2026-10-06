@@ -775,38 +775,83 @@ def _againstRound(job, stock):
         return FreeCAD.Vector((stop[1] + stop[3]) / 2, (stop[2] + stop[4]) / 2, 0)
 
     def over(at):
-        return [f for f in stops if _gapTo(at, radius, f)[0] < -TOUCH_NEAR]
+        return [f for f in stops if _gapTo(at, radius, f)[0] < -1e-6]
 
+    def clear(at, way, most):
+        """How far along way from at it first stands clear of every stop, up to most."""
+        step = max(radius / 50.0, 0.1)
+        t = 0.0
+        while t <= most:
+            if not over(at + way * t):
+                break
+            t += step
+        else:
+            return None
+        low, high = max(t - step, 0.0), t
+        for _ in range(40):
+            half = (low + high) / 2
+            if over(at + way * half):
+                low = half
+            else:
+                high = half
+        return high
+
+    # off those it is on top of, all together, the least way out of them
     for _ in range(4):
         under = over(center)
         if not under:
             break
-        mid = FreeCAD.Vector()
+        way = FreeCAD.Vector()
         for f in under:
-            mid += middle(f)
-        way = center - mid * (1.0 / len(under))
+            _, toward = _gapTo(center, radius, f)
+            way -= toward if toward is not None else (middle(f) - center)
+        if way.Length < 1e-9:
+            way = center - middle(under[0])
         if way.Length < 1e-9:
             break
         way.normalize()
-        low, high = 0.0, 2 * radius + max(width(f) for f in under) + 1.0
-        for _ in range(40):
-            half = (low + high) / 2
-            if over(center + way * half):
-                low = half
-            else:
-                high = half
-        center = center + way * high
+        far = clear(center, way, 2 * radius + max(width(f) for f in under) + 1.0)
+        if far is None:
+            break
+        center = center + way * far
     near = sorted(
         (f for f in stops if _gapTo(center, radius, f)[0] <= STOCK_SNAP_WIDTHS * width(f)),
         key=lambda f: _gapTo(center, radius, f)[0],
     )
+    # against them, each in turn, sliding along those it already touches, never into one
     for _ in range(200):
         moved = False
         for f in near:
             gap, way = _gapTo(center, radius, f)
             if gap < TOUCH_NEAR or way is None:
                 continue
-            center = center + way * gap
+            slide = FreeCAD.Vector(way)
+            for g in stops:
+                if g is f:
+                    continue
+                touch, toward = _gapTo(center, radius, g)
+                if touch < TOUCH_NEAR and toward is not None and slide.dot(toward) > 0:
+                    slide -= toward * slide.dot(toward)
+            if slide.Length < 1e-6:
+                continue
+            slide.normalize()
+            closing = slide.dot(way)
+            if closing < 1e-3:
+                continue
+            most = gap / closing
+            low, high = 0.0, most
+            if over(center + slide * most) or _gapTo(center + slide * most, radius, f)[0] < 0:
+                for _ in range(40):
+                    half = (low + high) / 2
+                    at = center + slide * half
+                    if over(at) or _gapTo(at, radius, f)[0] < 0:
+                        high = half
+                    else:
+                        low = half
+                most = low
+            if most < 1e-4:
+                continue
+            center = center + slide * most
             moved = True
         if not moved:
             break
