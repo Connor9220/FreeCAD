@@ -481,6 +481,33 @@ def _isGroup(obj):
     return obj.hasExtension("App::GeoFeatureGroupExtension")
 
 
+def recompute(doc):
+    """recompute(doc) ... doc recomputed: all of it; or, while the workholding panel holds back
+    the toolpaths (the document's RecomputesFrozen set), its Jobs' stops, clamps and vises, their
+    stock and model and what these need, not the operations: moving the stock does not compute
+    the toolpaths again until the panel's changes are kept."""
+    if not getattr(doc, "RecomputesFrozen", False):
+        doc.recompute()
+        return
+    found = []
+
+    def add(obj):
+        if obj is None or obj in found:
+            return
+        found.append(obj)
+        for child in getattr(obj, "Group", []) or []:
+            add(child)
+
+    for job in doc.Objects:
+        if hasattr(job, "Workholding") and hasattr(job, "Stock"):
+            add(job.Workholding)
+            add(job.Stock)
+            for model in getattr(getattr(job, "Model", None), "Group", []) or []:
+                add(model)
+    if found:
+        doc.recompute(found, True)
+
+
 def _instance(job, label, members, placement, proxy=None, name="Vise"):
     """A vise of the Job's Workholding made of members, (object, expressions) pairs: the
     settings of each VarSet or vise among them copied onto it, each part linked, driven as the
@@ -546,7 +573,7 @@ def addVise(job, source, placement=None):
     vise = _instance(job, source.Label, members, placement or FreeCAD.Placement())
     if len(stations(vise)) > 1:
         _addStation(vise, 1)
-    job.Document.recompute()
+    recompute(job.Document)
     return vise
 
 
@@ -707,7 +734,7 @@ def addAnother(member, offset=None):
     for name in copy.PropertiesList:
         if copy.getGroupOfProperty(name) == "Placed":
             copy.removeProperty(name)
-    doc.recompute()
+    recompute(doc)
     return copy
 
 
@@ -1292,7 +1319,7 @@ def shareVise(owner, job, number=None):
     vise = _instance(job, owner.Label, _members(owner), FreeCAD.Placement(owner.Placement))
     _addStation(vise, number)
     _follow(vise, owner)
-    job.Document.recompute()
+    recompute(job.Document)
     return vise
 
 
@@ -1474,7 +1501,7 @@ def seat(
         setOpening(vise, opening if fits else maxOpening)
     # parallels of no height: on the floor
     _remember(vise, parallels is not None and parallels > 1e-9, close, parallels, step, kit)
-    job.Document.recompute()
+    recompute(job.Document)
     return {
         "move": move if not moveVise else move * -1,
         "grip": grip,
@@ -1686,7 +1713,7 @@ def setJaws(vise, kind, thickness=None, height=None, steps=None, gripJaws=None):
     finally:
         proxy.settingJaws = False
     jaws = _makeJaws(vise)
-    vise.Document.recompute()
+    recompute(vise.Document)
     return jaws
 
 

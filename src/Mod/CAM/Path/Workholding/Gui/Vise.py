@@ -130,10 +130,74 @@ class _Adding:
             self.doc.commitTransaction()
         else:
             self.doc.abortTransaction()
-            self.doc.recompute()
+            PathWorkholding.recompute(self.doc)
         if self.source is not None:
             _closeIfUnused(self.source)
         FreeCADGui.setActiveDocument(self.doc.Name)
+
+
+class _Frozen:
+    """The Job's toolpaths held back while the workholding panel is open: its document not
+    recomputed but for the workholding, the stock and the model, and the paths shown hidden.
+    Once the panel's changes are kept, computed again once; the paths shown again as they were.
+    """
+
+    def __init__(self, job):
+        self.job = job
+        self.doc = job.Document
+        self.was = bool(getattr(self.doc, "RecomputesFrozen", False))
+        self.shown = []
+        for op in self.operations():
+            vobj = getattr(op, "ViewObject", None)
+            if vobj is not None and vobj.Visibility:
+                self.shown.append(op.Name)
+                vobj.Visibility = False
+        self.hold()
+
+    def operations(self):
+        """The Job's operations and their dressups."""
+        proxy = getattr(self.job, "Proxy", None)
+        try:
+            return list(proxy.allOperations()) if hasattr(proxy, "allOperations") else []
+        except Exception:
+            return []
+
+    def hold(self):
+        # those up to date now: not left marked for a recompute once what changed is undone
+        self.clean = [op.Name for op in self.operations() if "Touched" not in op.State]
+        self.doc.RecomputesFrozen = True
+
+    def compute(self):
+        """Kept, the panel still open: the toolpaths computed again once, as the stock and the
+        part now are, then held back again."""
+        if self.doc is None:
+            return
+        self.doc.RecomputesFrozen = self.was
+        self.doc.recompute()
+        self.hold()
+
+    def release(self, kept):
+        """The panel closed: kept, the toolpaths computed again; else, what it changed already
+        undone, the operations left as they were. The paths shown again as they were."""
+        doc, self.doc = self.doc, None
+        if doc is None:
+            return
+        doc.RecomputesFrozen = self.was
+        if kept:
+            doc.recompute()
+        else:
+            for name in self.clean:
+                op = doc.getObject(name)
+                if op is not None and "Touched" in op.State:
+                    op.purgeTouched()
+        for name in self.shown:
+            op = doc.getObject(name)
+            if op is not None and getattr(op, "ViewObject", None) is not None:
+                op.ViewObject.Visibility = True
+
+    def gone(self):
+        """The document closed: nothing in it touched."""
+        self.doc = None
 
 
 def _hex(color):
@@ -1104,7 +1168,14 @@ class TaskPanelVise:
             self.focusVise(None)
 
     def open(self):
+        # the toolpaths held back while open: moving the stock does not compute them each time
+        self.frozen = _Frozen(self.job)
         self.focusChanged()
+
+    def unfreeze(self, kept):
+        frozen = getattr(self, "frozen", None)
+        if frozen is not None:
+            frozen.release(kept)
 
     def focusVise(self, vise):
         """The vise picked in Placed, its settings shown; None, a stop or clamp picked or none:
@@ -1944,6 +2015,9 @@ class TaskPanelVise:
     def clicked(self, button):
         if button == QtWidgets.QDialogButtonBox.Apply:
             if self.applyAll():
+                frozen = getattr(self, "frozen", None)
+                if frozen is not None:
+                    frozen.compute()
                 self.stops.readIn(self.existing)
 
     def applyAll(self):
@@ -1969,6 +2043,7 @@ class TaskPanelVise:
             finally:
                 # let go of the selection and the document whatever went wrong before
                 self.stops.finish()
+                self.unfreeze(kept=True)
             return True
         return False
 
@@ -2007,11 +2082,15 @@ class TaskPanelVise:
                 self.adding.finish(keep=False)
         finally:
             self.stops.finish()
+            self.unfreeze(kept=False)
 
     def autoClosedOnDeletedDocument(self):
         """The Job's document closed while open: the panel let go of it."""
         self.previewTimer.stop()
         self.seatFaces.hide()
+        frozen = getattr(self, "frozen", None)
+        if frozen is not None:
+            frozen.gone()
         self.stops.finish(gone=True)
 
     def reject(self):
@@ -2021,7 +2100,7 @@ class TaskPanelVise:
         if self.pending:
             # what the preview seated, undone
             self.job.Document.abortTransaction()
-            self.job.Document.recompute()
+            PathWorkholding.recompute(self.job.Document)
             self.pending = False
         FreeCADGui.Control.closeDialog()
         try:
@@ -2030,4 +2109,5 @@ class TaskPanelVise:
                 self.adding.finish(keep=False)
         finally:
             self.stops.finish()
+            self.unfreeze(kept=False)
         return True

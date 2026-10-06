@@ -925,7 +925,7 @@ def _toShared(job, shared):
     along that side, the stock touching it and its bottom on the surface the stop stands on;
     then onto the others, square to their faces."""
     # those following another placed where it is
-    job.Document.recompute()
+    PathWorkholding.recompute(job.Document)
     for i, stop in enumerate(shared):
         # the stock's side faces out against the stop's face
         face = stop.Placement.Rotation.multVec(Vector(0, -1, 0))
@@ -1036,7 +1036,7 @@ def _layout(job, sides=None):
             for piece, x in zip(group, _slots(job, group, frame, length)):
                 if piece not in shared:
                     _placeAt(job, piece, frame, _alongSide(job, piece, frame, x))
-    job.Document.recompute()
+    PathWorkholding.recompute(job.Document)
 
 
 def _remove(piece):
@@ -1075,7 +1075,7 @@ def removePieces(pieces):
     for job in jobs:
         layout(job, sides[job.Name])
     for doc in docs:
-        doc.recompute()
+        PathWorkholding.recompute(doc)
 
 
 def positionOf(piece):
@@ -1631,7 +1631,7 @@ def addTable(job):
     tables = [o for o in itemsOf(job) if getattr(o, "Kind", None) == Kind.Table]
     table = tables[0] if tables else create(job, "Table")
     placeTable(job, table)
-    job.Document.recompute()
+    PathWorkholding.recompute(job.Document)
     return table
 
 

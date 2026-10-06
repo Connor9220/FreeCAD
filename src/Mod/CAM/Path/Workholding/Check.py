@@ -224,7 +224,7 @@ def checkDocument(doc):
         opening = getattr(holder, name).Value
         setattr(holder, name, opening + 10.0)
         try:
-            doc.recompute()
+            PathWorkholding.recompute(doc)
             for o, _ in driven:
                 moved = o.Placement.Base - before[o.Name]
                 if (moved - closing).Length > 1e-6:
@@ -246,7 +246,7 @@ def checkDocument(doc):
         finally:
             # the vise left as it was, even if its parts failed to move
             setattr(holder, name, opening)
-            doc.recompute()
+            PathWorkholding.recompute(doc)
         # the moving jaw's face the opening in front of the fixed one, at Y 0, facing it; a
         # screw moving with the jaw may reach further
         if not any(_facesFixedJaw(f, -opening, frame) for o, _ in driven for f in o.Shape.Faces):
