@@ -1053,6 +1053,10 @@ def _watchStock():
 _watchStock()
 
 
+# the top and bottom of each Job's stock its stops and clamps were last stood for
+_stockHeights = {}
+
+
 def keepOnTable(job):
     """keepOnTable(job) ... the Job's stops and clamps kept where they stand on the table as its
     stock changes: placed round it again for how high they stand and what they reach over, then
@@ -1064,6 +1068,16 @@ def keepOnTable(job):
     ]
     if not pieces:
         return
+    # how high they stand follows only the stock's top and bottom: unchanged, as when it is only
+    # slid or turned, they are left as they stand, free
+    box = stockBox(job)
+    heights = (round(box.ZMin, 6), round(box.ZMax, 6))
+    key = (job.Document.Name, job.Name)
+    if _stockHeights.get(key) == heights:
+        for piece in pieces:
+            setFree(piece, True)
+        return
+    _stockHeights[key] = heights
     before = {p.Name: FreeCAD.Placement(p.Placement) for p in pieces}
     for piece in pieces:
         setFree(piece, False)
