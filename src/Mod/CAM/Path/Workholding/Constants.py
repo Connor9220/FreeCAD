@@ -57,6 +57,11 @@ LIT_FACE_TOLERANCE = 0.1
 # edge, a lever clamp the panel places by its points, and a strap clamp kit, one of each piece
 CLAMP_KINDS = ("HoldDown", "Push", "Lever", "StrapKit")
 
+# what a fixture's file says it is, its VarSet's Kind: grounded, stackable things the stock, or
+# another fixture, rests or is clamped on, as opposed to a vise or a clamp, which holds the stock
+# itself
+FIXTURE_KINDS = ("Table", "Spoilboard", "Plate", "Pallet", "AnglePlate", "Block")
+
 # lever clamps, as quantities FreeCAD reads: the stud's end above its nut; the gap kept between
 # the stock's side and the washer or nut when a clamp is spread along a side; the least it
 # presses in from the stock's edge; a riser's length under the clamp's end, the margin it has to
