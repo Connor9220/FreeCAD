@@ -46,7 +46,12 @@ copied onto the group FreeCAD puts in the Job, an ObjectFixture.
 
 fromStep() builds a fixture's own file from a STEP file, the holes in it found as the cylindrical
 faces of each radius asked for; build() does the same from a shape and hole and slot data already
-worked out."""
+worked out.
+
+holes() and slots() read a fixture's own back, obj its Job's row or its file's Settings, either
+holding the same properties; nearestHole() and nearestSlotPoint() find what workholding dragged
+near point, in the fixture's own frame, would snap to. Squaring a dragged thing's turn to the
+fixture's own axes, not only its grid's, is squareRotation()."""
 
 import os
 
@@ -297,3 +302,110 @@ def fromStep(
         about=about,
         label=label,
     )
+
+
+# how near a hole or a slot's centerline a point must be to be snapped to it, when not told
+# otherwise, mm
+SNAP_NEAR = 10.0
+
+
+def holes(obj):
+    """holes(obj) ... the fixture's holes, obj its Job's row or its file's Settings, either
+    holding the same properties: (position, diameter, usable, dowel, thread) tuples, position a
+    Vector, mm, in the fixture's own frame. Empty where it has none."""
+    return list(
+        zip(
+            getattr(obj, "HolePositions", []) or [],
+            getattr(obj, "HoleDiameters", []) or [],
+            getattr(obj, "HoleUsable", []) or [],
+            getattr(obj, "HoleDowel", []) or [],
+            getattr(obj, "HoleThread", []) or [],
+        )
+    )
+
+
+def slots(obj):
+    """slots(obj) ... the fixture's T-slots, obj its Job's row or its file's Settings, either
+    holding the same properties: (start, end, width, trackWidth, depth) tuples, start and end
+    Vectors, mm, in the fixture's own frame. Empty where it has none."""
+    return list(
+        zip(
+            getattr(obj, "SlotStarts", []) or [],
+            getattr(obj, "SlotEnds", []) or [],
+            getattr(obj, "SlotWidths", []) or [],
+            getattr(obj, "SlotTrackWidths", []) or [],
+            getattr(obj, "SlotDepths", []) or [],
+        )
+    )
+
+
+def nearestHole(obj, point, usableOnly=True, within=SNAP_NEAR):
+    """nearestHole(obj, point, usableOnly=True, within=SNAP_NEAR) ... of the fixture's holes
+    (obj, as holes() takes it), the one nearest point, a Vector, mm, in the fixture's own frame:
+    a dict of its position, diameter, usable, dowel, thread and distance from point, mm. None
+    where it has no holes, usableOnly leaves none, or within, mm, excludes the nearest; None, any
+    distance. usableOnly, True, only a hole workholding may be snapped into, not one only holding
+    the fixture itself down."""
+    best = None
+    for position, diameter, usable, dowel, thread in holes(obj):
+        if usableOnly and not usable:
+            continue
+        distance = (position - point).Length
+        if within is not None and distance > within:
+            continue
+        if best is None or distance < best["distance"]:
+            best = {
+                "position": position,
+                "diameter": diameter,
+                "usable": usable,
+                "dowel": dowel,
+                "thread": thread,
+                "distance": distance,
+            }
+    return best
+
+
+def nearestSlotPoint(obj, point, within=SNAP_NEAR):
+    """nearestSlotPoint(obj, point, within=SNAP_NEAR) ... of the fixture's T-slots (obj, as
+    slots() takes it), the point on the one nearest point, a Vector, mm, in the fixture's own
+    frame: a dict of position, on the slot's centerline, clamped to its ends; direction, a unit
+    Vector along it from start to end; width, trackWidth and depth, mm; across, how far point is
+    off the centerline, mm; along and length, how far position is along the slot from its start,
+    and the slot's own length, mm; and atStart and atEnd, whether position is at either end, for a
+    rail or an insert run along it, not only a bolt's. None where it has no slots, or within, mm,
+    excludes the nearest; None, any distance."""
+    best = None
+    for start, end, width, trackWidth, depth in slots(obj):
+        axis = end - start
+        length = axis.Length
+        if length < 1e-6:
+            continue
+        direction = FreeCAD.Vector(axis)
+        direction.normalize()
+        along = (point - start).dot(direction)
+        clamped = max(0.0, min(length, along))
+        onAxis = start + direction * clamped
+        across = (point - onAxis).Length
+        if within is not None and across > within:
+            continue
+        if best is None or across < best["across"]:
+            best = {
+                "position": onAxis,
+                "direction": direction,
+                "width": width,
+                "trackWidth": trackWidth,
+                "depth": depth,
+                "across": across,
+                "along": clamped,
+                "length": length,
+                "atStart": clamped <= 1e-6,
+                "atEnd": clamped >= length - 1e-6,
+            }
+    return best
+
+
+def squareRotation(angle, step=90.0):
+    """squareRotation(angle, step=90.0) ... angle, degrees, rounded to the nearest multiple of
+    step: how a dragged thing's turn is squared to the fixture's own axes, not only its grid's, a
+    fixture's shape not always being a rectangle on it."""
+    return round(angle / step) * step
