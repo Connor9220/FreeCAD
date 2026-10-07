@@ -21,8 +21,8 @@
 
 
 """The view providers of a Job's workholding: a vise, its parts, jaws and parallels; simple
-workholding, steel for what holds, a pale table to see the rest on; and a clamp from a file of
-its own."""
+workholding, steel for what holds, a pale table to see the rest on; a clamp from a file of its
+own; and a fixture, grounded, from a file of its own."""
 
 import FreeCAD
 import Path.Workholding.Vise as PathWorkholding
@@ -467,6 +467,11 @@ class ViewProvider(_ViewProvider):
 
 class ViewProviderClamp(_GroupViewProvider):
     """A clamp of a Job's Workholding from a file of its own: double-clicked, the workholding
+    panel; deleted, all of it."""
+
+
+class ViewProviderFixture(_GroupViewProvider):
+    """A fixture of a Job's Workholding from a file of its own: double-clicked, the workholding
     panel; deleted, all of it."""
 
 

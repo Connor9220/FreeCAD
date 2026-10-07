@@ -42,7 +42,7 @@ import Path
 import Path.Workholding.Check as PathCheck
 
 from Path.Workholding.Common import objectKinds, objectProperties, readDocumentXml, readMember
-from Path.Workholding.Constants import CLAMP_KINDS
+from Path.Workholding.Constants import CLAMP_KINDS, FIXTURE_KINDS
 
 translate = FreeCAD.Qt.translate
 
@@ -51,7 +51,7 @@ DefaultSources = []
 # the index's layout this FreeCAD reads
 IndexFormat = 1
 # what a library lists
-Kinds = ("vise", "clamp")
+Kinds = ("vise", "clamp", "fixture")
 TIMEOUT = 20
 
 
@@ -136,11 +136,14 @@ def sources():
 
 def folder(kind="vise"):
     """folder(kind="vise") ... where vises are kept, and those downloaded saved: the Vises folder
-    of the CAM assets' Workholding folder; clamps, its Clamps folder."""
+    of the CAM assets' Workholding folder; clamps, its Clamps folder; fixtures, its Fixtures
+    folder."""
     import Path.Preferences
 
     if kind == "clamp":
         return str(Path.Preferences.getAssetPath() / "Workholding" / "Clamps")
+    if kind == "fixture":
+        return str(Path.Preferences.getAssetPath() / "Workholding" / "Fixtures")
     return str(Path.Preferences.getAssetPath() / "Workholding" / "Vises")
 
 
@@ -399,6 +402,8 @@ def download(item, where=None):
             f.write(data)
         if item.get("kind", "vise") == "clamp":
             errors = _checkClamp(temporary)
+        elif item.get("kind", "vise") == "fixture":
+            errors = _checkFixture(temporary)
         else:
             errors = PathCheck.checkZip(temporary)
         if errors:
@@ -433,6 +438,23 @@ def _checkClamp(path):
     return errors
 
 
+def _checkFixture(path):
+    """What is wrong with a fixture's file: Python in it, run when it is opened; no fixture in
+    it."""
+    import Path.Workholding.Fixtures as PathFixtures
+
+    errors = []
+    found = PathCheck.pythonObjects(path)
+    if found:
+        errors.append(PathCheck.pythonMessage(found))
+    files = PathCheck.filesLinked(path)
+    if files:
+        errors.append(PathCheck.linksMessage(files))
+    if PathFixtures.fixtureFile(path) is None:
+        errors.append(translate("CAM", "No fixture: no part, or no VarSet saying what kind it is"))
+    return errors
+
+
 # what a vise's or clamp's file says of itself, stamped in it where it was published: an About
 # group in its settings VarSet, each property and the field it is read as
 ABOUT = "About"
@@ -449,11 +471,11 @@ AboutFields = {
 
 
 def about(path):
-    """about(path) ... what the vise's or clamp's file at path says of itself, read from it
-    without opening it: label, its part's, and as stamped where it was published library, the
-    library's address, id, type, maker, model, license, attribution and source; kind, "vise" or
-    "clamp", and its settings, a vise's jawWidth and maxOpening in mm. Those not stamped are
-    missing; {} for a file that cannot be read or holds no vise or clamp."""
+    """about(path) ... what the vise's, clamp's or fixture's file at path says of itself, read
+    from it without opening it: label, its part's, and as stamped where it was published
+    library, the library's address, id, type, maker, model, license, attribution and source;
+    kind, "vise", "clamp" or "fixture", and its settings, a vise's jawWidth and maxOpening in mm.
+    Those not stamped are missing; {} for a file that cannot be read or holds none of these."""
     root = readDocumentXml(path)
     if root is None:
         return {}
@@ -481,10 +503,14 @@ def about(path):
                         found["settings"][key] = float(value.find("Float").get("value"))
             else:
                 kind = props["Kind"].find("String")
-                if kind is None or kind.get("value") not in CLAMP_KINDS:
+                value = kind.get("value") if kind is not None else None
+                if value in CLAMP_KINDS:
+                    found["kind"] = "clamp"
+                elif value in FIXTURE_KINDS:
+                    found["kind"] = "fixture"
+                else:
                     settings = None
                     continue
-                found["kind"] = "clamp"
         for prop_name, field in AboutFields.items():
             prop = props.get(prop_name)
             if prop is not None and prop.get("group") == ABOUT and prop.find("String") is not None:
