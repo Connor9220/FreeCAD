@@ -19,8 +19,9 @@
 #                                                                              #
 ################################################################################
 
-"""The vises or clamps on this computer and in the libraries, to choose one to add to a Job: what
-each is, where it came from, its license, whether it is here; one a library has downloaded."""
+"""The vises, clamps or fixtures on this computer and in the libraries, to choose one to add to a
+Job: what each is, where it came from, its license, whether it is here; one a library has
+downloaded."""
 
 import html
 import os
@@ -91,7 +92,7 @@ def _nominal(item):
 
 
 def _words(kind):
-    """What the dialog says for vises, or for clamps."""
+    """What the dialog says for vises, for clamps, or for fixtures."""
     if kind == "clamp":
         return {
             "title": translate("CAM_AddVise", "Choose Workholding"),
@@ -110,6 +111,25 @@ def _words(kind):
             "other": translate("CAM_AddVise", "Open a Clamp"),
             "get": translate("CAM_AddVise", "Select"),
             "update": translate("CAM_AddVise", "Update Clamp"),
+        }
+    if kind == "fixture":
+        return {
+            "title": translate("CAM_AddVise", "Choose a Fixture"),
+            "icon": ":/icons/CAM_Job.svg",
+            "search": translate(
+                "CAM_AddVise", "The fixtures whose name, maker, model or type has every word"
+            ),
+            "type": translate("CAM_AddVise", "The fixtures of a type"),
+            "none": translate("CAM_AddVise", "This library lists no fixtures."),
+            "nomatch": translate("CAM_AddVise", "No fixture matches."),
+            "local": translate(
+                "CAM_AddVise",
+                "No fixtures on this computer yet: add a library with Libraries…, or open one "
+                "with Other file….",
+            ),
+            "other": translate("CAM_AddVise", "Open a Fixture"),
+            "get": translate("CAM_AddVise", "Select"),
+            "update": translate("CAM_AddVise", "Update Fixture"),
         }
     return {
         "title": translate("CAM_AddVise", "Choose a Vise"),
@@ -691,7 +711,7 @@ class LibraryDialog(QtWidgets.QDialog):
                 if installed
                 else translate("CAM_AddVise", "Install")
             )
-        elif self.kind == "clamp":
+        elif self.kind in ("clamp", "fixture"):
             # installed first, then chosen: the task panel adds it
             missing = not self.local() and self.states[index] == "missing"
             self.get.setEnabled(not updating)
@@ -736,18 +756,16 @@ class LibraryDialog(QtWidgets.QDialog):
         if not path:
             return
         if PathLibrary.about(path).get("kind") != self.kind:
+            names = {
+                "vise": translate("CAM_AddVise", "vise"),
+                "clamp": translate("CAM_AddVise", "clamp"),
+                "fixture": translate("CAM_AddVise", "fixture"),
+            }
             QtWidgets.QMessageBox.warning(
                 self,
                 self.words["other"],
                 translate("CAM_AddVise", "%s holds no %s.")
-                % (
-                    path,
-                    (
-                        translate("CAM_AddVise", "vise")
-                        if self.kind == "vise"
-                        else translate("CAM_AddVise", "clamp")
-                    ),
-                ),
+                % (path, names.get(self.kind, self.kind)),
             )
             return
         self.downloaded = path
@@ -873,7 +891,11 @@ class LibraryDialog(QtWidgets.QDialog):
         if self.manage:
             self.install(index)
             return
-        if self.kind == "clamp" and not self.local() and self.states[index] == "missing":
+        if (
+            self.kind in ("clamp", "fixture")
+            and not self.local()
+            and self.states[index] == "missing"
+        ):
             # installed, the dialog left open: then chosen
             self.install(index)
             return
@@ -909,7 +931,8 @@ class LibraryDialog(QtWidgets.QDialog):
 
 
 class LibraryWindow(QtWidgets.QDialog):
-    """The vises and clamps, each a tab, to install from a library or update, without a Job."""
+    """The vises, clamps and fixtures, each a tab, to install from a library or update, without a
+    Job."""
 
     def __init__(self, parent=None):
         super().__init__(parent or FreeCADGui.getMainWindow())
@@ -922,6 +945,7 @@ class LibraryWindow(QtWidgets.QDialog):
         for kind, text in (
             ("vise", translate("CAM_AddVise", "Vises")),
             ("clamp", translate("CAM_AddVise", "Clamps")),
+            ("fixture", translate("CAM_AddVise", "Fixtures")),
         ):
             browser = LibraryDialog(self, kind=kind, manage=True)
             browser.setWindowFlags(QtCore.Qt.Widget)
@@ -955,8 +979,8 @@ class LibraryWindow(QtWidgets.QDialog):
 
 
 def showLibrary(parent=None):
-    """showLibrary(parent=None) ... the Workholding Library window, to install vises and clamps
-    from a library or update them."""
+    """showLibrary(parent=None) ... the Workholding Library window, to install vises, clamps and
+    fixtures from a library or update them."""
     LibraryWindow(parent).exec()
 
 
@@ -1020,6 +1044,15 @@ def getClamp(parent=None):
     """getClamp(parent=None) ... the path of a clamp chosen, on this computer or from a library,
     downloaded; None if none was."""
     dialog = LibraryDialog(parent, kind="clamp")
+    if dialog.exec() == QtWidgets.QDialog.Accepted:
+        return dialog.downloaded
+    return None
+
+
+def getFixture(parent=None):
+    """getFixture(parent=None) ... the path of a fixture chosen, on this computer or from a
+    library, downloaded; None if none was."""
+    dialog = LibraryDialog(parent, kind="fixture")
     if dialog.exec() == QtWidgets.QDialog.Accepted:
         return dialog.downloaded
     return None
