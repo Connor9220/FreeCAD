@@ -317,6 +317,24 @@ def _tool_axis_tilted(placement):
     return not placement.Rotation.multVec(z_up).isEqual(z_up, 1e-6)
 
 
+def _program_placement(job, source):
+    """Where an operation's path goes in the Job's program: its Placement in
+    the document, measured from the Job's zero (Workplane.toProgram). With the
+    zero at the document's origin that is its Placement itself. A Custom
+    G-code operation on no work plane holds G-code written for the machine,
+    already measured from the zero, and is left as written."""
+    import Path.Main.Workplane as PathWorkplane
+    import Path.Op.Custom as PathCustom
+
+    placement = getattr(source, "Placement", None) or FreeCAD.Placement()
+    base = PathUtil.baseOp(source)
+    if getattr(base, "Workplane", None) is None and isinstance(
+        getattr(base, "Proxy", None), PathCustom.ObjectCustom
+    ):
+        return FreeCAD.Placement(placement)
+    return PathWorkplane.toProgram(job, placement)
+
+
 class PostProcessorFactory:
     """Factory class for creating post processors."""
 
@@ -2221,19 +2239,27 @@ class PostProcessor:
         """
         import Path.Base.Generator.rotation as rotation
         from Machine.models.machine import RotationStrategy
+        from Path.Main.Workplane import zeroPlacement
 
         machine = self._machine
         strategy = self._rotation_strategy()
         chain = rotation.build_kinematic_chain(machine) if strategy is not None else []
+        # the zero turned from the machine table's axes
+        if strategy is not None and not zeroPlacement(self._job).Rotation.isSame(
+            FreeCAD.Rotation(), 1e-9
+        ):
+            self._refuse_turned_zero_on_rotary_machine()
 
         def placement_of(item):
-            """The operation's frame, or None for anything that is not an
-            operation. Without a rotary machine an unframed operation is
-            None too, so a three-axis Job passes through untouched."""
+            """The operation's frame in the program, measured from the Job's
+            zero, or None for anything that is not an operation. Without a
+            rotary machine an unframed operation is None too, so a three-axis
+            Job with its zero at the document's origin passes through
+            untouched."""
             src = item.source
             if src is None or item.item_type != "operation":
                 return None
-            placement = getattr(src, "Placement", None) or FreeCAD.Placement()
+            placement = _program_placement(self._job, src)
             if strategy is None and placement.isIdentity(1e-9):
                 return None
             return placement
@@ -2333,6 +2359,22 @@ class PostProcessor:
                 new_items.extend(self._plane_postables("TWP_CANCEL"))
             result.append((section_name, new_items))
         return result
+
+    def _refuse_turned_zero_on_rotary_machine(self):
+        """A zero moved from the document's origin is a shift: each plane and
+        each path is measured from it, the rotary positions solved as before.
+        A zero turned from the document's axes would have them solved against
+        its axes rather than the table's, so it is refused on a rotary
+        machine."""
+        raise CAMValueError(
+            translate(
+                "CAM",
+                "{job}'s zero is turned from the document's axes. Machine '{machine}' has "
+                "rotary axes, whose positions are solved against the table: turn the zero "
+                "back square to the document's axes.",
+            ).format(job=self._job.Label, machine=self._machine.name),
+            job=self._job,
+        )
 
     def _expand_rotary_move(self, postables):
         """Wrap any commands that have ABC axis
@@ -3047,6 +3089,11 @@ class PostProcessor:
 
         postables = self._buildPostList()
         Path.Log.debug(f"postables {postables}")
+        # measured from the Job's zero; with it at the document's origin the paths go as they are
+        from Path.Main.Workplane import zeroPlacement
+
+        if not zeroPlacement(self._job).isIdentity(1e-9):
+            WrapperPost._place_operations(postables, self._job)
 
         Path.Log.debug(f"postables count: {len(postables)}")
 
@@ -3992,7 +4039,7 @@ class WrapperPost(PostProcessor):
 
         self._refuse_tilted_operations()
         postables = self._buildPostList()
-        self._place_operations(postables)
+        self._place_operations(postables, self._job)
         Path.Log.debug(f"postables count: {len(postables)}")
 
         g_code_sections = []
@@ -4029,18 +4076,20 @@ class WrapperPost(PostProcessor):
                 )
 
     @staticmethod
-    def _place_operations(postables):
+    def _place_operations(postables, job=None):
         """An operation on a work plane stores its path in the plane's frame;
-        a legacy script reads the path it is given as world coordinates. Place
-        each one, as the current posts do in _expand_workplane_frames."""
+        a legacy script reads the path it is given as program coordinates,
+        measured from the Job's zero. Place each one, as the current posts do
+        in _expand_workplane_frames."""
         for _, items in postables:
             for item in items:
                 if item.item_type != "operation" or item.source is None:
                     continue
-                placement = getattr(item.source, "Placement", None)
-                if placement is not None and not placement.isIdentity(1e-9):
+                placement = _program_placement(job, item.source)
+                if not placement.isIdentity(1e-9):
                     item.path = PathUtil.applyPlacementToPath(placement, item.path)
-                    item.data["placed"] = True
+                # placed, even where the zero cancels its Placement: the script is not to apply it
+                item.data["placed"] = True
 
     @property
     def tooltip(self):

@@ -1243,7 +1243,11 @@ class TaskPanelHeightsPage(TaskPanelPage):
             combo.addItem(translate("CAM_Operation", "None (Job XY)"), "")
             job = PathUtils.findParentJob(obj)
             group = getattr(job, "Workplanes", None) if job else None
+            # the Job's zero is what None measures from: offered only to an operation already on it
+            zero = getattr(job, "Zero", None) if job else None
             for workplane in getattr(group, "Group", []) or []:
+                if workplane == zero and getattr(obj, "Workplane", None) != zero:
+                    continue
                 combo.addItem(workplane.Label, workplane.Name)
         finally:
             combo.blockSignals(False)

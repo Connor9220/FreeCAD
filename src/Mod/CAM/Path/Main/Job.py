@@ -69,6 +69,21 @@ class JobTemplate:
     PostProcessorPropertyOverrides = "PostPropertyOverrides"
     Machine = "Machine"
     Version = "Version"
+    Zero = "Zero"
+
+
+def stockTemplateAttrs(job, includeExtent=True, includePlacement=True):
+    """stockTemplateAttrs(job, includeExtent=True, includePlacement=True) ... the Job's stock as
+    a Job template keeps it, its placement measured from the Job's zero, as a version without a
+    Job zero reads it."""
+    import Path.Main.Workplane as PathWorkplane
+
+    attrs = PathStock.TemplateAttributes(job.Stock, includeExtent, includePlacement)
+    if attrs and "posX" in attrs:
+        attrs.update(
+            PathWorkplane.placementAttrs(PathWorkplane.toProgram(job, job.Stock.Placement))
+        )
+    return attrs
 
 
 def isResourceClone(obj, propLink, resourceName):
@@ -179,8 +194,11 @@ def objectsInModelFrame(job):
             return
         carried.append(obj)
 
+    # the Job's zero stays where it was set when the model moves within the setup
+    zero = getattr(job, "Zero", None)
     for workplane in getattr(getattr(job, "Workplanes", None), "Group", []) or []:
-        carry(workplane)
+        if workplane != zero:
+            carry(workplane)
     import PathScripts.PathUtils as PathUtils
 
     for obj in job.Document.Objects:
@@ -430,6 +448,9 @@ class ObjectJob:
 
         self.setupOperations(obj)
         self.setupWorkplanes(obj)
+        from Path.Main.Workplane import setupZero
+
+        setupZero(obj)
         self.setupSetupSheet(obj)
         self.setupBaseModel(obj, models)
         self.setupToolTable(obj)
@@ -816,6 +837,7 @@ class ObjectJob:
         self.adoptOrphanWorkplanes(obj)
         import Path.Main.Workplane as PathWorkplane
 
+        PathWorkplane.setupZero(obj)
         for workplane in PathWorkplane.workplanesOf(obj):
             PathWorkplane.ensureFixtureProperty(workplane)
         if FreeCAD.GuiUp:
@@ -971,8 +993,17 @@ class ObjectJob:
                             tcs.append(ctrl)
                         else:
                             Path.Log.debug(f"skipping TC {tc['name']}")
+                import Path.Main.Workplane as PathWorkplane
+
+                # the zero first: the stock is kept measured from it
+                PathWorkplane.setZeroFromTemplate(obj, attrs.get(JobTemplate.Zero))
                 if attrs.get(JobTemplate.Stock):
                     obj.Stock = PathStock.CreateFromTemplate(obj, attrs.get(JobTemplate.Stock))
+                    placed = PathWorkplane.placementFromAttrs(attrs[JobTemplate.Stock])
+                    if obj.Stock and placed is not None:
+                        placement = PathWorkplane.fromProgram(obj, placed)
+                        if not placement.isSame(obj.Stock.Placement, 1e-9):
+                            obj.Stock.Placement = placement
 
                 if attrs.get(JobTemplate.Fixtures):
                     obj.Fixtures = [x for y in attrs.get(JobTemplate.Fixtures) for x in y]
@@ -1019,6 +1050,11 @@ class ObjectJob:
         attrs[JobTemplate.GeometryTolerance] = str(obj.GeometryTolerance.Value)
         if obj.Description:
             attrs[JobTemplate.Description] = obj.Description
+        import Path.Main.Workplane as PathWorkplane
+
+        zero = PathWorkplane.zeroTemplateAttrs(obj)
+        if zero:
+            attrs[JobTemplate.Zero] = zero
         return attrs
 
     def dumps(self):

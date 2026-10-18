@@ -108,6 +108,8 @@ def createWorkplane(job, base=None, sub=None, label=None, placement=None):
     workplane = doc.addObject("Part::LocalCoordinateSystem", "Workplane")
     workplane.Label = label or "Workplane"
     ensureFixtureProperty(workplane)
+    # a new plane runs in the coordinate system the Job's zero names
+    workplane.Fixture = fixtureOf(getattr(job, ZeroProperty, None)) or ""
 
     if base is not None and sub:
         model = resolveToJobModel(job, base)
@@ -224,6 +226,161 @@ def workplanesOf(job):
     """workplanesOf(job) ... the Job's named work planes, in group order."""
     group = getattr(job, "Workplanes", None)
     return list(getattr(group, "Group", []) or [])
+
+
+ZeroProperty = "Zero"
+
+
+def setupZero(job):
+    """setupZero(job) ... give job its zero if it has none, and return it.
+
+    The document's origin is the machine's table; the Job's zero is where its
+    program is measured from. It is a work plane like the others, held first
+    in the Job's Workplanes, and not attached to anything: setting the origin
+    moves it, not the model, the stock or the workholding, so several Jobs
+    laid out on one table each keep a zero of their own. A new Job, and one
+    from a document saved before Jobs had a zero, gets it at the document's
+    origin, so its program is what it was."""
+    if not hasattr(job, ZeroProperty):
+        job.addProperty(
+            "App::PropertyLink",
+            ZeroProperty,
+            "WCS",
+            QT_TRANSLATE_NOOP(
+                "App::Property",
+                "The work plane the Job's program is measured from: the Job's zero",
+            ),
+        )
+    zero = getattr(job, ZeroProperty, None)
+    if zero is not None:
+        return zero
+    job.Proxy.setupWorkplanes(job)
+    zero = job.Document.addObject("Part::LocalCoordinateSystem", "Zero")
+    zero.Label = translate("CAM", "Zero")
+    ensureFixtureProperty(zero)
+    group = job.Workplanes
+    group.Group = [zero] + [o for o in group.Group if o != zero]
+    setattr(job, ZeroProperty, zero)
+    configureZeroView(zero)
+    return zero
+
+
+def configureZeroView(zero):
+    """configureZeroView(zero) ... draw nothing of a Job's zero in the view, nor list it in the
+    tree: the Job's origin marker stands for it (see the Job's view provider), and Set origin
+    moves it. Its axes stay hidden even when the zero, or the Workplanes group holding it, is
+    shown. Harmless without a GUI."""
+    configureView(zero)
+    if not FreeCAD.GuiUp:
+        return
+    view = getattr(zero, "ViewObject", None)
+    if view is not None and getattr(view, "ShowInTree", False):
+        view.ShowInTree = False
+    for child in getattr(zero, "OriginFeatures", []) or []:
+        view = getattr(child, "ViewObject", None)
+        if view is not None and view.Visibility:
+            view.Visibility = False
+
+
+def zeroOf(job):
+    """zeroOf(job) ... the work plane that is job's zero, or None."""
+    return getattr(job, ZeroProperty, None) if job is not None else None
+
+
+def zeroPlacement(job):
+    """zeroPlacement(job) ... where job's program is measured from, in the
+    document: its zero's placement, or the document's origin without one."""
+    zero = zeroOf(job)
+    if zero is None:
+        return FreeCAD.Placement()
+    return FreeCAD.Placement(zero.Placement)
+
+
+def showFromZero(job):
+    """showFromZero(job) ... draw job's paths from its zero: a path's first move starts where its
+    view's StartPosition is, which is the document's origin unless set. Each operation and
+    dressup, and what a dressup is made from, starts at the zero, in its own frame. Harmless
+    without a GUI."""
+    if not FreeCAD.GuiUp or job is None or getattr(job, "Operations", None) is None:
+        return
+    zero = zeroPlacement(job).Base
+    seen = set()
+
+    def show(obj):
+        # an operation's Base is the geometry it is made from; a dressup's, the path it dresses
+        if not isinstance(obj, FreeCAD.DocumentObject) or obj.Name in seen:
+            return
+        if not hasattr(obj, "Path"):
+            return
+        seen.add(obj.Name)
+        view = getattr(obj, "ViewObject", None)
+        if view is not None and hasattr(view, "StartPosition"):
+            placement = getattr(obj, "Placement", None) or FreeCAD.Placement()
+            start = placement.inverse().multVec(zero)
+            if not view.StartPosition.isEqual(start, 1e-9):
+                view.StartPosition = start
+        show(getattr(obj, "Base", None))
+
+    for op in job.Operations.Group:
+        show(op)
+
+
+def toProgram(job, placement):
+    """toProgram(job, placement) ... placement, a frame in the document, as
+    the Job's program reads it: measured from the Job's zero."""
+    return zeroPlacement(job).inverse().multiply(placement)
+
+
+def fromProgram(job, placement):
+    """fromProgram(job, placement) ... placement, measured from the Job's zero,
+    as a frame in the document: the inverse of toProgram."""
+    return zeroPlacement(job).multiply(placement)
+
+
+# a placement in a Job template, by the names the stock's uses: numbers only, for a version that
+# decodes a template's every list as a list of dicts fails on a list of numbers
+PlacementKeys = ("posX", "posY", "posZ", "rotX", "rotY", "rotZ", "rotW")
+
+
+def placementAttrs(placement):
+    """placementAttrs(placement) ... placement as a Job template keeps it."""
+    base = placement.Base
+    return dict(zip(PlacementKeys, (base.x, base.y, base.z) + tuple(placement.Rotation.Q)))
+
+
+def placementFromAttrs(attrs):
+    """placementFromAttrs(attrs) ... the placement a Job template keeps in attrs, or None
+    without one."""
+    try:
+        values = [float(attrs[key]) for key in PlacementKeys]
+    except (KeyError, TypeError, ValueError):
+        return None
+    return FreeCAD.Placement(FreeCAD.Vector(*values[:3]), FreeCAD.Rotation(*values[3:]))
+
+
+def zeroTemplateAttrs(job):
+    """zeroTemplateAttrs(job) ... the Job's zero as a Job template keeps it: where it is on the
+    table and the Fixture it names. The template keeps the stock measured from it, so a version
+    without a Job zero, which ignores this, makes the same program."""
+    zero = zeroOf(job)
+    if zero is None:
+        return None
+    attrs = placementAttrs(zero.Placement)
+    if fixtureOf(zero):
+        attrs["Fixture"] = fixtureOf(zero)
+    return attrs
+
+
+def setZeroFromTemplate(job, attrs):
+    """setZeroFromTemplate(job, attrs) ... put the Job's zero where a Job template keeps it. A
+    template without one, made before Jobs had a zero, leaves it at the document's origin."""
+    zero = setupZero(job)
+    placement = placementFromAttrs(attrs or {})
+    if placement is not None:
+        zero.Placement = placement
+    fixture = (attrs or {}).get("Fixture")
+    if fixture:
+        zero.Fixture = fixture
 
 
 def operationsUsing(job, workplane):

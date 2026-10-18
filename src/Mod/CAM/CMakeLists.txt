@@ -681,6 +681,7 @@ SET(Tests_SRCS
     CAMTests/TestPathVoronoi.py
     CAMTests/TestPathWorkplane.py
     CAMTests/TestPathWorkplaneFrame.py
+    CAMTests/TestPathJobZero.py
     CAMTests/TestPathTiltedWorkPlane.py
     CAMTests/TestPathJobModelLinks.py
     CAMTests/TestPathSharedWorkplane.py

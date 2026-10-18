@@ -235,7 +235,7 @@ class TestWorkplaneOnOperation(PathTestUtils.PathTestBase):
         op.Proxy.onDocumentRestored(op)
 
         self.assertIsNone(op.Workplane)
-        self.assertEqual([], self.job.Workplanes.Group)
+        self.assertEqual([self.job.Zero], self.job.Workplanes.Group)
 
     def test_migrationFromPrototypeLink(self):
         """A prototype document with placement plus WorkplaneLink keeps the link."""

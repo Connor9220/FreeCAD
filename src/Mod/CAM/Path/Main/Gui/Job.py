@@ -33,6 +33,7 @@ import Path.GuiInit as PathGuiInit
 import Path.Main.Gui.JobDlg as PathJobDlg
 import Path.Main.Job as PathJob
 import Path.Main.Stock as PathStock
+import Path.Main.Workplane as PathWorkplane
 import Path.Tool.Gui.Controller as PathToolControllerGui
 
 # Must stay an eager, top-level import (not lazy/local): importing this
@@ -110,6 +111,7 @@ class ViewProvider:
 
         # initialized later
         self.axs = None
+        self.zeroTransform = None
         self.mat = None
         self.obj = None
         self.sca = None
@@ -131,9 +133,12 @@ class ViewProvider:
         if not hasattr(self, "stockVisibility"):
             self.stockVisibility = False
 
-        # Setup the axis display at the origin
+        # Setup the axis display at the Job's zero
         self.switch = coin.SoSwitch()
         self.sep = coin.SoType.fromName("So3DAnnotation").createInstance()
+        # where the zero is: follows its work plane's own transform (followZero)
+        self.zeroTransform = coin.SoTransform()
+        self.sep.addChild(self.zeroTransform)
 
         self.axs = coin.SoType.fromName("SoFCPlacementIndicatorKit").createInstance()
         self.axs.axisLength.setValue(1.2)
@@ -149,6 +154,8 @@ class ViewProvider:
 
         vobj.RootNode.addChild(self.switch)
         self.showOriginAxis(True)
+        # the zero's view is made after the Job's while a document opens
+        QtCore.QTimer.singleShot(0, self.followZero)
 
         for base in self.obj.Model.Group:
             Path.Log.debug(f"{base.Name}: {base.ViewObject.Visibility}")
@@ -166,15 +173,19 @@ class ViewProvider:
                 return
 
             if vobj.Visibility:
+                self.restoreGroupsVisibility()
                 self.restoreOperationsVisibility()
                 self.restoreModelsVisibility()
                 self.restoreStockVisibility()
                 self.restoreToolsVisibility()
+                self.restoreChildrenVisibility()
             else:
                 self.hideOperations()
                 self.hideModels()
                 self.hideStock()
                 self.hideTools()
+                self.hideChildren()
+                self.hideGroups()
 
     def hideOperations(self):
         self.operationsVisibility = {}
@@ -206,6 +217,54 @@ class ViewProvider:
             for model in self.obj.Model.Group:
                 model.Visibility = True
 
+    # the groups hidden with the Job, so their eyes in the tree say so too; Model and Tools are
+    # hidden anyway
+    _groups = ("Operations", "Workplanes")
+    # the groups whose members are hidden and shown again with the Job, as each was
+    _childGroups = ("Workplanes",)
+
+    def _group(self, name):
+        group = getattr(self.obj, name, None)
+        return group if group is not None and group.ViewObject is not None else None
+
+    def _children(self, name):
+        group = self._group(name)
+        return [o for o in (getattr(group, "Group", None) or []) if o.ViewObject]
+
+    def hideGroups(self):
+        self.groupsVisibility = {}
+        for name in self._groups:
+            group = self._group(name)
+            if group is not None:
+                self.groupsVisibility[name] = group.Visibility
+                group.Visibility = False
+
+    def restoreGroupsVisibility(self):
+        shown = getattr(self, "groupsVisibility", None) or {}
+        for name in self._groups:
+            group = self._group(name)
+            if group is not None:
+                group.Visibility = shown.get(name, True)
+
+    def hideChildren(self):
+        """Hide the work planes, remembering which were shown."""
+        self.childrenVisibility = {}
+        for name in self._childGroups:
+            for child in self._children(name):
+                self.childrenVisibility[child.Name] = child.Visibility
+                child.Visibility = False
+
+    def restoreChildrenVisibility(self):
+        """Show the work planes again as they were before the Job was hidden; a group shown again
+        may have shown all its members."""
+        shown = getattr(self, "childrenVisibility", None)
+        if shown is None:
+            return
+        for name in self._childGroups:
+            for child in self._children(name):
+                if child.Name in shown:
+                    child.Visibility = shown[child.Name]
+
     def hideStock(self):
         self.stockVisibility = self.obj.Stock.Visibility
         self.obj.Stock.Visibility = False
@@ -229,6 +288,33 @@ class ViewProvider:
     def showOriginAxis(self, yes):
         sw = coin.SO_SWITCH_ALL if yes else coin.SO_SWITCH_NONE
         self.switch.whichChild = sw
+        if yes:
+            self.followZero()
+
+    def followZero(self):
+        """Draw the Job's origin marker at its zero: the marker's transform is tied to the zero
+        work plane's own, so it moves whenever the zero does, shown or not. Until the zero has a
+        view, the marker stays at the document's origin."""
+        transform = getattr(self, "zeroTransform", None)
+        zero = getattr(getattr(self, "obj", None), "Zero", None)
+        view = getattr(zero, "ViewObject", None) if zero is not None else None
+        if transform is None or view is None:
+            return
+        # the marker stands for the zero: its own axes stay hidden, also in a document saved
+        # with them shown
+        PathWorkplane.configureZeroView(zero)
+        source = None
+        root = view.RootNode
+        for i in range(root.getNumChildren()):
+            child = root.getChild(i)
+            if child.isOfType(coin.SoTransform.getClassTypeId()):
+                source = child
+                break
+        if source is None:
+            return
+        transform.translation.connectFrom(source.translation)
+        transform.rotation.connectFrom(source.rotation)
+        PathWorkplane.showFromZero(self.obj)
 
     def dumps(self):
         return None
@@ -309,6 +395,11 @@ class ViewProvider:
 
     def updateData(self, obj, prop):
         Path.Log.track(obj.Label, prop)
+        if prop == "Zero":
+            QtCore.QTimer.singleShot(0, self.followZero)
+        # paths are drawn from the Job's zero, also a path just made or made again
+        if prop in ("Zero", "PathChanged"):
+            QtCore.QTimer.singleShot(0, lambda: PathWorkplane.showFromZero(self.obj))
         # make sure the resource view providers are setup properly
         if prop == "Model" and self.obj.Model:
             for base in self.obj.Model.Group:
@@ -1487,21 +1578,17 @@ class TaskPanel:
                     bb = feature.BoundBox
                     offset = FreeCAD.Vector(axis.x * bb.XMax, axis.y * bb.YMax, axis.z * bb.ZMax)
                     Path.Log.track(feature.BoundBox.ZMax, offset)
+                    if self.form.linkStockAndModel.isChecked():
+                        # the whole setup: nothing moves, the Job's zero is set on that axis
+                        self.setZero(
+                            -offset.x if axis.x else None,
+                            -offset.y if axis.y else None,
+                            -offset.z if axis.z else None,
+                        )
+                        continue
                     p = selObject.Placement
                     p.move(offset)
                     selObject.Placement = p
-
-                    if self.form.linkStockAndModel.isChecked():
-                        # Also move the objects not selected
-                        # if selection is not model, move the model too
-                        # if the selection is not stock and there is a stock, move the stock too,
-                        # once: a stock made from the model follows it by itself, which
-                        # keepingPoints() sees to
-                        for model in self.obj.Model.Group:
-                            if model != selObject:
-                                Draft.move(model, offset)
-                        if selObject != self.obj.Stock and self.obj.Stock:
-                            Draft.move(self.obj.Stock, offset)
 
     def modelMove(self, axis):
         scale = self.form.modelMoveValue.property("rawValue")
@@ -1670,40 +1757,53 @@ class TaskPanel:
 
         return run
 
+    def setZero(self, x=None, y=None, z=None):
+        """Put the Job's zero at x, y, z in the document; an axis given as None keeps where the
+        zero is on it. Nothing else moves."""
+        zero = PathWorkplane.setupZero(self.obj)
+        placement = FreeCAD.Placement(zero.Placement)
+        base = placement.Base
+        placement.Base = FreeCAD.Vector(
+            base.x if x is None else x,
+            base.y if y is None else y,
+            base.z if z is None else z,
+        )
+        if not placement.isSame(zero.Placement, 1e-9):
+            zero.Placement = placement
+            PathWorkplane.showFromZero(self.obj)
+
+    def pickedPoint(self):
+        """Return the point picked for the origin, in the document; None if none is picked."""
+        for sel in FreeCADGui.Selection.getSelectionEx():
+            for feature in sel.SubElementNames:
+                point = self.datumPoint(sel.Object.Shape.getElement(feature))
+                if point is not None:
+                    return point
+        return None
+
     def alignSetOrigin(self):
-        obj, by = self.alignMoveToOrigin()
-
-        for base in self.obj.Model.Group:
-            if base != obj:
-                Draft.move(base, by)
-
-        if obj != self.obj.Stock and self.obj.Stock:
-            Draft.move(self.obj.Stock, by)
-
-        placement = FreeCADGui.ActiveDocument.ActiveView.viewPosition()
-        placement.Base = placement.Base + by
-        FreeCADGui.ActiveDocument.ActiveView.viewPosition(placement, 0)
+        """Put the Job's zero on the point picked. The model, the stock and the workholding stay
+        where they are on the table: only what the program is measured from changes."""
+        point = self.pickedPoint()
+        if point is None:
+            return
+        self.setZero(point.x, point.y, point.z)
         FreeCADGui.Selection.clearSelection()
 
     def alignMoveToOrigin(self):
+        """Move the picked object so the point picked on it lands on the Job's zero, which
+        the program is measured from."""
         selObject = None
         selFeature = None
         p = None
+        zero = PathWorkplane.zeroPlacement(self.obj).Base
         for sel in FreeCADGui.Selection.getSelectionEx():
             selObject = sel.Object
             for feature in sel.SubElementNames:
                 selFeature = feature
-                sub = sel.Object.Shape.getElement(feature)
-                if "Vertex" == sub.ShapeType:
-                    p = FreeCAD.Vector() - sub.Point
-                if "Edge" == sub.ShapeType:
-                    if isinstance(sub.Curve, Part.Circle):
-                        p = FreeCAD.Vector() - sub.Curve.Location
-                    else:
-                        mid = sub.valueAt((sub.FirstParameter + sub.LastParameter) / 2)
-                        p = FreeCAD.Vector() - mid
-                if "Face" == sub.ShapeType:
-                    p = FreeCAD.Vector() - sub.BoundBox.Center
+                point = self.datumPoint(sel.Object.Shape.getElement(feature))
+                if point is not None:
+                    p = zero - point
 
                 if p:
                     Draft.move(sel.Object, p)
@@ -1793,6 +1893,19 @@ class TaskPanel:
 
     def isValidDatumSelection(self, sel):
         return sel.ShapeType in ("Vertex", "Edge", "Face")
+
+    def datumPoint(self, sub):
+        """Return the point a picked vertex, edge or face stands for: the vertex, a circle's
+        center or an edge's middle, a face's center; None for anything else."""
+        if "Vertex" == sub.ShapeType:
+            return sub.Point
+        if "Edge" == sub.ShapeType:
+            if isinstance(sub.Curve, Part.Circle):
+                return sub.Curve.Location
+            return sub.valueAt((sub.FirstParameter + sub.LastParameter) / 2)
+        if "Face" == sub.ShapeType:
+            return sub.BoundBox.Center
+        return None
 
     def isValidAxisSelection(self, sel):
         if sel.ShapeType in ("Vertex", "Edge", "Face"):
@@ -1979,7 +2092,6 @@ class TaskPanel:
             "modelSet0",
             "modelMove",
             "modelRotate",
-            "alignSetOrigin",
             "alignMoveToOrigin",
         ):
             setattr(self, name, self.keepingPoints(getattr(self, name)))

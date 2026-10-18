@@ -435,10 +435,17 @@ void ViewProviderPath::onChanged(const App::Property* prop)
         }
     }
     else if (prop == &StartPosition) {
+        // the path is walked again from the new start: a move missing X, Y or Z takes it from
+        // the start, so more than the first point can change
         if (pcLineCoords->point.getNum()) {
-            const Base::Vector3d& pt = StartPosition.getValue();
-            pcLineCoords->point.set1Value(0, pt.x, pt.y, pt.z);
-            pcMarkerCoords->point.set1Value(0, pt.x, pt.y, pt.z);
+            bool vis = isShow();
+            if (vis) {
+                hide();
+            }
+            updateVisual(true);
+            if (vis) {
+                show();
+            }
         }
     }
     else {

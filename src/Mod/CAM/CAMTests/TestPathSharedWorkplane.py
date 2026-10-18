@@ -164,10 +164,10 @@ class TestSharedWorkplane(PathTestUtils.PathTestBase):
             self.assertIsNone(self.doc.getObject(name), "%s left behind" % name)
 
     def test_jobHasAWorkplanesGroup(self):
-        """Every Job gets somewhere to keep named work planes."""
+        """Every Job gets somewhere to keep named work planes, its zero the first of them."""
         self.assertTrue(hasattr(self.job, "Workplanes"))
         self.assertIsNotNone(self.job.Workplanes)
-        self.assertEqual([], self.job.Workplanes.Group)
+        self.assertEqual([self.job.Zero], self.job.Workplanes.Group)
 
     def test_createdWorkplaneIsFiledUnderTheJob(self):
         workplane = PathWorkplane.createWorkplane(self.job)

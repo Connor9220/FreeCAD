@@ -51,6 +51,22 @@ class GCodeEditorDialog(QtGui.QDialog):
         # the plane's own frame, before Placement moves it onto the part.
         self.commands = PathUtils.getPathWithPlacement(PathObj).Commands
         self.rawCommands = list(PathObj.Path.Commands) if PathObj.Path else []
+        # The listing, as the program has it: measured from the Job's zero, as the post-processor
+        # places it; with the zero at the document's origin, the placed path itself.
+        self.listedCommands = self.commands
+        self.zero = None
+        job = PathUtils.findParentJob(PathObj)
+        if job is not None and PathObj.Path:
+            import Path.Main.Workplane as PathWorkplane
+            from Path.Post.Processor import _program_placement
+
+            zero = PathWorkplane.zeroPlacement(job)
+            if not zero.isIdentity(1e-9):
+                self.zero = zero.Base
+                placement = _program_placement(job, PathObj)
+                self.listedCommands = PathUtils.applyPlacementToPath(
+                    placement, PathObj.Path
+                ).Commands
         self.tc = toolControllerForOp(PathObj)
         self.tool = getattr(self.tc, "Tool", None)
         self.toolInitVisibility = getattr(self.tool, "Visibility", False)  # keep tool visibility
@@ -325,6 +341,15 @@ class GCodeEditorDialog(QtGui.QDialog):
             )
             % (unitsStr, unitLength, unitLength, unitTime)
         )
+        if self.zero is not None and not self.chkRaw.isChecked():
+            self.lab.setText(
+                self.lab.text()
+                + translate(
+                    "CAM_Inspect",
+                    "<br><b>Measured from the Job's zero</b>, at (%.3f, %.3f, %.3f) mm in the document.",
+                )
+                % (self.zero.x, self.zero.y, self.zero.z)
+            )
         if self.chkRaw.isChecked():
             placement = self.pathObj.Placement
             if not placement.isIdentity(1e-9):
@@ -343,7 +368,7 @@ class GCodeEditorDialog(QtGui.QDialog):
             return
 
         text = ""
-        for cmd in self.commands:
+        for cmd in self.listedCommands:
             text += cmd.Name
             for key, value in cmd.Parameters.items():
                 if self.units == "imperial" and key in list("FXYZIJK"):

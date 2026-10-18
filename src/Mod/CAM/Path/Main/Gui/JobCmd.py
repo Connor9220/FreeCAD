@@ -28,7 +28,6 @@ import FreeCADGui
 import Path
 import Path.Main.Gui.JobDlg as PathJobDlg
 import Path.Main.Job as PathJob
-import Path.Main.Stock as PathStock
 import json
 import os
 
@@ -173,13 +172,13 @@ class CommandJobTemplateExport:
         stockAttrs = None
         if dialog:
             if dialog.includeStock():
-                stockAttrs = PathStock.TemplateAttributes(
-                    job.Stock,
+                stockAttrs = PathJob.stockTemplateAttrs(
+                    job,
                     dialog.includeStockExtent(),
                     dialog.includeStockPlacement(),
                 )
         else:
-            stockAttrs = PathStock.TemplateAttributes(job.Stock)
+            stockAttrs = PathJob.stockTemplateAttrs(job)
         if stockAttrs:
             attrs[PathJob.JobTemplate.Stock] = stockAttrs
 
@@ -199,6 +198,7 @@ class CommandJobTemplateExport:
             attrs[PathJob.JobTemplate.SetupSheet] = setupSheetAttrs
 
         encoded = job.Proxy.setupSheet.encodeTemplateAttributes(attrs)
+
         # write template
         with open(str(path), "w") as fp:
             json.dump(encoded, fp, sort_keys=True, indent=2)
