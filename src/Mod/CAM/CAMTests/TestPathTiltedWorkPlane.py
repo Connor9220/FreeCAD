@@ -357,6 +357,12 @@ class TestTiltedWorkPlanePost(_PlaneFixture):
         moves = self._rotary_moves(self._op("A", self._plane()), self._op("B", other))
         self.assertEqual(moves, [[["C"], ["A"]]], "already in place under G55")
 
+    def test_aPoseTheControlReachedCommandsEveryRotaryAgain(self):
+        """The control's align command may take the other solution, so its
+        angles are not assumed on the way home."""
+        moves = self._rotary_moves(self._op("Tilted", self._plane()), self._op("Plain", None))
+        self.assertEqual(moves, [[["C"], ["A"]]], "C is commanded home too")
+
     def test_aToolChangeCommandsEveryRotaryAgain(self):
         """Where the rotaries are is not assumed after a tool change."""
         self.machine.kinematics.rotation_strategy = RotationStrategy.DWO

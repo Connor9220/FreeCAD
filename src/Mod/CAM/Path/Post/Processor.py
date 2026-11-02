@@ -2264,6 +2264,9 @@ class PostProcessor:
         for section_name, sublist in postables:
             pose = None  # (frame, angles) the machine is at; None when not assumed
             declared = False  # a TWP plane is in effect
+            # The control's align command picks its own solution, which may
+            # not be the solver's, so those angles are not assumed.
+            commanded = True  # the program, not the control, put the rotaries at pose
             job_fixture = None  # the Job's own fixture, from the last fixture item
             selected = None  # the fixture the control has selected; None when not assumed
             new_items = []
@@ -2322,13 +2325,16 @@ class PostProcessor:
                             declared,
                             rotaries_move,
                             fixture_change,
-                            dict(pose[1]) if pose else None,
+                            dict(pose[1]) if pose and commanded else None,
                         )
                     )
                     if fixture_change:
                         selected = fixture_change
                     pose = (frame, angles)
                     declared = strategy == RotationStrategy.TWP and tilted
+                    commanded = not (
+                        declared and self.values.get("TWP_CONTROL_POSITIONS_ROTARIES", True)
+                    )
 
                 if strategy != RotationStrategy.TWP or not tilted:
                     # A datum plane under TWP is not declared: its frame is
