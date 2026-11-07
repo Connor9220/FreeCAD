@@ -56,8 +56,10 @@ else:
 class ObjectOp(PathOp.ObjectOp):
     """Base class for proxy objects of all operations on circular holes."""
 
-    # keep holes of different diameters at one position, as the steps of a stepped hole
-    keepsHoleSteps = False
+    def keepsHoleSteps(self, obj):
+        """keepsHoleSteps(obj) ...
+        Keep holes of different diameters at one position, as the steps of a stepped hole"""
+        return False
 
     def opFeatures(self, obj):
         """opFeatures(obj) ... calls circularHoleFeatures(obj) and ORs in the standard features required for processing circular holes.
@@ -226,7 +228,7 @@ class ObjectOp(PathOp.ObjectOp):
                     continue
                 diam = self.holeDiameter(base, sub)
                 for hole in holes:  # check positions repeats
-                    if self.keepsHoleSteps and not Path.Geom.isRoughly(diam, hole["d"]):
+                    if self.keepsHoleSteps(obj) and not Path.Geom.isRoughly(diam, hole["d"]):
                         continue  # another step of a stepped hole, not a repeat
                     if Path.Geom.pointsCoincide((pos.x, pos.y), (hole["x"], hole["y"])):
                         if diam > hole["d"] and not Path.Geom.isRoughly(diam, hole["d"]):

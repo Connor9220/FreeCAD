@@ -72,7 +72,9 @@ def _caclulateCutMode(direction, side):
 class ObjectHelix(PathCircularHoleBase.ObjectOp):
     """Proxy class for Helix operations."""
 
-    keepsHoleSteps = True
+    def keepsHoleSteps(self, obj):
+        """Allows processing steps of counterbored hole only if OverrideProfileDiameter is zero"""
+        return not bool(obj.OverrideProfileDiameter)
 
     @classmethod
     def helixOpPropertyEnumerations(self, dataType="data"):
@@ -673,16 +675,6 @@ class ObjectHelix(PathCircularHoleBase.ObjectOp):
             linkingArgs["tool_shape"] = obj.ToolController.Tool.BitBody.Shape
 
         obj.Direction = _caclulatePathDirection(obj)
-
-        if obj.OverrideProfileDiameter.Value:
-            # every hole is cut at one diameter, so the steps of a stepped hole are one hole again
-            holes = [
-                h
-                for i, h in enumerate(holes)
-                if not any(
-                    Path.Geom.pointsCoincide((h["x"], h["y"]), (g["x"], g["y"])) for g in holes[:i]
-                )
-            ]
 
         # a step over a smaller one, or outside on a larger one, stops at its floor or Final Depth
         for hole in holes:
