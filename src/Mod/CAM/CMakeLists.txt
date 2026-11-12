@@ -192,6 +192,7 @@ SET(PathPythonToolsFeedsSpeeds_SRCS
 
 SET(PathPythonMachineUi_SRCS
     Machine/ui/__init__.py
+    Machine/ui/library_dialog.py
     Machine/ui/mtconnect_import_dialog.py
 )
 
@@ -202,8 +203,14 @@ SET(PathPythonMachineUiEditor_SRCS
     Machine/ui/editor/output_options_layout.py
 )
 
+SET(PathPythonCAMAssets_SRCS
+    CAMAssets/__init__.py
+    CAMAssets/library.py
+)
+
 SET(PathPythonMachineModels_SRCS
     Machine/models/__init__.py
+    Machine/models/library.py
     Machine/models/machine.py
     Machine/models/mtconnect_import.py
     Machine/models/validate.py
@@ -607,6 +614,8 @@ SET(Tests_SRCS
     CAMTests/TestLegacyPostRetractMode.py
     CAMTests/TestLinkingGenerator.py
     CAMTests/TestMachine.py
+    CAMTests/TestMachineLibrary.py
+    CAMTests/TestCAMAssetsLibrary.py
     CAMTests/TestMachineValidate.py
     CAMTests/TestMach3Mach4LegacyPost.py
     CAMTests/TestMach3Mach4Post.py
@@ -813,6 +822,7 @@ SET(all_files
     ${PathPythonToolsLibraryModels_SRCS}
     ${PathPythonToolsLibrarySerializers_SRCS}
     ${PathPythonToolsLibraryUi_SRCS}
+    ${PathPythonCAMAssets_SRCS}
     ${PathPythonMachineModels_SRCS}
     ${PathPythonMachineUi_SRCS}
     ${PathPythonMachineUiEditor_SRCS}
@@ -1102,6 +1112,13 @@ INSTALL(
         ${PathPythonToolsLibraryUi_SRCS}
     DESTINATION
         Mod/CAM/Path/Tool/library/ui
+)
+
+INSTALL(
+    FILES
+        ${PathPythonCAMAssets_SRCS}
+    DESTINATION
+        Mod/CAM/CAMAssets
 )
 
 INSTALL(
