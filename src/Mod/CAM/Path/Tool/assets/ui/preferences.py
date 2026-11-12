@@ -91,7 +91,7 @@ class AssetPreferencesPage:
         self.machines_list = QtGui.QListWidget()
         self.machines_layout.addWidget(self.machines_list)
 
-        # Buttons: Add / Import / Edit / Delete
+        # Buttons: Add / Import / Library / Edit / Delete
         self.btn_layout = QtGui.QHBoxLayout()
         self.add_machine_btn = QtGui.QPushButton(translate("CAM_PreferencesAssets", "Add"))
         self.import_machine_btn = QtGui.QPushButton(translate("CAM_PreferencesAssets", "Import..."))
@@ -101,10 +101,20 @@ class AssetPreferencesPage:
                 "Create a machine from the probe document of an MTConnect agent",
             )
         )
+        self.library_machine_btn = QtGui.QPushButton(
+            translate("CAM_PreferencesAssets", "Library...")
+        )
+        self.library_machine_btn.setToolTip(
+            translate(
+                "CAM_PreferencesAssets",
+                "Install machines from the libraries FreeCAD knows, one at a time",
+            )
+        )
         self.edit_machine_btn = QtGui.QPushButton(translate("CAM_PreferencesAssets", "Edit"))
         self.delete_machine_btn = QtGui.QPushButton(translate("CAM_PreferencesAssets", "Delete"))
         self.btn_layout.addWidget(self.add_machine_btn)
         self.btn_layout.addWidget(self.import_machine_btn)
+        self.btn_layout.addWidget(self.library_machine_btn)
         self.btn_layout.addWidget(self.edit_machine_btn)
         self.btn_layout.addWidget(self.delete_machine_btn)
         self.machines_layout.addLayout(self.btn_layout)
@@ -125,12 +135,18 @@ class AssetPreferencesPage:
         # Wire up buttons
         self.add_machine_btn.clicked.connect(self.add_machine)
         self.import_machine_btn.clicked.connect(self.import_machine)
+        self.library_machine_btn.clicked.connect(self.library_machine)
         self.edit_machine_btn.clicked.connect(self.edit_machine)
         self.delete_machine_btn.clicked.connect(self.delete_machine)
 
         # Connect double-click to edit
         self.machines_list.itemDoubleClicked.connect(self.edit_machine)
 
+        self.fill_machines()
+
+    def fill_machines(self):
+        """List the machines in the user's Machines folder."""
+        self.machines_list.clear()
         for name, filename in MachineFactory.list_configuration_files():
             item = QtGui.QListWidgetItem(name)
             item.setData(QtCore.Qt.UserRole, filename)
@@ -210,6 +226,15 @@ class AssetPreferencesPage:
                 self.machines_list.addItem(item)
         except Exception as e:
             Path.Log.error(f"Failed to import machine: {e}")
+
+    def library_machine(self):
+        # Install machines from the Machine Library
+        from Machine.ui.library_dialog import MachineLibraryDialog
+
+        dialog = MachineLibraryDialog(self.form)
+        dialog.exec_()
+        if dialog.installed:
+            self.fill_machines()
 
     def edit_machine(self):
         try:

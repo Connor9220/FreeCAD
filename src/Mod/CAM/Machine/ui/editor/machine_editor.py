@@ -996,6 +996,23 @@ class MachineEditorDialog(QtGui.QDialog):
         ):
             self._refresh_after_addon_install()
 
+    def _open_machine_library(self):
+        """Open the Machine Library; the last machine installed becomes the template."""
+        from Machine.ui.library_dialog import MachineLibraryDialog
+
+        dialog = MachineLibraryDialog(self)
+        dialog.exec_()
+        if not dialog.installed:
+            return
+        text = self.template_combo.currentText()
+        self._populate_template_model()
+        self.template_combo.setEditText(text)
+        for row in range(self.template_model.rowCount()):
+            item = self.template_model.item(row)
+            if item.data(QtCore.Qt.UserRole) == dialog.installed[-1]:
+                self._load_template(self.template_model.indexFromItem(item))
+                break
+
     def _on_template_tree_clicked(self, model_index):
         """Handle a click in the template tree popup.
 
@@ -1112,7 +1129,19 @@ class MachineEditorDialog(QtGui.QDialog):
             self.template_combo.setToolTip(
                 translate("CAM_MachineEditor", "Load settings from an existing machine template")
             )
-            layout.addRow(translate("CAM_MachineEditor", "Template"), self.template_combo)
+            # the Machine Library beside it, to install a machine and start from it
+            template_row = QtGui.QHBoxLayout()
+            template_row.addWidget(self.template_combo, 1)
+            library_button = QtGui.QPushButton(translate("CAM_MachineEditor", "Library…"))
+            library_button.setToolTip(
+                translate(
+                    "CAM_MachineEditor",
+                    "Install a machine from the libraries FreeCAD knows and start from it",
+                )
+            )
+            library_button.clicked.connect(self._open_machine_library)
+            template_row.addWidget(library_button)
+            layout.addRow(translate("CAM_MachineEditor", "Template"), template_row)
 
             self.machines_addon_hint = self._make_machines_addon_hint()
             layout.addRow(self.machines_addon_hint)

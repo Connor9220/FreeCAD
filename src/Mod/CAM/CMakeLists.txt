@@ -192,6 +192,7 @@ SET(PathPythonToolsFeedsSpeeds_SRCS
 
 SET(PathPythonMachineUi_SRCS
     Machine/ui/__init__.py
+    Machine/ui/library_dialog.py
     Machine/ui/mtconnect_import_dialog.py
 )
 
@@ -204,6 +205,7 @@ SET(PathPythonMachineUiEditor_SRCS
 
 SET(PathPythonMachineModels_SRCS
     Machine/models/__init__.py
+    Machine/models/library.py
     Machine/models/machine.py
     Machine/models/mtconnect_import.py
     Machine/models/validate.py
@@ -607,6 +609,7 @@ SET(Tests_SRCS
     CAMTests/TestLegacyPostRetractMode.py
     CAMTests/TestLinkingGenerator.py
     CAMTests/TestMachine.py
+    CAMTests/TestMachineLibrary.py
     CAMTests/TestMachineValidate.py
     CAMTests/TestMach3Mach4LegacyPost.py
     CAMTests/TestMach3Mach4Post.py

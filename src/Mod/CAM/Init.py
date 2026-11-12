@@ -48,4 +48,17 @@ ParGrp.SetString("HelpIndex", "Path/Help/index.html")
 ParGrp.SetString("WorkBenchName", "CAM")
 ParGrp.SetString("WorkBenchModule", "PathWorkbench.py")
 
+# the machine library searched for machines to install, one at a time
+from freecad.content_provider import ContentProvider, ContentProviderRegistry
+
+ContentProviderRegistry.register(
+    ContentProvider(
+        schema="freecad:cam:machine:library",
+        name="FreeCAD-Machines",
+        label="FreeCAD Machines",
+        data={"repository": "https://github.com/Connor9220/Machines", "branch": "MachineLibrary"},
+        tags=("cam", "machine"),
+    )
+)
+
 FreeCAD.__unit_test__ += ["TestCAMApp"]
